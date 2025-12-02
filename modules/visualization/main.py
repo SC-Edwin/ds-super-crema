@@ -1,7 +1,12 @@
 """
 시각화 모듈
 Creative Performance Prediction 시각화 대시보드
+
+Last updated: 2024-12-02
+Author: Edwin
 """
+
+
 
 import streamlit as st
 import pandas as pd
