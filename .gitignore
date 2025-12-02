@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+env/
+venv/
+.DS_Store
+*.log
+.vscode/
+.idea/
+*.csv
+*.xlsx
+*.json
+gcp-key.json
+.streamlit/secrets.toml
