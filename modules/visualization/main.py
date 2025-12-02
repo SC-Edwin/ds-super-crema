@@ -67,7 +67,7 @@ def load_prediction_data():
         installs_1 + installs_2 + installs_3 as sum_installs,
         clicks_1 + clicks_2 + clicks_3 as sum_clicks,
         ROUND(cost_1 + cost_2 + cost_3,2) as sum_costs,
-        COALESCE(ROUND(SAFE_DIVIDE((installs_1 + installs_2 + installs_3),(cost_1 + cost_2 + cost_3)),2),0) as sum_CPI,
+        COALESCE(ROUND(SAFE_DIVIDE((cost_1 + cost_2 + cost_3), (installs_1 + installs_2 + installs_3)),2),0) as sum_CPI,
           ROW_NUMBER() OVER (
             PARTITION BY subject, network, app, past_network
             ORDER BY SAFE_CAST(prediction_timestamp AS TIMESTAMP) DESC) AS row_num
@@ -315,10 +315,10 @@ def run():
             
             display_table = top_10_df[[
                 'rank_per_network', 'app', 'subject_label',
-                'sum_impressions', 'sum_installs', 'sum_CPI', 'IPM', 'CTR', 'CVR', 'roas_sum_1to3', 'ranking_score'
+                'sum_impressions', 'sum_installs', 'sum_CPI', 'IPM', 'CTR', 'CVR', 'sum_costs','roas_sum_1to3', 'ranking_score'
             ]].copy()
             
-            display_table.columns = ['Rank', 'App', '소재', 'Impressions', 'Installs', 'CPI', 'IPM', 'CTR%', 'CVR%', 'ROAS', 'Score']
+            display_table.columns = ['Rank', 'App', '소재', 'Impressions', 'Installs', 'CPI', 'IPM', 'CTR%', 'CVR%', 'COST','ROAS', 'Score']
             
             st.dataframe(
                 display_table,
