@@ -180,9 +180,20 @@ def run():
             ].copy()
             
             # 랭킹은 이미 rank_per_network에 있음
-            combo_df = combo_df.sort_values('rank_per_network').reset_index(drop=True)
+            # combo_df = combo_df.sort_values('rank_per_network').reset_index(drop=True)
+
+            combo_df = combo_df.sort_values(['app', 'rank_per_network']).reset_index(drop=True)
+
             
-            top_10_df = combo_df.head(10)
+            # top_10_df = combo_df.head(10)
+
+                        
+            # 버블 차트용: Top 10만
+            top_10_bubble = combo_df.head(10)
+
+            # 테이블용: 전체
+            all_data_df = combo_df
+
             
             if len(top_10_df) == 0:
                 st.warning(f"⚠️ {past_net} → {future_net}에 데이터가 없습니다.")
@@ -197,18 +208,18 @@ def run():
                 st.markdown("##### 🎯 소재 순위")
                 
                 # 버블 크기: 적당하게 (Score 기반)
-                bubble_size = top_10_df['ranking_score'] * 8 + 20  # 최소 20, 최대 100
+                bubble_size = top_10_bubble['ranking_score'] * 8 + 20  # 최소 20, 최대 100
                 
                 # 버블 차트
                 fig_bubble = go.Figure()
                 
                 fig_bubble.add_trace(go.Scatter(
-                    x=top_10_df['rank_per_network'],
-                    y=top_10_df['ranking_score'],
+                    x=top_10_bubble['rank_per_network'],
+                    y=top_10_bubble['ranking_score'],
                     mode='markers+text',
                     marker=dict(
                         size=bubble_size,
-                        color=top_10_df['ranking_score'],
+                        color=top_10_bubble['ranking_score'],
                         colorscale=[[0, '#ff77a0'], [0.5, '#ff4d8f'], [1, '#ff006e']],
                         showscale=False,
                         line=dict(
@@ -217,7 +228,7 @@ def run():
                         ),
                         opacity=0.9
                     ),
-                    text=top_10_df['subject_label'],
+                    text=top_10_bubble['subject_label'],
                     textposition='top center',
                     textfont=dict(
                         color='white',
@@ -256,7 +267,7 @@ def run():
                 # Row 1
                 with row1_col1:
                     st.markdown("##### 👁️ Impressions")
-                    fig = px.bar(top_10_df, x='subject_label', y='sum_impressions', text='sum_impressions', color_discrete_sequence=['#0096ff'])
+                    fig = px.bar(top_10_bubble, x='subject_label', y='sum_impressions', text='sum_impressions', color_discrete_sequence=['#0096ff'])
                     fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
                                      xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
                                      yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
@@ -265,7 +276,7 @@ def run():
                 
                 with row1_col2:
                     st.markdown("##### 📲 Installs")
-                    fig = px.bar(top_10_df, x='subject_label', y='sum_installs', text='sum_installs', color_discrete_sequence=['#a855f7'])
+                    fig = px.bar(top_10_bubble, x='subject_label', y='sum_installs', text='sum_installs', color_discrete_sequence=['#a855f7'])
                     fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
                                      xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
                                      yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
@@ -274,7 +285,7 @@ def run():
                 
                 with row1_col3:
                     st.markdown("##### 💰 CPI")
-                    fig = px.bar(top_10_df, x='subject_label', y='sum_CPI', text='sum_CPI', color_discrete_sequence=['#ff006e'])
+                    fig = px.bar(top_10_bubble, x='subject_label', y='sum_CPI', text='sum_CPI', color_discrete_sequence=['#ff006e'])
                     fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
                                      xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
                                      yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
@@ -293,7 +304,7 @@ def run():
                 
                 with row2_col2:
                     st.markdown("##### 🎯 CTR")
-                    fig = px.bar(top_10_df, x='subject_label', y='CTR', text='CTR', color_discrete_sequence=['#ff77a0'])
+                    fig = px.bar(top_10_bubble, x='subject_label', y='CTR', text='CTR', color_discrete_sequence=['#ff77a0'])
                     fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
                                      xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
                                      yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
@@ -302,7 +313,7 @@ def run():
                 
                 with row2_col3:
                     st.markdown("##### 💎 ROAS")
-                    fig = px.bar(top_10_df, x='subject_label', y='roas_sum_1to3', text='roas_sum_1to3', color_discrete_sequence=['#8b00ff'])
+                    fig = px.bar(top_10_bubble, x='subject_label', y='roas_sum_1to3', text='roas_sum_1to3', color_discrete_sequence=['#8b00ff'])
                     fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
                                      xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
                                      yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
@@ -313,7 +324,7 @@ def run():
             st.markdown("---")
             st.markdown("##### 📋 Top 10 Details")
             
-            display_table = top_10_df[[
+            display_table = all_data_df[[
                 'rank_per_network', 'app', 'subject_label',
                 'sum_impressions', 'sum_installs', 'sum_CPI', 'IPM', 'CTR', 'CVR', 'sum_costs','roas_sum_1to3', 'ranking_score'
             ]].copy()
