@@ -6,8 +6,6 @@ Last updated: 2024-12-02
 Author: Edwin
 """
 
-
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -26,7 +24,7 @@ def get_bigquery_client():
     # Streamlit Cloud 확인
     try:
         if "gcp_service_account" in st.secrets:
-            st.write("✅ Secrets 발견!")  # 디버깅
+            st.write("✅ Secrets 발견!")
             credentials = service_account.Credentials.from_service_account_info(
                 st.secrets["gcp_service_account"]
             )
@@ -38,7 +36,7 @@ def get_bigquery_client():
         st.error(f"Secrets 에러: {e}")
     
     # 로컬
-    st.write("⚠️ Secrets 없음 - 로컬 모드")  # 디버깅
+    st.write("⚠️ Secrets 없음 - 로컬 모드")
     return bigquery.Client(project='roas-test-456808')
 
 
@@ -139,7 +137,7 @@ def run():
     
     # 필터 (메인 화면 왼쪽)
     st.markdown("### 🔍 Filter")
-    col1, col2, col_spacer = st.columns([1.5, 1.5, 5])  # 왼쪽에 붙이기
+    col1, col2, col_spacer = st.columns([1.5, 1.5, 5])
     
     with col1:
         all_apps = ['All'] + sorted(df['app'].unique().tolist())
@@ -179,25 +177,18 @@ def run():
                 (filtered_df['network'] == future_net)
             ].copy()
             
-            # 랭킹은 이미 rank_per_network에 있음
-            # combo_df = combo_df.sort_values('rank_per_network').reset_index(drop=True)
-
+            # App + Rank 순으로 정렬
             combo_df = combo_df.sort_values(['app', 'rank_per_network']).reset_index(drop=True)
-
             
-            # top_10_df = combo_df.head(10)
-
-                        
-            # 버블 차트용: Top 10만
-            top_10_bubble = combo_df.head(10)
-
-            # 테이블용: 전체
-            all_data_df = combo_df
-
-            
-            if len(top_10_bubble) == 0:
+            if len(combo_df) == 0:
                 st.warning(f"⚠️ {past_net} → {future_net}에 데이터가 없습니다.")
                 continue
+            
+            # 버블 차트용: Top 10만
+            top_10_bubble = combo_df.head(10)
+            
+            # 테이블용: 전체
+            all_data_df = combo_df
             
             # Row 1: 버블 차트 + 6개 지표 차트
             col_bubble, col_charts = st.columns([1, 3])
@@ -205,12 +196,10 @@ def run():
             theme = create_plotly_theme()
             
             with col_bubble:
-                st.markdown("##### 🎯 소재 순위")
+                st.markdown("##### 🎯 소재 순위 (Top 10)")
                 
-                # 버블 크기: 적당하게 (Score 기반)
-                bubble_size = top_10_bubble['ranking_score'] * 8 + 20  # 최소 20, 최대 100
+                bubble_size = top_10_bubble['ranking_score'] * 8 + 20
                 
-                # 버블 차트
                 fig_bubble = go.Figure()
                 
                 fig_bubble.add_trace(go.Scatter(
@@ -223,7 +212,7 @@ def run():
                         colorscale=[[0, '#ff77a0'], [0.5, '#ff4d8f'], [1, '#ff006e']],
                         showscale=False,
                         line=dict(
-                            color='rgba(255, 255, 255, 0.5)',  # 테두리 약하게
+                            color='rgba(255, 255, 255, 0.5)',
                             width=2
                         ),
                         opacity=0.9
@@ -248,7 +237,7 @@ def run():
                         showgrid=False
                     ),
                     yaxis=dict(
-                        showgrid=True,  # 가로 그리드만
+                        showgrid=True,
                         gridcolor='rgba(255, 255, 255, 0.1)',
                         gridwidth=1
                     ),
@@ -322,14 +311,14 @@ def run():
             
             # 테이블
             st.markdown("---")
-            st.markdown("##### 📋 Top 10 Details")
+            st.markdown("##### 📋 All Creatives Details")
             
             display_table = all_data_df[[
                 'rank_per_network', 'app', 'subject_label',
-                'sum_impressions', 'sum_installs', 'sum_CPI', 'IPM', 'CTR', 'CVR', 'sum_costs','roas_sum_1to3', 'ranking_score'
+                'sum_impressions', 'sum_installs', 'sum_costs', 'sum_CPI', 'IPM', 'CTR', 'CVR', 'roas_sum_1to3', 'ranking_score'
             ]].copy()
             
-            display_table.columns = ['Rank', 'App', '소재', 'Impressions', 'Installs', 'CPI', 'IPM', 'CTR%', 'CVR%', 'COST','ROAS', 'Score']
+            display_table.columns = ['Rank', 'App', '소재', 'Impressions', 'Installs', 'Costs', 'CPI', 'IPM', 'CTR%', 'CVR%', 'ROAS', 'Score']
             
             st.dataframe(
                 display_table,
@@ -345,7 +334,7 @@ def run():
                 st.download_button(
                     label="📥 Export CSV",
                     data=csv,
-                    file_name=f"{past_net}_to_{future_net}_top10_{datetime.now().strftime('%Y%m%d')}.csv",
+                    file_name=f"{past_net}_to_{future_net}_all_{datetime.now().strftime('%Y%m%d')}.csv",
                     mime="text/csv",
                     key=f'export_{past_net}_{future_net}',
                     use_container_width=True
@@ -360,6 +349,3 @@ if __name__ == "__main__":
 
 
     
-
-
-
