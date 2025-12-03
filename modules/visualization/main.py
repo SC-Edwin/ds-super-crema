@@ -94,6 +94,7 @@ def load_prediction_data():
       ROUND(SAFE_DIVIDE(sum_installs * 1000, sum_impressions), 2) as IPM,
       ROUND(SAFE_DIVIDE(sum_clicks * 100, sum_impressions), 2) as CTR,
       ROUND(SAFE_DIVIDE(sum_installs * 100, sum_clicks), 2) as CVR,
+      ROUND(SAFE_DIVIDE(sum_impressions * 100, sum_clicks), 2) as CVR_IMP,
       retention_rate_sum_1to3,
       engagement_quality_2,
       ROW_NUMBER() OVER (
@@ -330,10 +331,10 @@ def run():
             
             display_table = all_data_df[[
                 'rank_per_network', 'app', 'subject_label',
-                'sum_impressions', 'sum_installs', 'sum_CPI', 'IPM', 'CTR', 'CVR', 'sum_costs','roas_sum_1to3', 'ranking_score'
+                'sum_impressions', 'sum_installs', 'sum_CPI', 'IPM', 'CTR', 'CVR', 'CVR_IMP','sum_costs','roas_sum_1to3', 'ranking_score'
             ]].copy()
             
-            display_table.columns = ['Rank', 'App', '소재', 'Impressions', 'Installs', 'CPI', 'IPM', 'CTR%', 'CVR%', 'COST','ROAS', 'Score']
+            display_table.columns = ['Rank', 'App', '소재', 'Impressions', 'Installs', 'CPI', 'IPM', 'CTR%', 'CVR%', 'CVR_IMP%','COST','ROAS', 'Score']
             
             st.dataframe(
                 display_table,
@@ -360,6 +361,12 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+
+
+
+
+
 
 
 
