@@ -244,7 +244,7 @@ def run():
                 
                 fig_bubble.update_layout(
                     **theme,
-                    height=560,
+                    height=580,
                     margin=dict(l=20, r=20, t=20, b=40),
                     xaxis_title='순위',
                     yaxis_title='Score',
