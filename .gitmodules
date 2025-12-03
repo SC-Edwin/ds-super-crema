@@ -1,0 +1,3 @@
+[submodule "modules/video_generation"]
+	path = modules/video_generation
+	url = https://github.com/supercent-growth-ds/Project-Creative-Generation.git
