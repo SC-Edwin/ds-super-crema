@@ -104,7 +104,7 @@ def main():
     apply_theme()
     render_header()
     
-    tab1, tab2, tab3 = st.tabs(["📊 시각화", "🚀 소재 업로드", "🎬 동영상 제작"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 모델링 시각화", "🚀 소재 업로드", "🎬 동영상 제작", "로컬라이징"])
     
     with tab1:
         try:
@@ -118,6 +118,9 @@ def main():
     
     with tab3:
         st.info("🚧 동영상 자동화 모듈 개발 예정")
+
+    with tab4:
+        st.info("🚧 로컬라이징 자동화 Comming Soon 12/12")        
     
     st.markdown("---")
     st.caption("© 2025 Super Crema - Supercent Marketing Intelligence Team")

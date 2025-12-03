@@ -107,6 +107,9 @@ def load_prediction_data():
     df = client.query(query).to_dataframe()
     return df
 
+
+
+
 def create_plotly_theme():
     """Plotly 차트 테마 - 블랙 + 핑크 통일"""
     return {
@@ -116,6 +119,8 @@ def create_plotly_theme():
         'font': {'color': '#ffffff', 'family': 'Arial', 'size': 11},
         'colorway': ['#ff006e', '#ff4d8f', '#ff77a0', '#a855f7', '#8b00ff']
     }
+
+
 
 # ================================
 # 메인 시각화
@@ -355,6 +360,14 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+
+
+
+
+
+
+
 
 
 
