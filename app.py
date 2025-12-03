@@ -14,98 +14,175 @@ st.set_page_config(
 def apply_theme():
     st.markdown("""
     <style>
-    /* 기존 코드 유지... */
+    /* Streamlit 상단 툴바 숨기기 */
+    header[data-testid="stHeader"] {
+        display: none;
+    }
     
-    /* ========== 3D Floating Cards 효과 추가 ========== */
+    /* 상단 여백 제거 */
+    .main > div {
+        padding-top: 0.5rem !important;
+    }
     
-    /* 모든 stMetric (지표 카드) */
+    /* ========== 배경 ========== */
+    .stApp {
+        background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%) !important;
+    }
+    
+    /* ========== 헤더 (최우선) ========== */
+    .super-crema-header {
+        background: linear-gradient(90deg, #ff006e 0%, #ff4d8f 50%, #ff006e 100%) !important;
+        background-size: 200% auto !important;
+        animation: gradient 3s ease infinite !important;
+        padding: 0.8rem 2rem !important;
+        border-radius: 12px !important;
+        text-align: center !important;
+        margin-bottom: 1rem !important;
+        margin-top: 0 !important;
+        box-shadow: 0 4px 20px rgba(255, 0, 110, 0.3) !important;
+        position: relative !important;
+        z-index: 100 !important;
+    }
+    
+    @keyframes gradient {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+    
+    .super-crema-title {
+        font-size: 4rem !important;
+        font-weight: 900 !important;
+        color: #ffffff !important;
+        text-shadow: 0 0 15px rgba(255, 0, 110, 0.5) !important;
+        margin: 0 !important;
+        letter-spacing: 1px !important;
+    }
+    
+    .super-crema-subtitle {
+        font-size: 1rem !important;
+        color: #ffffff !important;
+        margin-top: 0.2rem !important;
+        margin-bottom: 0 !important;
+        opacity: 0.9 !important;
+    }
+    
+    /* ========== 탭 ========== */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px !important;
+        background: rgba(26, 26, 26, 0.6) !important;
+        backdrop-filter: blur(10px) !important;
+        padding: 8px !important;
+        border-radius: 12px !important;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background: linear-gradient(135deg, rgba(255, 0, 110, 0.1) 0%, rgba(255, 77, 143, 0.1) 100%) !important;
+        border: 1px solid rgba(255, 0, 110, 0.3) !important;
+        border-radius: 10px !important;
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        font-size: 1rem !important;
+        padding: 10px 20px !important;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, #ff006e 0%, #ff4d8f 100%) !important;
+        border-color: #ff006e !important;
+        box-shadow: 0 4px 15px rgba(255, 0, 110, 0.5) !important;
+    }
+    
+    /* ========== 3D Floating Cards ========== */
+    
+    /* 메트릭 카드 */
     [data-testid="stMetric"] {
-        background: linear-gradient(135deg, rgba(255, 0, 110, 0.1) 0%, rgba(26, 26, 26, 0.8) 100%);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 0, 110, 0.3);
-        border-radius: 16px;
-        padding: 1.5rem;
+        background: linear-gradient(135deg, rgba(255, 0, 110, 0.1) 0%, rgba(26, 26, 26, 0.8) 100%) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(255, 0, 110, 0.3) !important;
+        border-radius: 16px !important;
+        padding: 1.5rem !important;
         box-shadow: 
             0 8px 32px rgba(0, 0, 0, 0.4),
-            0 0 20px rgba(255, 0, 110, 0.2);
-        transform-style: preserve-3d;
-        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            0 0 20px rgba(255, 0, 110, 0.2) !important;
+        transform-style: preserve-3d !important;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
     }
     
     [data-testid="stMetric"]:hover {
-        transform: translateY(-10px) rotateX(5deg);
+        transform: translateY(-10px) rotateX(5deg) !important;
         box-shadow: 
             0 20px 50px rgba(0, 0, 0, 0.6),
-            0 0 40px rgba(255, 0, 110, 0.5);
-        border-color: rgba(255, 0, 110, 0.6);
+            0 0 40px rgba(255, 0, 110, 0.5) !important;
+        border-color: rgba(255, 0, 110, 0.6) !important;
     }
     
-    /* Plotly 차트 컨테이너 */
+    /* Plotly 차트 */
     .js-plotly-plot {
         background: linear-gradient(135deg, rgba(255, 0, 110, 0.05) 0%, rgba(26, 26, 26, 0.9) 100%) !important;
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 0, 110, 0.2);
-        border-radius: 16px;
-        padding: 1rem;
+        backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(255, 0, 110, 0.2) !important;
+        border-radius: 16px !important;
+        padding: 1rem !important;
         box-shadow: 
             0 8px 32px rgba(0, 0, 0, 0.4),
-            0 0 20px rgba(255, 0, 110, 0.15);
-        transform-style: preserve-3d;
-        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            0 0 20px rgba(255, 0, 110, 0.15) !important;
+        transform-style: preserve-3d !important;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
     }
     
     .js-plotly-plot:hover {
-        transform: translateY(-8px) scale(1.02);
+        transform: translateY(-8px) scale(1.02) !important;
         box-shadow: 
             0 20px 50px rgba(0, 0, 0, 0.6),
-            0 0 40px rgba(255, 0, 110, 0.4);
-        border-color: rgba(255, 0, 110, 0.5);
+            0 0 40px rgba(255, 0, 110, 0.4) !important;
+        border-color: rgba(255, 0, 110, 0.5) !important;
     }
     
-    /* DataFrame 테이블 */
+    /* DataFrame */
     [data-testid="stDataFrame"] {
-        background: linear-gradient(135deg, rgba(255, 0, 110, 0.05) 0%, rgba(26, 26, 26, 0.9) 100%);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 0, 110, 0.2);
-        border-radius: 16px;
-        padding: 1rem;
+        background: linear-gradient(135deg, rgba(255, 0, 110, 0.05) 0%, rgba(26, 26, 26, 0.9) 100%) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(255, 0, 110, 0.2) !important;
+        border-radius: 16px !important;
+        padding: 1rem !important;
         box-shadow: 
             0 8px 32px rgba(0, 0, 0, 0.4),
-            0 0 20px rgba(255, 0, 110, 0.15);
-        transform-style: preserve-3d;
-        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            0 0 20px rgba(255, 0, 110, 0.15) !important;
+        transform-style: preserve-3d !important;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
     }
     
     [data-testid="stDataFrame"]:hover {
-        transform: translateY(-5px);
+        transform: translateY(-5px) !important;
         box-shadow: 
             0 15px 40px rgba(0, 0, 0, 0.5),
-            0 0 30px rgba(255, 0, 110, 0.3);
+            0 0 30px rgba(255, 0, 110, 0.3) !important;
     }
     
-    /* Selectbox, Multiselect 등 입력 요소 */
+    /* 입력 요소 */
     [data-baseweb="select"],
     [data-baseweb="input"] {
         background: rgba(26, 26, 26, 0.8) !important;
-        backdrop-filter: blur(10px);
+        backdrop-filter: blur(10px) !important;
         border: 1px solid rgba(255, 0, 110, 0.3) !important;
-        border-radius: 12px;
-        transition: all 0.3s ease;
+        border-radius: 12px !important;
+        transition: all 0.3s ease !important;
     }
     
     [data-baseweb="select"]:hover,
     [data-baseweb="input"]:hover {
         border-color: rgba(255, 0, 110, 0.6) !important;
-        box-shadow: 0 0 20px rgba(255, 0, 110, 0.3);
+        box-shadow: 0 0 20px rgba(255, 0, 110, 0.3) !important;
     }
     
-    /* ================================================ */
-    
+    /* ========== 텍스트 색상 ========== */
+    h1, h2, h3 { color: #ffffff !important; }
+    p, span, div { color: #cccccc !important; }
     </style>
     """, unsafe_allow_html=True)
 
 
-    
+
 
 def render_header():
     st.markdown("""
