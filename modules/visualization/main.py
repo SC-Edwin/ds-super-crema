@@ -94,7 +94,7 @@ def load_prediction_data():
       ROUND(SAFE_DIVIDE(sum_installs * 1000, sum_impressions), 2) as IPM,
       ROUND(SAFE_DIVIDE(sum_clicks * 100, sum_impressions), 2) as CTR,
       ROUND(SAFE_DIVIDE(sum_installs * 100, sum_clicks), 2) as CVR,
-      ROUND(SAFE_DIVIDE(sum_impressions * 100, sum_clicks), 2) as CVR_IMP,
+      ROUND(SAFE_DIVIDE(sum_installs * 100, sum_impressions), 2) as CVR_IMP,
       retention_rate_sum_1to3,
       engagement_quality_2,
       ROW_NUMBER() OVER (
