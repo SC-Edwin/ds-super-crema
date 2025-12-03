@@ -304,58 +304,89 @@ def run():
                     )
                     return fig
                 # Row 1
+
                 with row1_col1:
                     st.markdown("##### 👁️ Impressions")
-                    fig = px.bar(top_10_bubble, x='subject_label', y='sum_impressions', text='sum_impressions', color_discrete_sequence=['#0096ff'])
-                    fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
-                                     xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
-                                     yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
-                    fig.update_traces(texttemplate='%{text:,.0f}', textposition='inside', marker=dict(line=dict(color='#0096ff', width=2)))
+                    fig = bar_with_headroom(
+                        top_10_bubble,
+                        x="subject_label",
+                        y="sum_impressions",
+                        text="sum_impressions",
+                        theme=theme,
+                        height=chart_height,
+                        color="#0096ff",
+                        texttemplate="%{text:,.0f}",
+                    )
                     st.plotly_chart(fig, use_container_width=True)
-                                
+                
                 with row1_col2:
                     st.markdown("##### 📲 Installs")
-                    fig = px.bar(top_10_bubble, x='subject_label', y='sum_installs', text='sum_installs', color_discrete_sequence=['#a855f7'])
-                    fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
-                                     xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
-                                     yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
-                    fig.update_traces(texttemplate='%{text:,.0f}', textposition='inside', marker=dict(line=dict(color='#a855f7', width=2)))
+                    fig = bar_with_headroom(
+                        top_10_bubble,
+                        x="subject_label",
+                        y="sum_installs",
+                        text="sum_installs",
+                        theme=theme,
+                        height=chart_height,
+                        color="#a855f7",
+                        texttemplate="%{text:,.0f}",
+                    )
                     st.plotly_chart(fig, use_container_width=True)
 
                 with row1_col3:
                     st.markdown("##### 💰 CPI")
-                    fig = px.bar(top_10_bubble, x='subject_label', y='sum_CPI', text='sum_CPI', color_discrete_sequence=['#ff006e'])
-                    fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
-                                     xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
-                                     yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
-                    fig.update_traces(texttemplate='$%{text:.2f}', textposition='inside', marker=dict(line=dict(color='#ff006e', width=2)))
+                    fig = bar_with_headroom(
+                        top_10_bubble,
+                        x="subject_label",
+                        y="sum_CPI",
+                        text="sum_CPI",
+                        theme=theme,
+                        height=chart_height,
+                        color="#ff006e",
+                        texttemplate="$%{text:.2f}",
+                    )
                     st.plotly_chart(fig, use_container_width=True)
 
                 with row2_col1:
                     st.markdown("##### 📈 IPM")
-                    fig = px.bar(top_10_bubble, x='subject_label', y='IPM', text='IPM', color_discrete_sequence=['#ff4d8f'])
-                    fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
-                                     xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
-                                     yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
-                    fig.update_traces(texttemplate='%{text:.2f}', textposition='inside', marker=dict(line=dict(color='#ff4d8f', width=2)))
+                    fig = bar_with_headroom(
+                        top_10_bubble,
+                        x="subject_label",
+                        y="IPM",
+                        text="IPM",
+                        theme=theme,
+                        height=chart_height,
+                        color="#ff4d8f",
+                        texttemplate="%{text:.2f}",
+                    )
                     st.plotly_chart(fig, use_container_width=True)
 
                 with row2_col2:
                     st.markdown("##### 🎯 CTR")
-                    fig = px.bar(top_10_bubble, x='subject_label', y='CTR', text='CTR', color_discrete_sequence=['#ff77a0'])
-                    fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
-                                     xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
-                                     yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
-                    fig.update_traces(texttemplate='%{text:.2f}%', textposition='inside', marker=dict(line=dict(color='#ff77a0', width=2)))
+                    fig = bar_with_headroom(
+                        top_10_bubble,
+                        x="subject_label",
+                        y="CTR",
+                        text="CTR",
+                        theme=theme,
+                        height=chart_height,
+                        color="#ff77a0",
+                        texttemplate="%{text:.2f}%",
+                    )
                     st.plotly_chart(fig, use_container_width=True)
 
                 with row2_col3:
                     st.markdown("##### 💎 ROAS")
-                    fig = px.bar(top_10_bubble, x='subject_label', y='roas_sum_1to3', text='roas_sum_1to3', color_discrete_sequence=['#8b00ff'])
-                    fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
-                                     xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
-                                     yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
-                    fig.update_traces(texttemplate='%{text:.2f}', textposition='inside', marker=dict(line=dict(color='#8b00ff', width=2)))
+                    fig = bar_with_headroom(
+                        top_10_bubble,
+                        x="subject_label",
+                        y="roas_sum_1to3",
+                        text="roas_sum_1to3",
+                        theme=theme,
+                        height=chart_height,
+                        color="#8b00ff",
+                        texttemplate="%{text:.2f}",
+                    )
                     st.plotly_chart(fig, use_container_width=True)
             
             # 테이블
