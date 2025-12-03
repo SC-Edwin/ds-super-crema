@@ -134,7 +134,7 @@ def run():
     with st.spinner("🔄 데이터 로딩 중..."):
         try:
             df = load_prediction_data()
-            st.success(f"✅ {len(df)}개 크리에이티브 로드 완료!")
+            # st.success(f"✅ {len(df)}개 크리에이티브 로드 완료!")
         except Exception as e:
             st.error(f"❌ 데이터 로드 실패: {str(e)}")
             st.info("💡 GCP 인증이 필요합니다.")
