@@ -14,83 +14,98 @@ st.set_page_config(
 def apply_theme():
     st.markdown("""
     <style>
-    /* Streamlit 상단 툴바 숨기기 */
-    header[data-testid="stHeader"] {
-        display: none;
-    }
+    /* 기존 코드 유지... */
     
-    /* 상단 여백 제거 */
-    .main > div {
-        padding-top: 0.5rem !important;
-    }
+    /* ========== 3D Floating Cards 효과 추가 ========== */
     
-    .stApp {
-        background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
-    }
-    
-    .super-crema-header {
-        background: linear-gradient(90deg, #ff006e 0%, #ff4d8f 50%, #ff006e 100%);
-        background-size: 200% auto;
-        animation: gradient 3s ease infinite;
-        padding: 0.8rem 2rem;
-        border-radius: 12px;
-        text-align: center;
-        margin-bottom: 1rem;
-        margin-top: 0;
-        box-shadow: 0 4px 20px rgba(255, 0, 110, 0.3);
-    }
-    
-    @keyframes gradient {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-    }
-    
-    .super-crema-title {
-        font-size: 4rem;
-        font-weight: 900;
-        color: #ffffff;
-        text-shadow: 0 0 15px rgba(255, 0, 110, 0.5);
-        margin: 0;
-        letter-spacing: 1px;
-    }
-    
-    .super-crema-subtitle {
-        font-size: 1rem;
-        color: #ffffff;
-        margin-top: 0.2rem;
-        margin-bottom: 0;
-        opacity: 0.9;
-    }
-    
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background: rgba(26, 26, 26, 0.6);
+    /* 모든 stMetric (지표 카드) */
+    [data-testid="stMetric"] {
+        background: linear-gradient(135deg, rgba(255, 0, 110, 0.1) 0%, rgba(26, 26, 26, 0.8) 100%);
         backdrop-filter: blur(10px);
-        padding: 8px;
-        border-radius: 12px;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        background: linear-gradient(135deg, rgba(255, 0, 110, 0.1) 0%, rgba(255, 77, 143, 0.1) 100%);
         border: 1px solid rgba(255, 0, 110, 0.3);
-        border-radius: 10px;
-        color: #ffffff;
-        font-weight: 600;
-        font-size: 1rem;
-        padding: 10px 20px;
+        border-radius: 16px;
+        padding: 1.5rem;
+        box-shadow: 
+            0 8px 32px rgba(0, 0, 0, 0.4),
+            0 0 20px rgba(255, 0, 110, 0.2);
+        transform-style: preserve-3d;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
     
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #ff006e 0%, #ff4d8f 100%) !important;
-        border-color: #ff006e !important;
-        box-shadow: 0 4px 15px rgba(255, 0, 110, 0.5);
+    [data-testid="stMetric"]:hover {
+        transform: translateY(-10px) rotateX(5deg);
+        box-shadow: 
+            0 20px 50px rgba(0, 0, 0, 0.6),
+            0 0 40px rgba(255, 0, 110, 0.5);
+        border-color: rgba(255, 0, 110, 0.6);
     }
     
-    h1, h2, h3 { color: #ffffff !important; }
-    p, span, div { color: #cccccc !important; }
+    /* Plotly 차트 컨테이너 */
+    .js-plotly-plot {
+        background: linear-gradient(135deg, rgba(255, 0, 110, 0.05) 0%, rgba(26, 26, 26, 0.9) 100%) !important;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 0, 110, 0.2);
+        border-radius: 16px;
+        padding: 1rem;
+        box-shadow: 
+            0 8px 32px rgba(0, 0, 0, 0.4),
+            0 0 20px rgba(255, 0, 110, 0.15);
+        transform-style: preserve-3d;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    .js-plotly-plot:hover {
+        transform: translateY(-8px) scale(1.02);
+        box-shadow: 
+            0 20px 50px rgba(0, 0, 0, 0.6),
+            0 0 40px rgba(255, 0, 110, 0.4);
+        border-color: rgba(255, 0, 110, 0.5);
+    }
+    
+    /* DataFrame 테이블 */
+    [data-testid="stDataFrame"] {
+        background: linear-gradient(135deg, rgba(255, 0, 110, 0.05) 0%, rgba(26, 26, 26, 0.9) 100%);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 0, 110, 0.2);
+        border-radius: 16px;
+        padding: 1rem;
+        box-shadow: 
+            0 8px 32px rgba(0, 0, 0, 0.4),
+            0 0 20px rgba(255, 0, 110, 0.15);
+        transform-style: preserve-3d;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    [data-testid="stDataFrame"]:hover {
+        transform: translateY(-5px);
+        box-shadow: 
+            0 15px 40px rgba(0, 0, 0, 0.5),
+            0 0 30px rgba(255, 0, 110, 0.3);
+    }
+    
+    /* Selectbox, Multiselect 등 입력 요소 */
+    [data-baseweb="select"],
+    [data-baseweb="input"] {
+        background: rgba(26, 26, 26, 0.8) !important;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 0, 110, 0.3) !important;
+        border-radius: 12px;
+        transition: all 0.3s ease;
+    }
+    
+    [data-baseweb="select"]:hover,
+    [data-baseweb="input"]:hover {
+        border-color: rgba(255, 0, 110, 0.6) !important;
+        box-shadow: 0 0 20px rgba(255, 0, 110, 0.3);
+    }
+    
+    /* ================================================ */
+    
     </style>
     """, unsafe_allow_html=True)
+
+
+    
 
 def render_header():
     st.markdown("""
