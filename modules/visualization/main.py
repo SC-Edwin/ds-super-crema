@@ -23,10 +23,9 @@ def get_bigquery_client():
     """BigQuery 클라이언트 초기화"""
     from google.oauth2 import service_account
     
-    # Streamlit Cloud 확인
+    # Streamlit Cloud
     try:
         if "gcp_service_account" in st.secrets:
-            st.write("✅ Secrets 발견!")  # 디버깅
             credentials = service_account.Credentials.from_service_account_info(
                 st.secrets["gcp_service_account"]
             )
@@ -35,10 +34,10 @@ def get_bigquery_client():
                 project=st.secrets["gcp_service_account"]["project_id"]
             )
     except Exception as e:
-        st.error(f"Secrets 에러: {e}")
+        st.error(f"❌ GCP 인증 실패: {e}")
+        st.stop()  # 여기서 멈춤
     
-    # 로컬
-    st.write("⚠️ Secrets 없음 - 로컬 모드")  # 디버깅
+    # 로컬 (Secrets 없을 때만)
     return bigquery.Client(project='roas-test-456808')
 
 
@@ -359,7 +358,7 @@ if __name__ == "__main__":
 
 
 
-    
+
 
 
 
