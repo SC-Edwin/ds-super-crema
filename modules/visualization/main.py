@@ -293,7 +293,7 @@ def run():
                     fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
                                      xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
                                      yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
-                    fig.update_traces(texttemplate='$%{text:.2f}', textposition='outside', marker=dict(line=dict(color='#ff006e', width=2)))
+                    fig.update_traces(texttemplate='$%{text:.2f}', textposition='inside', marker=dict(line=dict(color='#ff006e', width=2)))
                     st.plotly_chart(fig, use_container_width=True)
                 
                 # Row 2
@@ -303,7 +303,7 @@ def run():
                     fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
                                      xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
                                      yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
-                    fig.update_traces(texttemplate='%{text:.2f}', textposition='outside', marker=dict(line=dict(color='#ff4d8f', width=2)))
+                    fig.update_traces(texttemplate='%{text:.2f}', textposition='inside', marker=dict(line=dict(color='#ff4d8f', width=2)))
                     st.plotly_chart(fig, use_container_width=True)
                 
                 with row2_col2:
@@ -312,7 +312,7 @@ def run():
                     fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
                                      xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
                                      yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
-                    fig.update_traces(texttemplate='%{text:.2f}%', textposition='outside', marker=dict(line=dict(color='#ff77a0', width=2)))
+                    fig.update_traces(texttemplate='%{text:.2f}%', textposition='inside', marker=dict(line=dict(color='#ff77a0', width=2)))
                     st.plotly_chart(fig, use_container_width=True)
                 
                 with row2_col3:
@@ -321,7 +321,7 @@ def run():
                     fig.update_layout(**theme, height=chart_height, margin=dict(l=20, r=20, t=20, b=60), showlegend=False,
                                      xaxis={'tickangle': -45, 'title': '', 'showgrid': False},
                                      yaxis={'title': '', 'showgrid': True, 'gridcolor': 'rgba(255,255,255,0.1)'})
-                    fig.update_traces(texttemplate='%{text:.2f}', textposition='outside', marker=dict(line=dict(color='#8b00ff', width=2)))
+                    fig.update_traces(texttemplate='%{text:.2f}', textposition='inside', marker=dict(line=dict(color='#8b00ff', width=2)))
                     st.plotly_chart(fig, use_container_width=True)
             
             # 테이블
