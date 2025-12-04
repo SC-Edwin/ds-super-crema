@@ -407,6 +407,9 @@ def run():
                 height=400
             )
             
+            st.markdown("<br>", unsafe_allow_html=True)  # ← 추가!
+
+
             # Export
             col_export, col_space = st.columns([1, 3])
             with col_export:
