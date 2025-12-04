@@ -33,12 +33,21 @@ def apply_theme():
         background-size: 200% auto;
         animation: gradient 3s ease infinite;
         padding: 0.8rem 2rem;
-        border-radius: 12px;
+        border-radius: 16px;
         text-align: center;
         margin-bottom: 1rem;
         margin-top: 0;
-        box-shadow: 0 4px 20px rgba(255, 0, 110, 0.3);
+        
+        /* 3D 입체감 */
+        box-shadow: 
+            0 8px 32px rgba(255, 0, 110, 0.5),
+            0 15px 50px rgba(255, 0, 110, 0.3),
+            inset 0 2px 10px rgba(255, 255, 255, 0.1);
+        
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-bottom: 2px solid rgba(0, 0, 0, 0.2);
     }
+                                
     
     @keyframes gradient {
         0% { background-position: 0% 50%; }
