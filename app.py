@@ -18,27 +18,46 @@ def apply_theme():
     header[data-testid="stHeader"] {
         display: none;
     }
-    
+         
     /* 상단 여백 제거 */
     .main > div {
-        padding-top: 0.5rem !important;
+        padding-top: 0rem !important;
     }
+
+    .main {
+        padding-top: 0rem !important;
+    }
+
+    .block-container {
+        padding-top: 0rem !important;
+    }
+                                    
     
     .stApp {
         background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
     }
     
     .super-crema-header {
-        background: linear-gradient(90deg, #ff006e 0%, #ff4d8f 50%, #ff006e 100%);
+        background: linear-gradient(90deg, rgba(15, 15, 30, 0.85) 0%, rgba(26, 26, 46, 0.9) 50%, rgba(15, 15, 30, 0.85) 100%);
         background-size: 200% auto;
-        animation: gradient 3s ease infinite;
+        backdrop-filter: blur(10px);
+        animation: gradient 3s ease infinite;                
         padding: 0.8rem 2rem;
-        border-radius: 12px;
+        border-radius: 16px;
         text-align: center;
         margin-bottom: 1rem;
         margin-top: 0;
-        box-shadow: 0 4px 20px rgba(255, 0, 110, 0.3);
+        
+        /* 3D 입체감 */
+        box-shadow: 
+            0 4px 16px rgba(255, 0, 110, 0.25),
+            0 8px 25px rgba(255, 0, 110, 0.15),
+            inset 0 2px 10px rgba(255, 255, 255, 0.1);
+        
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-bottom: 2px solid rgba(0, 0, 0, 0.2);
     }
+                                
     
     @keyframes gradient {
         0% { background-position: 0% 50%; }
@@ -87,10 +106,92 @@ def apply_theme():
         box-shadow: 0 4px 15px rgba(255, 0, 110, 0.5);
     }
     
+    /* ========== 3D Floating Cards ========== */
+    
+    [data-testid="stMetric"] {
+        background: linear-gradient(135deg, rgba(255, 0, 110, 0.1) 0%, rgba(26, 26, 26, 0.8) 100%);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 0, 110, 0.3);
+        border-radius: 16px;
+        padding: 1.5rem;
+        box-shadow: 
+            0 8px 32px rgba(0, 0, 0, 0.4),
+            0 0 20px rgba(255, 0, 110, 0.2);
+        transform-style: preserve-3d;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    [data-testid="stMetric"]:hover {
+        transform: translateY(-10px) rotateX(5deg);
+        box-shadow: 
+            0 20px 50px rgba(0, 0, 0, 0.6),
+            0 0 40px rgba(255, 0, 110, 0.5);
+        border-color: rgba(255, 0, 110, 0.6);
+    }
+    
+    .js-plotly-plot {
+        background: linear-gradient(135deg, rgba(255, 0, 110, 0.05) 0%, rgba(26, 26, 26, 0.9) 100%) !important;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 0, 110, 0.2);
+        border-radius: 16px;
+        padding: 1rem;
+        box-shadow: 
+            0 8px 32px rgba(0, 0, 0, 0.4),
+            0 0 20px rgba(255, 0, 110, 0.15);
+        transform-style: preserve-3d;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    .js-plotly-plot:hover {
+        transform: translateY(-8px) scale(1.02);
+        box-shadow: 
+            0 20px 50px rgba(0, 0, 0, 0.6),
+            0 0 40px rgba(255, 0, 110, 0.4);
+        border-color: rgba(255, 0, 110, 0.5);
+    }
+    
+    [data-testid="stDataFrame"] {
+        background: linear-gradient(135deg, rgba(255, 0, 110, 0.05) 0%, rgba(26, 26, 26, 0.9) 100%);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 0, 110, 0.2);
+        border-radius: 16px;
+        padding: 1rem;
+        box-shadow: 
+            0 8px 32px rgba(0, 0, 0, 0.4),
+            0 0 20px rgba(255, 0, 110, 0.15);
+        transform-style: preserve-3d;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    [data-testid="stDataFrame"]:hover {
+        transform: translateY(-5px);
+        box-shadow: 
+            0 15px 40px rgba(0, 0, 0, 0.5),
+            0 0 30px rgba(255, 0, 110, 0.3);
+    }
+    
+    [data-baseweb="select"],
+    [data-baseweb="input"] {
+        background: rgba(26, 26, 26, 0.8) !important;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 0, 110, 0.3) !important;
+        border-radius: 12px;
+        transition: all 0.3s ease;
+    }
+    
+    [data-baseweb="select"]:hover,
+    [data-baseweb="input"]:hover {
+        border-color: rgba(255, 0, 110, 0.6) !important;
+        box-shadow: 0 0 20px rgba(255, 0, 110, 0.3);
+    }
+    
     h1, h2, h3 { color: #ffffff !important; }
     p, span, div { color: #cccccc !important; }
     </style>
     """, unsafe_allow_html=True)
+
+
+
 
 def render_header():
     st.markdown("""
@@ -133,6 +234,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
 
 
 
