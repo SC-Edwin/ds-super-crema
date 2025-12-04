@@ -29,9 +29,10 @@ def apply_theme():
     }
     
     .super-crema-header {
-        background: linear-gradient(90deg, #ff006e 0%, #ff4d8f 50%, #ff006e 100%);
+        background: linear-gradient(90deg, rgba(15, 15, 30, 0.85) 0%, rgba(26, 26, 46, 0.9) 50%, rgba(15, 15, 30, 0.85) 100%);
         background-size: 200% auto;
-        animation: gradient 3s ease infinite;
+        backdrop-filter: blur(10px);
+        animation: gradient 3s ease infinite;                
         padding: 0.8rem 2rem;
         border-radius: 16px;
         text-align: center;
@@ -218,6 +219,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
 
 
 
