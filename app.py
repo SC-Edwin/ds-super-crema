@@ -18,11 +18,20 @@ def apply_theme():
     header[data-testid="stHeader"] {
         display: none;
     }
-    
+         
     /* 상단 여백 제거 */
     .main > div {
         padding-top: 0rem !important;
     }
+
+    .main {
+        padding-top: 0rem !important;
+    }
+
+    .block-container {
+        padding-top: 0rem !important;
+    }
+                                    
     
     .stApp {
         background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
