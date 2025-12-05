@@ -8,4 +8,5 @@ You can add marketer-only helpers or overrides here later.
 from __future__ import annotations
 
 # Re-export all public functions/classes from unity_ads
-from .unity_ads import * 
+# 'from .unity_ads import *' -> 점(.) 제거
+from unity_ads import * 

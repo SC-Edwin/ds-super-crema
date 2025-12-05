@@ -23,8 +23,8 @@ from facebook_business.adobjects.ad import Ad
 from facebook_business.exceptions import FacebookRequestError
 
 # Import everything from the base module
-from . import facebook_ads as fb_ops
-from .facebook_ads import (
+import facebook_ads as fb_ops  # 'from . import' 제거
+from facebook_ads import (     # 'from .facebook_ads'에서 점(.) 제거
     FB_GAME_MAPPING,
     GAME_DEFAULTS,
     OPT_GOAL_LABEL_TO_API,
