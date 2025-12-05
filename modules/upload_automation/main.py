@@ -612,13 +612,108 @@ def run():
     """
     Main entry point called by the parent app.
     """
-    # [중요] 세션 상태 강제 초기화 (에러 방지용)
-    # 이 두 줄이 없으면 'remote_videos' 키가 없다는 에러가 발생합니다.
-    init_state()
-    init_remote_state()
+    # ========================================================
+    # [중요] 필수 초기화 함수들 (이게 없으면 에러 납니다!)
+    # ========================================================
+    init_state()                    # uploads, settings 초기화
+    init_remote_state()             # remote_videos 초기화 (에러 해결!)
+    fb_ops.init_fb_game_defaults()  # Facebook URL/AppID 기본값 채우기 (빈칸 해결!)
+
+    # ------------------------------------------------------------
+    # [UI] 모드 선택 버튼 및 스타일 설정
+    # ------------------------------------------------------------
     
-    # Test 모드만 표시 (Marketer 모드 숨김)
-    render_main_app("Creative 업로드", fb_ops, uni_ops, is_marketer=False)
+    # 페이지 상태 초기화
+    if "page" not in st.session_state:
+        st.session_state["page"] = "Creative 자동 업로드"
+
+    # 상단에 모드 전환 버튼 배치
+    st.markdown("#### 🛠️ 모드 선택")
+    st.markdown("""
+    <style>
+    div[data-testid="stButton"] button,
+    .stButton > button {
+        width: 100% !important;
+        max-width: 400px !important;
+        height: auto !important;
+        min-height: 50px !important;
+        border-radius: 12px !important;
+        padding: 14px 24px !important;
+        
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
+        border: 2px solid #ff006e !important;
+        
+        box-shadow: 
+            0 4px 15px rgba(0, 0, 0, 0.8),
+            0 0 20px rgba(255, 0, 110, 0.4),
+            inset 0 2px 8px rgba(255, 255, 255, 0.1) !important;
+        
+        transition: all 0.3s ease !important;
+    }
+
+    div[data-testid="stButton"] button p,
+    .stButton > button p {
+        font-size: 15px !important;
+        font-weight: 700 !important;
+        line-height: 1.4 !important;
+        letter-spacing: 0.5px !important;
+        white-space: nowrap !important;
+        color: #ff006e !important;
+        text-align: center !important;
+        text-shadow: 
+            0 0 10px rgba(255, 0, 110, 0.6),
+            0 0 20px rgba(255, 0, 110, 0.3) !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    div[data-testid="stButton"] button:hover,
+    .stButton > button:hover {
+        transform: translateY(-3px) scale(1.02) !important;
+        background: linear-gradient(135deg, #2a1a3e 0%, #261e4e 50%, #1f4470 100%) !important;
+        border-color: #ff4d8f !important;
+        box-shadow: 
+            0 8px 25px rgba(0, 0, 0, 0.9),
+            0 0 35px rgba(255, 0, 110, 0.7),
+            inset 0 3px 10px rgba(255, 0, 110, 0.2) !important;
+    }
+
+    div[data-testid="stButton"] button:hover p,
+    .stButton > button:hover p {
+        color: #ff77a0 !important;
+        text-shadow: 
+            0 0 15px rgba(255, 0, 110, 0.8),
+            0 0 25px rgba(255, 0, 110, 0.4) !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # 컬럼을 사용하여 버튼을 가로로 배치
+    col_mode1, col_mode2, _ = st.columns([1, 1, 4])
+    
+    with col_mode1:
+        if st.button("Test", use_container_width=True, key="btn_mode_ops"):
+            st.session_state["page"] = "Creative 자동 업로드"
+            st.rerun()
+            
+    with col_mode2:
+        if st.button("Marketer", use_container_width=True, key="btn_mode_mkt"):
+            st.session_state["page"] = "Creative 자동 업로드 - 마케터"
+            st.rerun()
+
+    # 현재 모드 확인
+    current_page = st.session_state.get("page", "Creative 자동 업로드")
+    
+    # 시각적 구분선
+    st.divider()
+
+    # 모드에 따른 렌더링
+    if current_page == "Creative 자동 업로드":
+        # OPS MODE
+        render_main_app("Test Mode", fb_ops, uni_ops, is_marketer=False)
+    else:
+        # MARKETER MODE
+        render_main_app("Marketer Mode", fb_marketer, uni_marketer, is_marketer=True)
 
 
 # Allow standalone execution
