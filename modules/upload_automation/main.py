@@ -5,49 +5,67 @@ import os
 import sys
 import pathlib
 import logging
-from typing import Dict, List
-from datetime import datetime, timedelta, timezone
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Dict
+# =========================================================
+# 1. 경로 설정 (Root 디렉토리 찾기)
+# =========================================================
+current_dir = os.path.dirname(os.path.abspath(__file__))  # modules/upload_automation
+root_dir = os.path.dirname(os.path.dirname(current_dir))  # ds-super-crema (Root)
 
+# 경로 추가 (중복 방지)
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
+
+# =========================================================
+# 2. 스트림릿 및 로깅 설정
+# =========================================================
 import streamlit as st
 from streamlit.components.v1 import html as components_html 
 
-
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-# 두 단계 위(프로젝트 루트) 위치
-root_dir = os.path.dirname(os.path.dirname(current_dir))
-
-# 경로 추가 (위층도 찾아보게 만듦)
-if root_dir not in sys.path:
-    sys.path.append(root_dir)
-
-# 경로 추가 (중복 방지)
-if current_dir not in sys.path:
-    sys.path.append(current_dir)
-if root_dir not in sys.path:
-    sys.path.append(root_dir)
-
-# --- LOGGING SETUP ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# --- IMPORTS ---
+# =========================================================
+# 3. 디버깅 및 모듈 임포트 (수정된 부분)
+# =========================================================
+
+# (1) drive_import.py 파일이 진짜 있는지 눈으로 확인
+target_file = os.path.join(root_dir, "drive_import.py")
+if not os.path.exists(target_file):
+    st.error(f"🚨 [CRITICAL] 'drive_import.py' 파일을 찾을 수 없습니다!")
+    st.code(f"찾는 위치: {target_file}")
+    
+    # 루트 폴더에 무슨 파일이 있는지 보여줌 (범인 찾기)
+    try:
+        files_in_root = os.listdir(root_dir)
+        st.warning(f"📂 현재 루트({root_dir})에 있는 파일 목록:\n" + ", ".join(files_in_root))
+    except Exception as e:
+        st.error(f"폴더 목록 읽기 실패: {e}")
+    st.stop()
+
+# (2) 파일은 있는데 불러오다가 에러가 나는 경우 체크
 try:
     from drive_import import import_drive_folder_videos_parallel as import_drive_folder_videos
     _DRIVE_IMPORT_SUPPORTS_PROGRESS = True
-except ImportError:
-    # If parallel import isn't available or fails, fall back
+except ImportError as e:
+    # 혹시 parallel 버전이 없어서 에러난 건지 확인
     try:
         from drive_import import import_drive_folder_videos
         _DRIVE_IMPORT_SUPPORTS_PROGRESS = False
-    except ImportError:
-        # Stop execution if drive_import is completely missing
-        st.error(f"Critical Error: Could not find 'drive_import.py' in {current_dir}")
+    except ImportError as e2:
+        # 진짜 심각한 에러 (파일은 있는데 내용물 문제일 수 있음)
+        st.error("🚨 모듈을 불러오는 중 에러가 발생했습니다.")
+        st.error(f"1차 시도 에러: {e}")
+        st.error(f"2차 시도 에러: {e2}")
+        st.info("💡 팁: requirements.txt에 필요한 라이브러리(google-api-python-client 등)가 빠져있지 않은지 확인하세요.")
         st.stop()
+
+# ---------------------------------------------------------
+# 아래부터는 기존 코드와 동일
+# ---------------------------------------------------------
 
 # 1. Game Manager (BigQuery Integration)
 import game_manager
