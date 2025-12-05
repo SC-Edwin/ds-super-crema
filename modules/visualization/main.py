@@ -296,12 +296,14 @@ def run():
 
     # ========== 팝업 모달 (Dialog) ==========
     @st.dialog("🤖 Henry & Kyle AI 추천", width="large")
-    def show_ai_modal(filtered_df, selected_app, selected_locality):
+    def show_ai_modal(filtered_df, selected_app, selected_locality, selected_week_label):  # ← 파라미터 추가
         """AI 추천 모달"""
         
         app_text = selected_app if selected_app != 'All' else '전체'
         loc_text = selected_locality if selected_locality != 'All' else '전체'
-        st.markdown(f"**{app_text}** × **{loc_text}** - {len(filtered_df)}개 소재 분석")
+        week_text = selected_week_label if selected_week_label != 'All' else '전체 주차'  # ← 추가
+        
+        st.markdown(f"**{app_text}** × **{loc_text}** × **{week_text}** - {len(filtered_df)}개 소재 분析")  # ← 수정
         
         st.markdown("---")
         
@@ -460,7 +462,7 @@ def run():
 
     # 버튼 클릭 시 팝업 호출
     if st.session_state.get('show_ai_recommendation', False):
-        show_ai_modal(filtered_df, selected_app, selected_locality)
+        show_ai_modal(filtered_df, selected_app, selected_locality, selected_week_label)
         st.session_state['show_ai_recommendation'] = False  # 리셋
     
     # 네트워크 조합 (Past → Future)
