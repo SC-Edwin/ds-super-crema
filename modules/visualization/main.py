@@ -155,10 +155,12 @@ def run():
         selected_locality = st.selectbox("🌍 Locality", all_localities)
 
     # Henry & Kyle 버튼 (필터 아래 왼쪽)
-    col_btn, col_spacer = st.columns([0.5, 8])
+    # [수정] 버튼이 숨을 쉴 수 있게 컬럼 너비를 0.5 -> 1.5로 넓혔습니다.
+    col_btn, col_spacer = st.columns([1.5, 7]) 
 
     with col_btn:
-        if st.button("Heny\n&\nKyle", key="ai_btn", help="Heny & Kyle AI 추천"):
+        # [수정] 줄바꿈(\n) 제거 & use_container_width=True 추가
+        if st.button("Heny & Kyle", key="ai_btn", help="Heny & Kyle AI 추천", use_container_width=True):
             st.session_state['show_ai_recommendation'] = True
 
     # 필터 적용

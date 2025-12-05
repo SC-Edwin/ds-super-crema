@@ -127,11 +127,73 @@ fb_ops.init_fb_game_defaults()
 # MAIN RENDERER (Shared Logic)
 # ======================================================================
 def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = False) -> None:
+
     """
     Renders the main UI. 
     Dynamically loads games from BigQuery via game_manager.
     """
     st.title(title)
+    
+    # ============ 여기에 추가! ============
+    # 버튼 스타일 통일
+    st.markdown("""
+    <style>
+    div[data-testid="stButton"] button,
+    .stButton > button {
+        width: 100% !important;
+        max-width: 400px !important;
+        height: auto !important;
+        min-height: 50px !important;
+        border-radius: 12px !important;
+        padding: 14px 24px !important;
+        
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
+        border: 2px solid #ff006e !important;
+        
+        box-shadow: 
+            0 4px 15px rgba(0, 0, 0, 0.8),
+            0 0 20px rgba(255, 0, 110, 0.4),
+            inset 0 2px 8px rgba(255, 255, 255, 0.1) !important;
+        
+        transition: all 0.3s ease !important;
+    }
+
+    div[data-testid="stButton"] button p,
+    .stButton > button p {
+        font-size: 15px !important;
+        font-weight: 700 !important;
+        line-height: 1.4 !important;
+        letter-spacing: 0.5px !important;
+        white-space: nowrap !important;
+        color: #ff006e !important;
+        text-align: center !important;
+        text-shadow: 
+            0 0 10px rgba(255, 0, 110, 0.6),
+            0 0 20px rgba(255, 0, 110, 0.3) !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    div[data-testid="stButton"] button:hover,
+    .stButton > button:hover {
+        transform: translateY(-3px) scale(1.02) !important;
+        background: linear-gradient(135deg, #2a1a3e 0%, #261e4e 50%, #1f4470 100%) !important;
+        border-color: #ff4d8f !important;
+        box-shadow: 
+            0 8px 25px rgba(0, 0, 0, 0.9),
+            0 0 35px rgba(255, 0, 110, 0.7),
+            inset 0 3px 10px rgba(255, 0, 110, 0.2) !important;
+    }
+
+    div[data-testid="stButton"] button:hover p,
+    .stButton > button:hover p {
+        color: #ff77a0 !important;
+        text-shadow: 
+            0 0 15px rgba(255, 0, 110, 0.8),
+            0 0 25px rgba(255, 0, 110, 0.4) !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
     # --- [MARKETER ONLY] Add New Game Sidebar Form ---
     if is_marketer:
@@ -215,7 +277,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             "Parallel workers", min_value=1, max_value=16, value=8, key=f"drive_workers_{i}"
                         )
 
-                    if st.button("드라이브에서 Creative 가져오기", key=f"drive_import_{i}"):
+                    # [수정 1] 드라이브 가져오기 버튼: 너비 꽉 채우기
+                    if st.button("드라이브에서 Creative 가져오기", key=f"drive_import_{i}", use_container_width=True):
                         try:
                             overall = st.progress(0, text="Waiting...")
                             log_box = st.empty()
@@ -256,7 +319,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     else:
                         st.write("- (None)")
 
-                    if st.button("초기화 (Clear Videos)", key=f"clearurl_{i}"):
+                    # [수정 2] 초기화 버튼: 너비 꽉 채우기
+                    if st.button("초기화 (Clear Videos)", key=f"clearurl_{i}", use_container_width=True):
                         st.session_state.remote_videos[game] = []
                         st.rerun()
 
@@ -264,13 +328,19 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     if platform == "Facebook":
                         ok_msg_placeholder = st.empty()
                         btn_label = "Creative 업로드하기" if is_marketer else "Creative Test 업로드하기"
-                        cont = st.button(btn_label, key=f"continue_{i}")
-                        clr = st.button("전체 초기화", key=f"clear_{i}")
+                        
+                        # [수정 3] 업로드 및 전체 초기화 버튼: 너비 꽉 채우기
+                        # 간격을 두어 시각적으로 분리
+                        st.write("") 
+                        cont = st.button(btn_label, key=f"continue_{i}", use_container_width=True)
+                        clr = st.button("전체 초기화", key=f"clear_{i}", use_container_width=True)
                     else:
                         unity_ok_placeholder = st.empty()
-                        cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{i}")
-                        cont_unity_apply = st.button("캠페인에 적용", key=f"unity_apply_{i}")
-                        clr_unity = st.button("전체 초기화 (Unity)", key=f"unity_clear_{i}")
+                        # Unity 버튼들도 동일하게 적용
+                        st.write("")
+                        cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{i}", use_container_width=True)
+                        cont_unity_apply = st.button("캠페인에 적용", key=f"unity_apply_{i}", use_container_width=True)
+                        clr_unity = st.button("전체 초기화 (Unity)", key=f"unity_clear_{i}", use_container_width=True)
 
             # =========================
             # RIGHT COLUMN: Settings
@@ -407,12 +477,12 @@ def run():
     <style>
     div[data-testid="stButton"] button,
     .stButton > button {
-        width: auto !important;
+        width: 100% !important;
+        max-width: 400px !important;
         height: auto !important;
-        min-width: 100px !important;
-        min-height: 45px !important;
+        min-height: 50px !important;
         border-radius: 12px !important;
-        padding: 12px 24px !important;
+        padding: 14px 24px !important;
         
         background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
         border: 2px solid #ff006e !important;
@@ -427,12 +497,13 @@ def run():
 
     div[data-testid="stButton"] button p,
     .stButton > button p {
-        font-size: 14px !important;
+        font-size: 15px !important;
         font-weight: 700 !important;
-        line-height: 1.3 !important;
+        line-height: 1.4 !important;
         letter-spacing: 0.5px !important;
         white-space: nowrap !important;
         color: #ff006e !important;
+        text-align: center !important;
         text-shadow: 
             0 0 10px rgba(255, 0, 110, 0.6),
             0 0 20px rgba(255, 0, 110, 0.3) !important;
@@ -442,7 +513,7 @@ def run():
 
     div[data-testid="stButton"] button:hover,
     .stButton > button:hover {
-        transform: translateY(-3px) scale(1.05) !important;
+        transform: translateY(-3px) scale(1.02) !important;
         background: linear-gradient(135deg, #2a1a3e 0%, #261e4e 50%, #1f4470 100%) !important;
         border-color: #ff4d8f !important;
         box-shadow: 

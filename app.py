@@ -221,15 +221,14 @@ def apply_theme():
     h1, h2, h3 { color: #ffffff !important; }
     p, span, div { color: #cccccc !important; }
     
-    /* ========== Heny & Kyle 버튼 (블랙핑크 스타일) ========== */
+    /* ========== Global Button Style (블랙핑크 스타일 - 와이드형) ========== */
     div[data-testid="stButton"] button,
     .stButton > button {
-        width: 55px !important;
-        height: 55px !important;
-        min-width: 55px !important;
-        min-height: 55px !important;
-        border-radius: 50% !important;
-        padding: 8px !important;
+        width: 100% !important;
+        height: auto !important;
+        min-height: 50px !important;
+        border-radius: 12px !important; /* 원형(50%)에서 둥근사각형(12px)으로 변경 */
+        padding: 14px 24px !important;
         
         background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
         border: 2px solid #ff006e !important;
@@ -244,12 +243,13 @@ def apply_theme():
 
     div[data-testid="stButton"] button p,
     .stButton > button p {
-        font-size: 12px !important;
+        font-size: 15px !important; /* 폰트 사이즈 키움 */
         font-weight: 700 !important;
-        line-height: 1.1 !important;
+        line-height: 1.4 !important;
         letter-spacing: 0.5px !important;
-        white-space: pre-line !important;
+        white-space: nowrap !important;
         color: #ff006e !important;
+        text-align: center !important;
         text-shadow: 
             0 0 10px rgba(255, 0, 110, 0.6),
             0 0 20px rgba(255, 0, 110, 0.3) !important;
@@ -259,7 +259,7 @@ def apply_theme():
 
     div[data-testid="stButton"] button:hover,
     .stButton > button:hover {
-        transform: translateY(-3px) scale(1.08) !important;
+        transform: translateY(-3px) scale(1.02) !important; /* scale 조정 */
         background: linear-gradient(135deg, #2a1a3e 0%, #261e4e 50%, #1f4470 100%) !important;
         border-color: #ff4d8f !important;
         box-shadow: 
@@ -278,7 +278,7 @@ def apply_theme():
 
     div[data-testid="stButton"] button:active,
     .stButton > button:active {
-        transform: translateY(-1px) scale(1.03) !important;
+        transform: translateY(-1px) scale(0.98) !important;
     }
 
     /* ========== Selectbox 안정화 (그림자 버그 제거) ========== */
