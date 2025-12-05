@@ -5,10 +5,20 @@ import os
 import sys
 import pathlib
 import logging
-from typing import Dict, List
-from datetime import datetime, timedelta, timezone
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Dict
+# =========================================================
+# 1. 경로 설정 (Root 디렉토리 찾기)
+# =========================================================
+current_dir = os.path.dirname(os.path.abspath(__file__))  # modules/upload_automation
+root_dir = os.path.dirname(os.path.dirname(current_dir))  # ds-super-crema (Root)
 
+# 경로 추가 (중복 방지)
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
+
+# =========================================================
+# 2. 스트림릿 및 로깅 설정
+# =========================================================
 import streamlit as st
 from streamlit.components.v1 import html as components_html 
 
@@ -37,33 +47,52 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- IMPORTS ---
-try:
-    from drive_import import import_drive_folder_videos_parallel as import_drive_folder_videos
-    _DRIVE_IMPORT_SUPPORTS_PROGRESS = True
-except ImportError:
-    # If parallel import isn't available or fails, fall back
+# =========================================================
+# 3. 디버깅 및 모듈 임포트 (수정된 부분)
+# =========================================================
+
+# (1) drive_import.py 파일이 진짜 있는지 눈으로 확인
+target_file = os.path.join(current_dir, "drive_import.py")  # ← 수정: root_dir → current_dir
+if not os.path.exists(target_file):
+    st.error(f"🚨 [CRITICAL] 'drive_import.py' 파일을 찾을 수 없습니다!")
+    st.code(f"찾는 위치: {target_file}")
+    
+    # 현재 폴더에 무슨 파일이 있는지 보여줌
     try:
-        from drive_import import import_drive_folder_videos
+        files_in_current = os.listdir(current_dir)  # ← 수정: root_dir → current_dir
+        st.warning(f"📂 현재 폴더({current_dir})에 있는 파일 목록:\n" + ", ".join(files_in_current))
+    except Exception as e:
+        st.error(f"폴더 목록 읽기 실패: {e}")
+    st.stop()
+
+# (2) 파일은 있는데 불러오다가 에러가 나는 경우 체크
+try:
+    from modules.upload_automation.drive_import import import_drive_folder_videos_parallel as import_drive_folder_videos  # ← 수정
+    _DRIVE_IMPORT_SUPPORTS_PROGRESS = True
+except ImportError as e:
+    try:
+        from modules.upload_automation.drive_import import import_drive_folder_videos  # ← 수정
         _DRIVE_IMPORT_SUPPORTS_PROGRESS = False
-    except ImportError:
-        # Stop execution if drive_import is completely missing
-        st.error(f"Critical Error: Could not find 'drive_import.py' in {current_dir}")
+    except ImportError as e2:
+        st.error("🚨 모듈을 불러오는 중 에러가 발생했습니다.")
+        st.error(f"1차 시도 에러: {e}")
+        st.error(f"2차 시도 에러: {e2}")
+        st.info("💡 팁: requirements.txt에 필요한 라이브러리(google-api-python-client 등)가 빠져있지 않은지 확인하세요.")
         st.stop()
 
 # 1. Game Manager (BigQuery Integration)
-import game_manager
+from modules.upload_automation import game_manager  # ← 수정
 
 # 2. Operations Modules (Admin/Full Access)
-import facebook_ads as fb_ops
-import unity_ads as uni_ops
+from modules.upload_automation import facebook_ads as fb_ops  # ← 수정
+from modules.upload_automation import unity_ads as uni_ops  # ← 수정
 
 # 3. Marketer Modules (Simplified/Restricted)
 try:
-    import fb as fb_marketer 
-    import uni as uni_marketer 
+    from modules.upload_automation import fb as fb_marketer  # ← 수정
+    from modules.upload_automation import uni as uni_marketer  # ← 수정
 except ImportError as e:
-    st.error(f"Module Import Error: {e}. Please ensure fb.py and unity_marketer.py are in {current_dir}")
+    st.error(f"Module Import Error: {e}. Please ensure fb.py and uni.py are in {current_dir}")
     st.stop()
 
 
@@ -474,15 +503,22 @@ def run():
     """
     Main entry point called by the parent app.
     """
+    # ========================================================
+    # [중요] 필수 초기화 함수들 (이게 없으면 에러 납니다!)
+    # ========================================================
+    init_state()                    # uploads, settings 초기화
+    init_remote_state()             # remote_videos 초기화 (에러 해결!)
+    fb_ops.init_fb_game_defaults()  # Facebook URL/AppID 기본값 채우기 (빈칸 해결!)
+
     # ------------------------------------------------------------
-    # [수정됨] 사이드바 대신 메인 화면 상단에 모드 선택 버튼 배치
+    # [UI] 모드 선택 버튼 및 스타일 설정
     # ------------------------------------------------------------
     
     # 페이지 상태 초기화
     if "page" not in st.session_state:
         st.session_state["page"] = "Creative 자동 업로드"
 
-    # 상단에 모드 전환 버튼 배치 (Tab 내부 상단에 위치하게 됨)
+    # 상단에 모드 전환 버튼 배치
     st.markdown("#### 🛠️ 모드 선택")
     st.markdown("""
     <style>
@@ -542,6 +578,7 @@ def run():
     }
     </style>
     """, unsafe_allow_html=True)
+    
     # 컬럼을 사용하여 버튼을 가로로 배치
     col_mode1, col_mode2, _ = st.columns([1, 1, 4])
     
