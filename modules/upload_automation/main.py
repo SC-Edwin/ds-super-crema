@@ -604,10 +604,19 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
 # if __name__ == "__main__":
 #     run()
 
+# ======================================================================
+# PAGE ROUTING
+# ======================================================================
+
 def run():
     """
     Main entry point called by the parent app.
     """
+    # [중요] 세션 상태 강제 초기화 (에러 방지용)
+    # 이 두 줄이 없으면 'remote_videos' 키가 없다는 에러가 발생합니다.
+    init_state()
+    init_remote_state()
+    
     # Test 모드만 표시 (Marketer 모드 숨김)
     render_main_app("Creative 업로드", fb_ops, uni_ops, is_marketer=False)
 
