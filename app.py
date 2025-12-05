@@ -20,38 +20,7 @@ def apply_theme():
     header[data-testid="stHeader"] {
         display: none;
     }
-    /* ========== 모든 Alert 강제로 검은 배경 ========== */
-
-    /* 모든 알림 박스들 */
-    [data-testid="stAlert"],
-    [data-testid="stNotification"],
-    [data-testid="stInfo"],
-    [data-testid="stException"],
-    [data-testid="stErrorMessage"],
-    .element-container [data-testid="stAlert"],
-    .element-container [data-testid="stNotification"] {
-        background-color: #0a0a0a !important;
-        background: #0a0a0a !important;
-    }
-
-    /* 내부 div도 검은색으로 */
-    [data-testid="stAlert"] > div,
-    [data-testid="stNotification"] > div {
-        background-color: #0a0a0a !important;
-        background: #0a0a0a !important;
-    }
-
-    /* 텍스트는 흰색 유지 */
-    [data-testid="stAlert"] *,
-    [data-testid="stNotification"] * {
-        color: #ffffff !important;
-    }
-
-    /* 아이콘 색상은 유지 */
-    [data-testid="stAlert"] svg,
-    [data-testid="stNotification"] svg {
-        color: inherit !important;
-    }
+         
     /* 상단 여백 제거 */
     .main > div {
         padding-top: 0rem !important;
@@ -221,14 +190,15 @@ def apply_theme():
     h1, h2, h3 { color: #ffffff !important; }
     p, span, div { color: #cccccc !important; }
     
-    /* ========== Global Button Style (블랙핑크 스타일 - 와이드형) ========== */
+    /* ========== Heny & Kyle 버튼 (블랙핑크 스타일) ========== */
     div[data-testid="stButton"] button,
     .stButton > button {
-        width: 100% !important;
-        height: auto !important;
-        min-height: 50px !important;
-        border-radius: 12px !important; /* 원형(50%)에서 둥근사각형(12px)으로 변경 */
-        padding: 14px 24px !important;
+        width: 55px !important;
+        height: 55px !important;
+        min-width: 55px !important;
+        min-height: 55px !important;
+        border-radius: 50% !important;
+        padding: 8px !important;
         
         background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
         border: 2px solid #ff006e !important;
@@ -243,13 +213,12 @@ def apply_theme():
 
     div[data-testid="stButton"] button p,
     .stButton > button p {
-        font-size: 15px !important; /* 폰트 사이즈 키움 */
+        font-size: 12px !important;
         font-weight: 700 !important;
-        line-height: 1.4 !important;
+        line-height: 1.1 !important;
         letter-spacing: 0.5px !important;
-        white-space: nowrap !important;
+        white-space: pre-line !important;
         color: #ff006e !important;
-        text-align: center !important;
         text-shadow: 
             0 0 10px rgba(255, 0, 110, 0.6),
             0 0 20px rgba(255, 0, 110, 0.3) !important;
@@ -259,7 +228,7 @@ def apply_theme():
 
     div[data-testid="stButton"] button:hover,
     .stButton > button:hover {
-        transform: translateY(-3px) scale(1.02) !important; /* scale 조정 */
+        transform: translateY(-3px) scale(1.08) !important;
         background: linear-gradient(135deg, #2a1a3e 0%, #261e4e 50%, #1f4470 100%) !important;
         border-color: #ff4d8f !important;
         box-shadow: 
@@ -278,7 +247,7 @@ def apply_theme():
 
     div[data-testid="stButton"] button:active,
     .stButton > button:active {
-        transform: translateY(-1px) scale(0.98) !important;
+        transform: translateY(-1px) scale(1.03) !important;
     }
 
     /* ========== Selectbox 안정화 (그림자 버그 제거) ========== */
@@ -322,13 +291,7 @@ def main():
             st.error(f"시각화 모듈 로드 실패: {str(e)}")
     
     with tab2:
-        try:
-            from modules.upload_automation import main as upload_main
-            upload_main.run()
-        except Exception as e:
-            st.error(f"소재 업로드 모듈 로드 실패: {str(e)}")
-            import traceback
-            st.code(traceback.format_exc())
+        st.info("🚧 업로드 자동화 모듈 개발 예정")
     
     with tab3:
         st.info("🚧 동영상 자동화 모듈 개발 예정")

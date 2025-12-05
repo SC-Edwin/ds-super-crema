@@ -253,7 +253,9 @@ def run():
 
     # Henry & Kyle 버튼 (필터 아래 왼쪽)
     # [수정] 버튼이 숨을 쉴 수 있게 컬럼 너비를 0.5 -> 1.5로 넓혔습니다.
-    col_btn, col_spacer = st.columns([1.5, 7]) 
+    # col_btn, col_spacer = st.columns([1.5, 7]) 
+    col_btn, col_spacer = st.columns([0.3, 9.7])
+
 
     with col_btn:
         # [수정] 줄바꿈(\n) 제거 & use_container_width=True 추가
