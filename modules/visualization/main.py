@@ -25,7 +25,7 @@ def get_bigquery_client():
     
     # Streamlit Cloud
     try:
-        if "gcp_service_account" in st.secrets:
+        if "gcp_service_account" in st.secrets:  # ← Secrets 있으면
             credentials = service_account.Credentials.from_service_account_info(
                 st.secrets["gcp_service_account"]
             )
@@ -34,11 +34,10 @@ def get_bigquery_client():
                 project=st.secrets["gcp_service_account"]["project_id"]
             )
     except Exception as e:
-        st.error(f"❌ GCP 인증 실패: {e}")
-        st.stop()  # 여기서 멈춤
+        pass  # ← Secrets 없으면 넘어감
     
-    # 로컬 (Secrets 없을 때만)
-    return bigquery.Client(project='roas-test-456808')
+    # 로컬 (Application Default Credentials)
+    return bigquery.Client(project='roas-test-456808')  # ← 로컬 인증 사용
 
 
 @st.cache_data(ttl=300)
@@ -83,6 +82,7 @@ def load_prediction_data():
       network,
       app,
       locality,
+      prediction_score,  
       ranking_score,
       past_network,
       sum_impressions,
@@ -129,7 +129,7 @@ def create_plotly_theme():
 def run():
     """시각화 모듈 메인"""
     
-    st.markdown("## 📊 Top 10 Creatives by Network")
+    st.markdown("## 🥇 Top Creatives by Network")
     
     # 데이터 로드
     with st.spinner("🔄 데이터 로딩 중..."):
@@ -144,15 +144,22 @@ def run():
     
     # 필터 (메인 화면 왼쪽)
     st.markdown("### 🔍 Filter")
-    col1, col2, col_spacer = st.columns([1.5, 1.5, 5])  # 왼쪽에 붙이기
-    
+    col1, col2, col_spacer = st.columns([1.2, 1.2, 5]) 
+
     with col1:
         all_apps = ['All'] + sorted(df['app'].unique().tolist())
         selected_app = st.selectbox("📱 App", all_apps)
-    
+
     with col2:
         all_localities = ['All'] + sorted(df['locality'].unique().tolist())
         selected_locality = st.selectbox("🌍 Locality", all_localities)
+
+    # Henry & Kyle 버튼 (필터 아래 왼쪽)
+    col_btn, col_spacer = st.columns([0.5, 8])
+
+    with col_btn:
+        if st.button("Heny\n&\nKyle", key="ai_btn", help="Heny & Kyle AI 추천"):
+            st.session_state['show_ai_recommendation'] = True
 
     # 필터 적용
     filtered_df = df.copy()
@@ -164,6 +171,176 @@ def run():
     if len(filtered_df) == 0:
         st.warning("⚠️ 선택한 조건에 맞는 데이터가 없습니다.")
         return
+    
+
+    # ========== 팝업 모달 (Dialog) ==========
+    @st.dialog("🤖 Henry & Kyle AI 추천", width="large")
+    def show_ai_modal(filtered_df, selected_app, selected_locality):
+        """AI 추천 모달"""
+        
+        app_text = selected_app if selected_app != 'All' else '전체'
+        loc_text = selected_locality if selected_locality != 'All' else '전체'
+        st.markdown(f"**{app_text}** × **{loc_text}** - {len(filtered_df)}개 소재 분석")
+        
+        st.markdown("---")
+        
+        # 소재별 최적 경로 계산
+        best_per_creative = filtered_df.loc[
+            filtered_df.groupby('subject_label')['ranking_score'].idxmax()
+        ]
+        
+        best_per_creative['path'] = (
+            best_per_creative['past_network'] + ' → ' + 
+            best_per_creative['network']
+        )
+        
+        # 2등과의 차이 계산
+        def get_score_gap(row):
+            same_creative = filtered_df[filtered_df['subject_label'] == row['subject_label']]
+            sorted_scores = same_creative['ranking_score'].sort_values(ascending=False)
+            if len(sorted_scores) >= 2:
+                return sorted_scores.iloc[0] - sorted_scores.iloc[1]
+            return 0
+        
+        best_per_creative['gap'] = best_per_creative.apply(get_score_gap, axis=1)
+        
+        # 아이콘 추가
+        def add_icon(row):
+            rank = row['rank_per_network']
+            if rank <= 3:
+                return '🏆'
+            elif rank <= 10:
+                return '⭐'
+            return ''
+        
+        best_per_creative['icon'] = best_per_creative.apply(add_icon, axis=1)
+        
+        # 테이블
+        st.markdown("### 📊 소재별 최적 투자 경로")
+        
+        # 확률(%) 계산
+        best_per_creative['probability_pct'] = (best_per_creative['prediction_score'] * 100).round(1)
+
+        display_df = best_per_creative[[
+            'icon', 'subject_label', 'path', 'probability_pct',  # ← ranking_score 대신!
+            'rank_per_network', 'sum_CPI', 'gap'
+        ]].sort_values('probability_pct', ascending=False).reset_index(drop=True)  # ← 정렬 기준도 변경
+
+        st.dataframe(
+            display_df,
+            column_config={
+                'icon': st.column_config.TextColumn('', width='small'),
+                'subject_label': st.column_config.TextColumn('소재', width='small'),
+                'path': st.column_config.TextColumn('최적 경로', width='medium'),
+                'probability_pct': st.column_config.NumberColumn('확률', format="%.1f%%", width='small'),  # ← 추가!
+                'rank_per_network': st.column_config.TextColumn('순위', width='small'),
+                'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small'),
+                'gap': st.column_config.NumberColumn('차이', format="+%.2f", width='small')
+            },
+            hide_index=True,
+            use_container_width=True,
+            height=400
+        )
+        
+        # 인사이트 시각화
+        st.markdown("---")
+        st.markdown("### 💡 AI 인사이트")
+        
+        col_viz1, col_viz2 = st.columns(2)
+        
+        theme = create_plotly_theme()
+        
+        with col_viz1:
+            # 네트워크별 추천 수
+            network_counts = best_per_creative['network'].value_counts()
+            
+            fig_pie = go.Figure(data=[go.Pie(
+                labels=network_counts.index,
+                values=network_counts.values,
+                marker=dict(
+                    colors=['#ff006e', '#ff4d8f', '#ff77a0', '#a855f7', '#8b00ff']
+                ),
+                textfont=dict(color='white', size=14)
+            )])
+            
+            fig_pie.update_layout(
+                **theme,
+                title='최적 네트워크 분포',
+                height=300,
+                showlegend=True
+            )
+            
+            st.plotly_chart(fig_pie, use_container_width=True)
+        
+        with col_viz2:
+            # Past 네트워크별 평균 스코어
+            past_avg = best_per_creative.groupby('past_network')['ranking_score'].mean().sort_values(ascending=True)
+            
+            fig_bar = go.Figure(data=[go.Bar(
+                x=past_avg.values,
+                y=past_avg.index,
+                orientation='h',
+                marker=dict(
+                    color=past_avg.values,
+                    colorscale=[[0, '#ff77a0'], [0.5, '#ff4d8f'], [1, '#ff006e']],
+                    line=dict(color='rgba(255, 255, 255, 0.3)', width=2)
+                ),
+                text=[f'{v:.2f}' for v in past_avg.values],
+                textposition='outside',
+                cliponaxis=False
+            )])
+            
+            fig_bar.update_layout(
+                **theme,
+                title='Past 네트워크별 평균 Score',
+                height=300,
+                margin=dict(l=20, r=100, t=40, b=40),
+                xaxis=dict(
+                    range=[0, past_avg.values.max() * 1.12]
+                ),
+                xaxis_title='Average Score',
+                yaxis_title='',
+                showlegend=False
+            )
+            
+            st.plotly_chart(fig_bar, use_container_width=True)  # ← 이게 누락됐었음!
+        
+        # 핵심 인사이트 요약
+        st.markdown("---")
+        
+        col_insight1, col_insight2, col_insight3 = st.columns(3)
+        
+        with col_insight1:
+            best_network = network_counts.index[0]
+            best_count = network_counts.values[0]
+            st.metric(
+                "🏆 최다 추천 네트워크",
+                best_network.upper(),
+                f"{best_count}개 소재 ({best_count/len(best_per_creative)*100:.0f}%)"
+            )
+        
+        with col_insight2:
+            best_past = past_avg.index[-1]
+            best_past_score = past_avg.values[-1]
+            st.metric(
+                "📈 최고 Past 네트워크",
+                best_past.upper(),
+                f"평균 {best_past_score:.2f}"
+            )
+        
+        with col_insight3:
+            avg_gap = best_per_creative['gap'].mean()
+            st.metric(
+                "🎯 평균 우위 점수",
+                f"+{avg_gap:.2f}",
+                "1등과 2등 차이"
+            )
+
+
+    # 버튼 클릭 시 팝업 호출
+    if st.session_state.get('show_ai_recommendation', False):
+        show_ai_modal(filtered_df, selected_app, selected_locality)
+        st.session_state['show_ai_recommendation'] = False  # 리셋
     
     # 네트워크 조합 (Past → Future)
     combinations = filtered_df.groupby(['past_network', 'network']).size().reset_index()[['past_network', 'network']]

@@ -11,6 +11,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+
+
 def apply_theme():
     st.markdown("""
     <style>
@@ -187,10 +189,84 @@ def apply_theme():
     
     h1, h2, h3 { color: #ffffff !important; }
     p, span, div { color: #cccccc !important; }
+    
+    /* ========== Heny & Kyle 버튼 (블랙핑크 스타일) ========== */
+    div[data-testid="stButton"] button,
+    .stButton > button {
+        width: 55px !important;
+        height: 55px !important;
+        min-width: 55px !important;
+        min-height: 55px !important;
+        border-radius: 50% !important;
+        padding: 8px !important;
+        
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
+        border: 2px solid #ff006e !important;
+        
+        box-shadow: 
+            0 4px 15px rgba(0, 0, 0, 0.8),
+            0 0 20px rgba(255, 0, 110, 0.4),
+            inset 0 2px 8px rgba(255, 255, 255, 0.1) !important;
+        
+        transition: all 0.3s ease !important;
+    }
+
+    div[data-testid="stButton"] button p,
+    .stButton > button p {
+        font-size: 12px !important;
+        font-weight: 700 !important;
+        line-height: 1.1 !important;
+        letter-spacing: 0.5px !important;
+        white-space: pre-line !important;
+        color: #ff006e !important;
+        text-shadow: 
+            0 0 10px rgba(255, 0, 110, 0.6),
+            0 0 20px rgba(255, 0, 110, 0.3) !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    div[data-testid="stButton"] button:hover,
+    .stButton > button:hover {
+        transform: translateY(-3px) scale(1.08) !important;
+        background: linear-gradient(135deg, #2a1a3e 0%, #261e4e 50%, #1f4470 100%) !important;
+        border-color: #ff4d8f !important;
+        box-shadow: 
+            0 8px 25px rgba(0, 0, 0, 0.9),
+            0 0 35px rgba(255, 0, 110, 0.7),
+            inset 0 3px 10px rgba(255, 0, 110, 0.2) !important;
+    }
+
+    div[data-testid="stButton"] button:hover p,
+    .stButton > button:hover p {
+        color: #ff77a0 !important;
+        text-shadow: 
+            0 0 15px rgba(255, 0, 110, 0.8),
+            0 0 25px rgba(255, 0, 110, 0.4) !important;
+    }
+
+    div[data-testid="stButton"] button:active,
+    .stButton > button:active {
+        transform: translateY(-1px) scale(1.03) !important;
+    }
+
+    /* ========== Selectbox 안정화 (그림자 버그 제거) ========== */
+    div[data-baseweb="select"] {
+        transition: none !important;
+    }
+
+    div[data-baseweb="select"] > div {
+        transition: none !important;
+        box-shadow: none !important;
+    }
+
+    div[data-baseweb="select"]:hover {
+        box-shadow: none !important;
+    }
+    /* ======================================================= */
+                
     </style>
     """, unsafe_allow_html=True)
-
-
 
 
 def render_header():
