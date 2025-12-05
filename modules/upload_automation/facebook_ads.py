@@ -364,13 +364,24 @@ def init_fb_game_defaults() -> None:
 
 def init_fb_from_secrets(ad_account_id: str | None = None) -> "AdAccount":
     """
-    Initialize Meta SDK using only access_token from st.secrets,
+    Initialize Meta SDK using access_token from st.secrets (preferably under [facebook]),
     and return an AdAccount (default: XP HERO account if none given).
     """
     _require_fb()
-    token = st.secrets.get("access_token", "").strip()
+    
+    # Try to get token from [facebook] section first, then root
+    if "facebook" in st.secrets:
+        token = st.secrets["facebook"].get("access_token", "").strip()
+    else:
+        token = st.secrets.get("access_token", "").strip()
+
     if not token:
-        raise RuntimeError("Missing access_token in st.secrets. Put it in .streamlit/secrets.toml")
+        raise RuntimeError(
+            "Missing 'access_token' in st.secrets.\n"
+            "Please add it to .streamlit/secrets.toml under [facebook] section:\n"
+            "[facebook]\n"
+            "access_token = \"...\""
+        )
 
     FacebookAdsApi.init(access_token=token)
 
@@ -479,13 +490,20 @@ def upload_videos_create_ads(
         Chunked upload to /{act_id}/advideos using the official 3-phase protocol.
         Retries transient errors and verifies total bytes sent before finishing.
         """
-        token = (st.secrets.get("access_token") or "").strip()
+        # Try to get token from [facebook] section first, then root
+        if "facebook" in st.secrets:
+            token = st.secrets["facebook"].get("access_token", "").strip()
+        else:
+            token = st.secrets.get("access_token", "").strip()
+
         if not token:
-            raise RuntimeError("Missing access_token in st.secrets")
+            raise RuntimeError("Missing access_token in st.secrets (check [facebook] section)")
 
         act = account.get_id()
         base = f"https://graph.facebook.com/v24.0/{act}/advideos"
         file_size = os.path.getsize(path)
+
+        # ... (rest of the function remains the same)
 
         def _post(data, files=None, max_retries=5):
             delays = [0, 2, 4, 8, 12]
@@ -1035,9 +1053,16 @@ def upload_to_facebook(
     account = init_fb_from_secrets(cfg["account_id"])
 
     page_id_key = cfg.get("page_id_key")
-    if not page_id_key or page_id_key not in st.secrets:
-        raise RuntimeError(f"Missing {page_id_key!r} in st.secrets for game {game_name}")
-    page_id = st.secrets[page_id_key]
+    
+    # 1. Try looking inside the [facebook] section (correct for your secrets.toml)
+    if "facebook" in st.secrets and page_id_key in st.secrets["facebook"]:
+        page_id = st.secrets["facebook"][page_id_key]
+    # 2. Fallback: Try looking at the root level
+    elif page_id_key in st.secrets:
+        page_id = st.secrets[page_id_key]
+    # 3. Error if not found in either
+    else:
+        raise RuntimeError(f"Missing {page_id_key!r} in st.secrets['facebook'] or st.secrets root for game {game_name}")
 
     # Validate page and capture IG actor
     page_check = validate_page_binding(account, page_id)

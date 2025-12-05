@@ -12,6 +12,8 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 from google.oauth2.service_account import Credentials
+
+
 #export GOOGLE_APPLICATION_CREDENTIALS="/Users/eader/Downloads/roas-test-456808-321ce7426bfb.json"
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
@@ -32,7 +34,7 @@ def get_drive_service_from_secrets():
     # 1) Try st.secrets safely (no KeyError)
     try:
         if "gcp_service_account" in st.secrets:
-            info = dict(st.secrets["gcp_service_account"])
+            info = dict(st.secrets["creative_gcp_key"])
     except Exception:
         # st.secrets may not exist outside Streamlit runtime
         pass

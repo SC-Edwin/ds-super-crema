@@ -121,23 +121,33 @@ init_state()
 init_remote_state()
 fb_ops.init_fb_game_defaults()
 
+# ----- TOP NAV: MODE SELECTION ----------------------------------------
+st.markdown("### 🛠️ Creative 자동 업로드") # 페이지 제목
 
-# ----- SIDEBAR: MODE SELECTION ----------------------------------------
-with st.sidebar:
-    st.markdown("### 페이지 선택")
-    if "page" not in st.session_state:
-        st.session_state["page"] = "Creative 자동 업로드"
+# 1. 초기 상태값 설정 (없으면 기본값)
+if "page" not in st.session_state:
+    st.session_state["page"] = "Creative 자동 업로드"
 
-    # Buttons to switch modes
-    if st.button("운영 (Ops)", use_container_width=True):
-        st.session_state["page"] = "Creative 자동 업로드"
-    
-    if st.button("마케터 (Marketer)", use_container_width=True):
-        st.session_state["page"] = "Creative 자동 업로드 - 마케터"
+# 2. 현재 상태에 맞춰 라디오 버튼의 기본 위치(index) 설정
+# 'Creative 자동 업로드'면 0번(Ops), 아니면 1번(Marketer)
+default_index = 0 if st.session_state["page"] == "Creative 자동 업로드" else 1
 
-    # Display current mode text
-    current_display = "Test" if st.session_state["page"] == "Creative 자동 업로드" else "Marketer"
-    st.caption(f"현재 페이지: **{current_display}**")
+# 3. 상단에 가로형 라디오 버튼 배치
+selected_mode = st.radio(
+    "모드 선택", 
+    ["운영 (Ops)", "마케터 (Marketer)"], 
+    index=default_index, 
+    horizontal=True, 
+    label_visibility="collapsed" # "모드 선택" 라벨 숨김 (깔끔하게)
+)
+
+# 4. 선택된 값에 따라 session_state 업데이트
+if selected_mode == "운영 (Ops)":
+    st.session_state["page"] = "Creative 자동 업로드"
+else:
+    st.session_state["page"] = "Creative 자동 업로드 - 마케터"
+
+st.divider() # 구분선 추가로 깔끔하게 분리
 
 
 # ======================================================================
