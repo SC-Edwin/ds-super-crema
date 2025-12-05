@@ -253,14 +253,30 @@ def run():
 
     # Henry & Kyle 버튼 (필터 아래 왼쪽)
     # [수정] 버튼이 숨을 쉴 수 있게 컬럼 너비를 0.5 -> 1.5로 넓혔습니다.
-    # col_btn, col_spacer = st.columns([1.5, 7]) 
-    col_btn, col_spacer = st.columns([0.3, 9.7])
+    # # col_btn, col_spacer = st.columns([1.5, 7]) 
+    # col_btn, col_spacer = st.columns([0.3, 9.7])
 
 
-    with col_btn:
-        # [수정] 줄바꿈(\n) 제거 & use_container_width=True 추가
-        if st.button("Heny & Kyle", key="ai_btn", help="Heny & Kyle AI 추천", use_container_width=True):
+    # with col_btn:
+    #     # [수정] 줄바꿈(\n) 제거 & use_container_width=True 추가
+    #     if st.button("Heny & Kyle", key="ai_btn", help="Heny & Kyle AI 추천", use_container_width=True):
+    #         st.session_state['show_ai_recommendation'] = True
+
+    # Henry & Kyle 버튼 (필터와 같은 그리드에 정렬)
+    btn_col1, btn_col2, btn_col3, btn_spacer = st.columns([1.2, 1.2, 1.5, 4])
+
+    # 1열(📱 App가 시작하는 위치)에 맞게 배치
+    with btn_col1:
+        if st.button(
+            "Heny & Kyle",
+            key="ai_btn",
+            help="Heny & Kyle AI 추천",
+            use_container_width=False,  # 열 폭만큼만 쓰게
+        ):
             st.session_state['show_ai_recommendation'] = True
+
+
+
 
     # 필터 적용
     filtered_df = df.copy()
