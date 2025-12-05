@@ -20,7 +20,38 @@ def apply_theme():
     header[data-testid="stHeader"] {
         display: none;
     }
-         
+    /* ========== 모든 Alert 강제로 검은 배경 ========== */
+
+    /* 모든 알림 박스들 */
+    [data-testid="stAlert"],
+    [data-testid="stNotification"],
+    [data-testid="stInfo"],
+    [data-testid="stException"],
+    [data-testid="stErrorMessage"],
+    .element-container [data-testid="stAlert"],
+    .element-container [data-testid="stNotification"] {
+        background-color: #0a0a0a !important;
+        background: #0a0a0a !important;
+    }
+
+    /* 내부 div도 검은색으로 */
+    [data-testid="stAlert"] > div,
+    [data-testid="stNotification"] > div {
+        background-color: #0a0a0a !important;
+        background: #0a0a0a !important;
+    }
+
+    /* 텍스트는 흰색 유지 */
+    [data-testid="stAlert"] *,
+    [data-testid="stNotification"] * {
+        color: #ffffff !important;
+    }
+
+    /* 아이콘 색상은 유지 */
+    [data-testid="stAlert"] svg,
+    [data-testid="stNotification"] svg {
+        color: inherit !important;
+    }
     /* 상단 여백 제거 */
     .main > div {
         padding-top: 0rem !important;
