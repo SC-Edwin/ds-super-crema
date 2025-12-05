@@ -15,6 +15,59 @@ import plotly.graph_objects as go
 from datetime import datetime
 from google.cloud import bigquery
 
+from datetime import datetime, timedelta
+import pandas as pd
+
+def get_friday_based_week(date):
+    """
+    금요일 기준 주차 계산
+    
+    Args:
+        date: datetime or string (YYYY-MM-DD)
+    
+    Returns:
+        str: 'YYYY-Wnn' 형식 (예: '2024-W49')
+    """
+    if isinstance(date, str):
+        date = pd.to_datetime(date)
+    
+    if pd.isna(date):
+        return None
+    
+    # 해당 날짜가 속한 주의 금요일 찾기
+    # weekday(): 월=0, 화=1, 수=2, 목=3, 금=4, 토=5, 일=6
+    days_since_friday = (date.weekday() - 4) % 7
+    week_friday = date - timedelta(days=days_since_friday)
+    
+    # ISO 주차 형식 (YYYY-Wnn)
+    year = week_friday.year
+    week_num = week_friday.isocalendar()[1]
+    
+    return f"{year}-W{week_num:02d}"
+
+
+def get_week_label(week_str, reference_weeks):
+    """
+    주차 코드를 사용자 친화적 레이블로 변환
+    
+    Args:
+        week_str: 'YYYY-Wnn' 형식
+        reference_weeks: dict {'this': 'YYYY-Wnn', 'last': ..., 'two_ago': ...}
+    
+    Returns:
+        str: '이번주 (2024-W49)' 같은 형식
+    """
+    if week_str == reference_weeks['this']:
+        return f"이번주 ({week_str})"
+    elif week_str == reference_weeks['last']:
+        return f"전주 ({week_str})"
+    elif week_str == reference_weeks['two_ago']:
+        return f"전전주 ({week_str})"
+    else:
+        return week_str
+    
+
+
 # ================================
 # BigQuery 연결
 # ================================
@@ -82,6 +135,9 @@ def load_prediction_data():
       network,
       app,
       locality,
+      day_1,
+      day_2,
+      day_3,
       prediction_score,  
       ranking_score,
       past_network,
@@ -141,10 +197,27 @@ def run():
             st.info("💡 GCP 인증이 필요합니다.")
             st.code("gcloud auth application-default login")
             return
+        
+    # ========== 주차 계산 추가 ==========
+    # day_1 기준으로 업로드 주차 계산
+    df['upload_week'] = df['day_1'].apply(get_friday_based_week)
+    
+    # 현재 기준 주차들 계산
+    today = datetime.now()
+    reference_weeks = {
+        'this': get_friday_based_week(today),
+        'last': get_friday_based_week(today - timedelta(weeks=1)),
+        'two_ago': get_friday_based_week(today - timedelta(weeks=2))
+    }
+    # ====================================
+
+
     
     # 필터 (메인 화면 왼쪽)
     st.markdown("### 🔍 Filter")
-    col1, col2, col_spacer = st.columns([1.2, 1.2, 5]) 
+
+    col1, col2, col3, col_spacer = st.columns([1.2, 1.2, 1.5, 4])
+
 
     with col1:
         all_apps = ['All'] + sorted(df['app'].unique().tolist())
@@ -153,6 +226,30 @@ def run():
     with col2:
         all_localities = ['All'] + sorted(df['locality'].unique().tolist())
         selected_locality = st.selectbox("🌍 Locality", all_localities)
+
+    with col3:  # ← 새로 추가!
+        # 주차 목록 (최신순, None 제외)
+        available_weeks = sorted(
+            [w for w in df['upload_week'].unique() if w is not None], 
+            reverse=True
+        )
+        
+        # 사용자 친화적 레이블 생성
+        week_options = ['All'] + [
+            get_week_label(w, reference_weeks) for w in available_weeks
+        ]
+        
+        selected_week_label = st.selectbox("📅 업로드 주차", week_options)
+        
+        # 레이블 → 실제 주차 코드 변환
+        if selected_week_label == 'All':
+            selected_week = 'All'
+        else:
+            # 괄호 안의 주차 코드 추출 (예: "이번주 (2024-W49)" → "2024-W49")
+            import re
+            match = re.search(r'\((.*?)\)', selected_week_label)
+            selected_week = match.group(1) if match else selected_week_label
+                    
 
     # Henry & Kyle 버튼 (필터 아래 왼쪽)
     # [수정] 버튼이 숨을 쉴 수 있게 컬럼 너비를 0.5 -> 1.5로 넓혔습니다.
@@ -167,9 +264,13 @@ def run():
     filtered_df = df.copy()
     if selected_app != 'All':
         filtered_df = filtered_df[filtered_df['app'] == selected_app]
+
     if selected_locality != 'All':
         filtered_df = filtered_df[filtered_df['locality'] == selected_locality]
     
+    if selected_week != 'All':  # ← 새로 추가!
+        filtered_df = filtered_df[filtered_df['upload_week'] == selected_week]
+
     if len(filtered_df) == 0:
         st.warning("⚠️ 선택한 조건에 맞는 데이터가 없습니다.")
         return
