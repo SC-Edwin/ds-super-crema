@@ -1,3 +1,17 @@
+"""Streamlit app: bulk upload per-game videos from Drive and create Meta creative tests."""
+from __future__ import annotations
+
+import os
+import sys
+import pathlib
+import logging
+from typing import List, Dict
+# =========================================================
+# 1. 경로 설정 (Root 디렉토리 찾기)
+# =========================================================
+current_dir = os.path.dirname(os.path.abspath(__file__))  # modules/upload_automation
+root_dir = os.path.dirname(os.path.dirname(current_dir))  # ds-super-crema (Root)
+
 # 경로 추가 (중복 방지)
 if root_dir not in sys.path:
     sys.path.append(root_dir)
@@ -61,6 +75,7 @@ try:
 except ImportError as e:
     st.error(f"Module Import Error: {e}. Please ensure fb.py and uni.py are in {current_dir}")
     st.stop()
+
 
 # ----- CONFIG & STATE --------------------------------------------------
 try:
