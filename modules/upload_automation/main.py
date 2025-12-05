@@ -121,33 +121,6 @@ init_state()
 init_remote_state()
 fb_ops.init_fb_game_defaults()
 
-# ----- TOP NAV: MODE SELECTION ----------------------------------------
-st.markdown("### 🛠️ Creative 자동 업로드") # 페이지 제목
-
-# 1. 초기 상태값 설정 (없으면 기본값)
-if "page" not in st.session_state:
-    st.session_state["page"] = "Creative 자동 업로드"
-
-# 2. 현재 상태에 맞춰 라디오 버튼의 기본 위치(index) 설정
-# 'Creative 자동 업로드'면 0번(Ops), 아니면 1번(Marketer)
-default_index = 0 if st.session_state["page"] == "Creative 자동 업로드" else 1
-
-# 3. 상단에 가로형 라디오 버튼 배치
-selected_mode = st.radio(
-    "모드 선택", 
-    ["운영 (Ops)", "마케터 (Marketer)"], 
-    index=default_index, 
-    horizontal=True, 
-    label_visibility="collapsed" # "모드 선택" 라벨 숨김 (깔끔하게)
-)
-
-# 4. 선택된 값에 따라 session_state 업데이트
-if selected_mode == "운영 (Ops)":
-    st.session_state["page"] = "Creative 자동 업로드"
-else:
-    st.session_state["page"] = "Creative 자동 업로드 - 마케터"
-
-st.divider() # 구분선 추가로 깔끔하게 분리
 
 
 # ======================================================================
@@ -414,15 +387,6 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
 # PAGE ROUTING
 # ======================================================================
 
-# Retrieve current page safely
-current_page = st.session_state.get("page", "Creative 자동 업로드")
-
-if current_page == "Creative 자동 업로드":
-    # OPS MODE
-    render_main_app("Test", fb_ops, uni_ops, is_marketer=False)
-else:
-    # MARKETER MODE
-    render_main_app("Marketer", fb_marketer, uni_marketer, is_marketer=True)
 
 
 def run():
@@ -439,17 +403,73 @@ def run():
 
     # 상단에 모드 전환 버튼 배치 (Tab 내부 상단에 위치하게 됨)
     st.markdown("#### 🛠️ 모드 선택")
-    
+    st.markdown("""
+    <style>
+    div[data-testid="stButton"] button,
+    .stButton > button {
+        width: auto !important;
+        height: auto !important;
+        min-width: 100px !important;
+        min-height: 45px !important;
+        border-radius: 12px !important;
+        padding: 12px 24px !important;
+        
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
+        border: 2px solid #ff006e !important;
+        
+        box-shadow: 
+            0 4px 15px rgba(0, 0, 0, 0.8),
+            0 0 20px rgba(255, 0, 110, 0.4),
+            inset 0 2px 8px rgba(255, 255, 255, 0.1) !important;
+        
+        transition: all 0.3s ease !important;
+    }
+
+    div[data-testid="stButton"] button p,
+    .stButton > button p {
+        font-size: 14px !important;
+        font-weight: 700 !important;
+        line-height: 1.3 !important;
+        letter-spacing: 0.5px !important;
+        white-space: nowrap !important;
+        color: #ff006e !important;
+        text-shadow: 
+            0 0 10px rgba(255, 0, 110, 0.6),
+            0 0 20px rgba(255, 0, 110, 0.3) !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    div[data-testid="stButton"] button:hover,
+    .stButton > button:hover {
+        transform: translateY(-3px) scale(1.05) !important;
+        background: linear-gradient(135deg, #2a1a3e 0%, #261e4e 50%, #1f4470 100%) !important;
+        border-color: #ff4d8f !important;
+        box-shadow: 
+            0 8px 25px rgba(0, 0, 0, 0.9),
+            0 0 35px rgba(255, 0, 110, 0.7),
+            inset 0 3px 10px rgba(255, 0, 110, 0.2) !important;
+    }
+
+    div[data-testid="stButton"] button:hover p,
+    .stButton > button:hover p {
+        color: #ff77a0 !important;
+        text-shadow: 
+            0 0 15px rgba(255, 0, 110, 0.8),
+            0 0 25px rgba(255, 0, 110, 0.4) !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     # 컬럼을 사용하여 버튼을 가로로 배치
     col_mode1, col_mode2, _ = st.columns([1, 1, 4])
     
     with col_mode1:
-        if st.button("운영 (Ops)", use_container_width=True, key="btn_mode_ops"):
+        if st.button("Test", use_container_width=True, key="btn_mode_ops"):
             st.session_state["page"] = "Creative 자동 업로드"
             st.rerun()
             
     with col_mode2:
-        if st.button("마케터 (Marketer)", use_container_width=True, key="btn_mode_mkt"):
+        if st.button("Marketer", use_container_width=True, key="btn_mode_mkt"):
             st.session_state["page"] = "Creative 자동 업로드 - 마케터"
             st.rerun()
 
@@ -462,7 +482,7 @@ def run():
     # 모드에 따른 렌더링
     if current_page == "Creative 자동 업로드":
         # OPS MODE
-        render_main_app("Test Mode (Operations)", fb_ops, uni_ops, is_marketer=False)
+        render_main_app("Test Mode", fb_ops, uni_ops, is_marketer=False)
     else:
         # MARKETER MODE
         render_main_app("Marketer Mode", fb_marketer, uni_marketer, is_marketer=True)
