@@ -15,9 +15,21 @@ from streamlit.components.v1 import html as components_html
 # --- FIX: ADD CURRENT DIRECTORY TO PATH ---
 # This allows importing sibling files (drive_import, facebook_ads) 
 # when running from a different root directory (e.g. via app.py)
+# --- FIX: ADD PATHS ---
+import os
+import sys
+
+# 1. 현재 파일이 있는 폴더 (modules/upload_automation)
 current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# 2. 프로젝트 최상위 루트 폴더 (ds-super-crema) - 두 단계 위로 올라감
+root_dir = os.path.dirname(os.path.dirname(current_dir))
+
+# 경로 추가 (중복 방지)
 if current_dir not in sys.path:
     sys.path.append(current_dir)
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
 
 # --- LOGGING SETUP ---
 logging.basicConfig(
