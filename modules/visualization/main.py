@@ -158,7 +158,6 @@ def load_prediction_data():
         ORDER BY ranking_score DESC
       ) AS rank_per_network
     FROM LatestSnapshot
-    QUALIFY rank_per_network <= 10
     """
     
     df = client.query(query).to_dataframe()
@@ -201,6 +200,21 @@ def run():
     # ========== 주차 계산 추가 ==========
     # day_1 기준으로 업로드 주차 계산
     df['upload_week'] = df['day_1'].apply(get_friday_based_week)
+
+        
+    print(f"\n[DEBUG] 전체 데이터 행 수: {len(df)}")
+    print(f"[DEBUG] day_1이 NULL인 행: {df['day_1'].isna().sum()}개")
+    print(f"[DEBUG] upload_week이 None인 행: {df['upload_week'].isna().sum()}개")
+    print(f"\n[DEBUG] 주차별 소재 개수:")
+    print(df.groupby('upload_week')['subject'].nunique().sort_index(ascending=False))
+    print(f"\n[DEBUG] 주차별 조합 개수:")
+    for week in sorted(df['upload_week'].dropna().unique(), reverse=True)[:3]:
+        week_df = df[df['upload_week'] == week]
+        print(f"\n  {week}:")
+        combo_counts = week_df.groupby(['past_network', 'network'])['subject'].nunique()
+        for (past, net), count in combo_counts.items():
+            print(f"    {past} → {net}: {count}개")
+                
     
     # 현재 기준 주차들 계산
     today = datetime.now()
@@ -296,12 +310,14 @@ def run():
 
     # ========== 팝업 모달 (Dialog) ==========
     @st.dialog("🤖 Henry & Kyle AI 추천", width="large")
-    def show_ai_modal(filtered_df, selected_app, selected_locality):
+    def show_ai_modal(filtered_df, selected_app, selected_locality, selected_week_label):  # ← 파라미터 추가
         """AI 추천 모달"""
         
         app_text = selected_app if selected_app != 'All' else '전체'
         loc_text = selected_locality if selected_locality != 'All' else '전체'
-        st.markdown(f"**{app_text}** × **{loc_text}** - {len(filtered_df)}개 소재 분석")
+        week_text = selected_week_label if selected_week_label != 'All' else '전체 주차'  # ← 추가
+        
+        st.markdown(f"**{app_text}** × **{loc_text}** × **{week_text}** - {len(filtered_df)}개 소재 분析")  # ← 수정
         
         st.markdown("---")
         
@@ -460,7 +476,7 @@ def run():
 
     # 버튼 클릭 시 팝업 호출
     if st.session_state.get('show_ai_recommendation', False):
-        show_ai_modal(filtered_df, selected_app, selected_locality)
+        show_ai_modal(filtered_df, selected_app, selected_locality, selected_week_label)
         st.session_state['show_ai_recommendation'] = False  # 리셋
     
     # 네트워크 조합 (Past → Future)
