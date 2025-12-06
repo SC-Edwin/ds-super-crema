@@ -271,7 +271,7 @@ def run():
             "Heny\n&\nKyle",  # ← 3줄로 나눔!
             key="ai_btn",
             help="Heny & Kyle AI 추천",
-            use_container_width=False,
+            width="content",
         ):
             st.session_state['show_ai_recommendation'] = True
 

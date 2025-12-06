@@ -190,7 +190,7 @@ def apply_theme():
     h1, h2, h3 { color: #ffffff !important; }
     p, span, div { color: #cccccc !important; }
         
-    # ========== Heny & Kyle 버튼 (블랙핑크 스타일) ========== */
+    /* ========== Heny & Kyle 버튼 (블랙핑크 스타일) ========== */
     div[data-testid="stButton"] button,
     .stButton > button {
         width: 55px !important;
@@ -228,6 +228,23 @@ def apply_theme():
         margin: 0 !important;
         padding: 0 !important;
     }
+                
+    div[data-testid="stButton"] button p,
+    .stButton > button p {
+        font-size: 9px !important;
+        font-weight: 700 !important;
+        line-height: 1.0 !important;
+        letter-spacing: 0.3px !important;
+        white-space: pre-line !important;
+        color: #ff006e !important;
+        text-shadow:
+            0 0 10px rgba(255, 0, 110, 0.6),
+            0 0 20px rgba(255, 0, 110, 0.3) !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+                                
 
     div[data-testid="stButton"] button:hover,
     .stButton > button:hover {
