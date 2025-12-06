@@ -189,8 +189,8 @@ def apply_theme():
     
     h1, h2, h3 { color: #ffffff !important; }
     p, span, div { color: #cccccc !important; }
-    
-    /* ========== Heny & Kyle 버튼 (블랙핑크 스타일) ========== */
+        
+    # ========== Heny & Kyle 버튼 (블랙핑크 스타일) ========== */
     div[data-testid="stButton"] button,
     .stButton > button {
         width: 55px !important;
@@ -198,7 +198,7 @@ def apply_theme():
         min-width: 55px !important;
         min-height: 55px !important;
         border-radius: 50% !important;
-        padding: 8px !important;
+        padding: 0 !important;  /* ← 8px → 0 */
         
         background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
         border: 2px solid #ff006e !important;
@@ -209,14 +209,17 @@ def apply_theme():
             inset 0 2px 8px rgba(255, 255, 255, 0.1) !important;
         
         transition: all 0.3s ease !important;
+        display: flex !important;  /* ← 추가 */
+        align-items: center !important;  /* ← 추가 */
+        justify-content: center !important;  /* ← 추가 */
     }
 
     div[data-testid="stButton"] button p,
     .stButton > button p {
-        font-size: 12px !important;
+        font-size: 9px !important;  /* ← 12px → 9px */
         font-weight: 700 !important;
-        line-height: 1.1 !important;
-        letter-spacing: 0.5px !important;
+        line-height: 1.0 !important;  /* ← 1.1 → 1.0 */
+        letter-spacing: 0.3px !important;  /* ← 0.5px → 0.3px */
         white-space: pre-line !important;
         color: #ff006e !important;
         text-shadow: 
