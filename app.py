@@ -314,15 +314,13 @@ def main():
     #     st.info("🚧 업로드 자동화 모듈 개발 예정")
 
     with tab2:
-            try:
-                from modules.upload_automation import main as upload_main
-                upload_main.run()
-            except Exception as e:
-                st.error(f"소재 업로드 모듈 로드 실패: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
-
-
+        try:
+            from modules.upload_automation import main as upload_main
+            upload_main.run()
+        except Exception as e:
+            st.error(f"소재 업로드 모듈 로드 실패: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
     
     with tab3:
         st.info("🚧 동영상 자동화 모듈 개발 예정")
