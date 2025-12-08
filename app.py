@@ -280,28 +280,6 @@ def main():
 
 
 
-# 🔥🔥 여기!! (디버깅 DOM 출력 스크립트 삽입) 🔥🔥
-import streamlit.components.v1 as components
-
-components.html("""
-<script>
-setTimeout(() => {
-    const btn = document.querySelector('button[kind="secondary"]');
-    console.log("BTN:", btn);
-
-    let p = btn;
-    let level = 0;
-    while (p && level < 10) {
-        console.log("LEVEL", level, p);
-        p = p.parentElement;
-        level++;
-    }
-}, 1000);
-</script>
-""", height=0)
-
-
-
 if __name__ == "__main__":
     main()
 
