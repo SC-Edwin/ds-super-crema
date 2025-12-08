@@ -208,21 +208,6 @@ def apply_theme():
     /* ======================================================= */
 
 
-    /* 한눈에 보기 버튼만 스타일 적용 */
-    div[id="hk-btn-anchor"] + div button[kind="secondary"] {
-        background: #222 !important;
-        color: #ddd !important;
-        border: 1px solid #444 !important;
-        font-size: 0.85rem !important;
-        padding: 0.35rem 0.9rem !important;
-        border-radius: 6px !important;
-    }
-
-    div[id="hk-btn-anchor"] + div button[kind="secondary"]:hover {
-        background: #333 !important;
-        border-color: #666 !important;
-    }
-
     </style>
     """, unsafe_allow_html=True)
 
@@ -243,32 +228,51 @@ def main():
 
     tab1, tab2, tab3, tab4 = st.tabs(["📊 모델링 시각화", "🚀 소재 업로드", "🌐 로컬라이징", "🎬 동영상 제작"])
     
-    with tab1:
-        try:
-            from modules.visualization import main as viz_main
-            viz_main.run()
-        except Exception as e:
-            st.error(f"시각화 모듈 로드 실패: {str(e)}")
+    # with tab1:
+    #     try:
+    #         from modules.visualization import main as viz_main
+    #         viz_main.run()
+    #     except Exception as e:
+    #         st.error(f"시각화 모듈 로드 실패: {str(e)}")
     
+    # # with tab2:
+    # #     st.info("🚧 업로드 자동화 모듈 개발 예정")
+
     # with tab2:
-    #     st.info("🚧 업로드 자동화 모듈 개발 예정")
+    #         try:
+    #             from modules.upload_automation import main as upload_main
+    #             upload_main.run()
+    #         except Exception as e:
+    #             st.error(f"소재 업로드 모듈 로드 실패: {str(e)}")
+    #             import traceback
+    #             st.code(traceback.format_exc())
+
+
+
+    with tab1:
+        st.markdown('<div id="viz-root">', unsafe_allow_html=True)
+        from modules.visualization import main as viz_main
+        viz_main.run()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+
 
     with tab2:
-            try:
-                from modules.upload_automation import main as upload_main
-                upload_main.run()
-            except Exception as e:
-                st.error(f"소재 업로드 모듈 로드 실패: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
-
+        st.markdown('<div id="upload-root">', unsafe_allow_html=True)
+        from modules.upload_automation import main as upload_main
+        upload_main.run()
+        st.markdown('</div>', unsafe_allow_html=True)
 
     
+
     with tab3:
         st.info("🚧 동영상 자동화 모듈 개발 예정")
 
+
     with tab4:
-        st.info("🚧 로컬라이징 자동화 Comming Soon 12/12")        
+        st.info("🚧 로컬라이징 자동화 Comming Soon 12/12")   
+             
     
     st.markdown("---")
     st.caption("© 2025 Super Crema - Supercent Marketing Intelligence Team")
