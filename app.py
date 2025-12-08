@@ -190,85 +190,7 @@ def apply_theme():
     h1, h2, h3 { color: #ffffff !important; }
     p, span, div { color: #cccccc !important; }
         
-    /* ========== Heny & Kyle 버튼 (블랙핑크 스타일) ========== */
-    div[data-testid="stButton"] button,
-    .stButton > button {
-        width: 55px !important;
-        height: 55px !important;
-        min-width: 55px !important;
-        min-height: 55px !important;
-        border-radius: 50% !important;
-        padding: 0 !important;  /* ← 8px → 0 */
-        
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
-        border: 2px solid #ff006e !important;
-        
-        box-shadow: 
-            0 4px 15px rgba(0, 0, 0, 0.8),
-            0 0 20px rgba(255, 0, 110, 0.4),
-            inset 0 2px 8px rgba(255, 255, 255, 0.1) !important;
-        
-        transition: all 0.3s ease !important;
-        display: flex !important;  /* ← 추가 */
-        align-items: center !important;  /* ← 추가 */
-        justify-content: center !important;  /* ← 추가 */
-    }
 
-    div[data-testid="stButton"] button p,
-    .stButton > button p {
-        font-size: 9px !important;  /* ← 12px → 9px */
-        font-weight: 700 !important;
-        line-height: 1.0 !important;  /* ← 1.1 → 1.0 */
-        letter-spacing: 0.3px !important;  /* ← 0.5px → 0.3px */
-        white-space: pre-line !important;
-        color: #ff006e !important;
-        text-shadow: 
-            0 0 10px rgba(255, 0, 110, 0.6),
-            0 0 20px rgba(255, 0, 110, 0.3) !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-                
-    div[data-testid="stButton"] button p,
-    .stButton > button p {
-        font-size: 9px !important;
-        font-weight: 700 !important;
-        line-height: 1.0 !important;
-        letter-spacing: 0.3px !important;
-        white-space: pre-line !important;
-        color: #ff006e !important;
-        text-shadow:
-            0 0 10px rgba(255, 0, 110, 0.6),
-            0 0 20px rgba(255, 0, 110, 0.3) !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-
-                                
-
-    div[data-testid="stButton"] button:hover,
-    .stButton > button:hover {
-        transform: translateY(-3px) scale(1.08) !important;
-        background: linear-gradient(135deg, #2a1a3e 0%, #261e4e 50%, #1f4470 100%) !important;
-        border-color: #ff4d8f !important;
-        box-shadow: 
-            0 8px 25px rgba(0, 0, 0, 0.9),
-            0 0 35px rgba(255, 0, 110, 0.7),
-            inset 0 3px 10px rgba(255, 0, 110, 0.2) !important;
-    }
-
-    div[data-testid="stButton"] button:hover p,
-    .stButton > button:hover p {
-        color: #ff77a0 !important;
-        text-shadow: 
-            0 0 15px rgba(255, 0, 110, 0.8),
-            0 0 25px rgba(255, 0, 110, 0.4) !important;
-    }
-
-    div[data-testid="stButton"] button:active,
-    .stButton > button:active {
-        transform: translateY(-1px) scale(1.03) !important;
-    }
 
     /* ========== Selectbox 안정화 (그림자 버그 제거) ========== */
     div[data-baseweb="select"] {
@@ -284,9 +206,11 @@ def apply_theme():
         box-shadow: none !important;
     }
     /* ======================================================= */
-                
+
+
     </style>
     """, unsafe_allow_html=True)
+
 
 
 def render_header():
@@ -300,38 +224,61 @@ def render_header():
 def main():
     apply_theme()
     render_header()
-    
+
+
     tab1, tab2, tab3, tab4 = st.tabs(["📊 모델링 시각화", "🚀 소재 업로드", "🌐 로컬라이징", "🎬 동영상 제작"])
     
-    with tab1:
-        try:
-            from modules.visualization import main as viz_main
-            viz_main.run()
-        except Exception as e:
-            st.error(f"시각화 모듈 로드 실패: {str(e)}")
+    # with tab1:
+    #     try:
+    #         from modules.visualization import main as viz_main
+    #         viz_main.run()
+    #     except Exception as e:
+    #         st.error(f"시각화 모듈 로드 실패: {str(e)}")
     
+    # # with tab2:
+    # #     st.info("🚧 업로드 자동화 모듈 개발 예정")
+
     # with tab2:
-    #     st.info("🚧 업로드 자동화 모듈 개발 예정")
+    #         try:
+    #             from modules.upload_automation import main as upload_main
+    #             upload_main.run()
+    #         except Exception as e:
+    #             st.error(f"소재 업로드 모듈 로드 실패: {str(e)}")
+    #             import traceback
+    #             st.code(traceback.format_exc())
+
+
+
+    with tab1:
+        st.markdown('<div id="viz-root">', unsafe_allow_html=True)
+        from modules.visualization import main as viz_main
+        viz_main.run()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+
 
     with tab2:
-            try:
-                from modules.upload_automation import main as upload_main
-                upload_main.run()
-            except Exception as e:
-                st.error(f"소재 업로드 모듈 로드 실패: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
-
+        st.markdown('<div id="upload-root">', unsafe_allow_html=True)
+        from modules.upload_automation import main as upload_main
+        upload_main.run()
+        st.markdown('</div>', unsafe_allow_html=True)
 
     
+
     with tab3:
         st.info("🚧 동영상 자동화 모듈 개발 예정")
 
+
     with tab4:
-        st.info("🚧 로컬라이징 자동화 Comming Soon 12/12")        
+        st.info("🚧 로컬라이징 자동화 Comming Soon 12/12")   
+             
     
     st.markdown("---")
     st.caption("© 2025 Super Crema - Supercent Marketing Intelligence Team")
+
+
+
 
 if __name__ == "__main__":
     main()
