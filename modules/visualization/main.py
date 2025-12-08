@@ -17,6 +17,8 @@ from google.cloud import bigquery
 
 from datetime import datetime, timedelta
 import pandas as pd
+import streamlit.components.v1 as components
+
 
 def get_friday_based_week(date):
     """
@@ -219,9 +221,37 @@ def run():
     col1, col2, col3, col_spacer = st.columns([1.2, 1.2, 1.5, 4])
 
 
+    # with col1:
+    #     all_apps = ['All'] + sorted(df['app'].unique().tolist())
+    #     selected_app = st.selectbox("📱 App", all_apps)
+
+    #     # 🔥 여기가 추가되는 부분
+    #     st.markdown("<div style='height:0.3rem'></div>", unsafe_allow_html=True)  # 살짝만 띄우기
+    #     clicked_hk = st.button(
+    #         "한눈에 보기",
+    #         key="ai_btn",
+    #         help="한눈에 보는 AI 추천",
+    #         use_container_width=True
+    #     )
+    #     if clicked_hk:
+    #         st.session_state['show_ai_recommendation'] = True
+
     with col1:
         all_apps = ['All'] + sorted(df['app'].unique().tolist())
         selected_app = st.selectbox("📱 App", all_apps)
+
+        # 🔥 Anchor 추가 (CSS가 버튼을 조절하기 위한 기준점)
+        st.markdown('<div id="hk-btn-anchor"></div>', unsafe_allow_html=True)
+
+        clicked_hk = st.button(
+            "한눈에 보기",
+            key="ai_btn",
+            help="한눈에 보는 AI 추천"
+        )
+        if clicked_hk:
+            st.session_state['show_ai_recommendation'] = True
+
+
 
     with col2:
         all_localities = ['All'] + sorted(df['locality'].unique().tolist())
@@ -251,29 +281,16 @@ def run():
             selected_week = match.group(1) if match else selected_week_label
                     
 
-    # Henry & Kyle 버튼 (필터 아래 왼쪽)
-    # [수정] 버튼이 숨을 쉴 수 있게 컬럼 너비를 0.5 -> 1.5로 넓혔습니다.
-    # # col_btn, col_spacer = st.columns([1.5, 7]) 
-    # col_btn, col_spacer = st.columns([0.3, 9.7])
 
 
-    # with col_btn:
-    #     # [수정] 줄바꿈(\n) 제거 & use_container_width=True 추가
-    #     if st.button("Heny & Kyle", key="ai_btn", help="Heny & Kyle AI 추천", use_container_width=True):
+
+
+    # btn_col1, btn_col2, btn_col3, btn_spacer = st.columns([1.2, 1.2, 1.5, 4])
+
+    # with btn_col1:
+    #     clicked_hk = st.button("한눈에 보기", key="ai_btn", help="한눈에 보는 AI 추천", use_container_width=True)
+    #     if clicked_hk:
     #         st.session_state['show_ai_recommendation'] = True
-
-    # Henry & Kyle 버튼 (필터와 같은 그리드에 정렬)
-    btn_col1, btn_col2, btn_col3, btn_spacer = st.columns([1.2, 1.2, 1.5, 4])
-
-    # 1열(📱 App가 시작하는 위치)에 맞게 배치
-    with btn_col1:
-        if st.button(
-            "Heny\n&\nKyle",  # ← 3줄로 나눔!
-            key="ai_btn",
-            help="Heny & Kyle AI 추천",
-            use_container_width=False,
-        ):
-            st.session_state['show_ai_recommendation'] = True
 
 
 
@@ -292,6 +309,8 @@ def run():
         st.warning("⚠️ 선택한 조건에 맞는 데이터가 없습니다.")
         return
     
+
+
 
     # ========== 팝업 모달 (Dialog) ==========
     @st.dialog("🤖 Henry & Kyle AI 추천", width="large")

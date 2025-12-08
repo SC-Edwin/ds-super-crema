@@ -190,68 +190,7 @@ def apply_theme():
     h1, h2, h3 { color: #ffffff !important; }
     p, span, div { color: #cccccc !important; }
         
-    # ========== Heny & Kyle 버튼 (블랙핑크 스타일) ========== */
-    div[data-testid="stButton"] button,
-    .stButton > button {
-        width: 55px !important;
-        height: 55px !important;
-        min-width: 55px !important;
-        min-height: 55px !important;
-        border-radius: 50% !important;
-        padding: 0 !important;  /* ← 8px → 0 */
-        
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
-        border: 2px solid #ff006e !important;
-        
-        box-shadow: 
-            0 4px 15px rgba(0, 0, 0, 0.8),
-            0 0 20px rgba(255, 0, 110, 0.4),
-            inset 0 2px 8px rgba(255, 255, 255, 0.1) !important;
-        
-        transition: all 0.3s ease !important;
-        display: flex !important;  /* ← 추가 */
-        align-items: center !important;  /* ← 추가 */
-        justify-content: center !important;  /* ← 추가 */
-    }
 
-    div[data-testid="stButton"] button p,
-    .stButton > button p {
-        font-size: 9px !important;  /* ← 12px → 9px */
-        font-weight: 700 !important;
-        line-height: 1.0 !important;  /* ← 1.1 → 1.0 */
-        letter-spacing: 0.3px !important;  /* ← 0.5px → 0.3px */
-        white-space: pre-line !important;
-        color: #ff006e !important;
-        text-shadow: 
-            0 0 10px rgba(255, 0, 110, 0.6),
-            0 0 20px rgba(255, 0, 110, 0.3) !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-
-    div[data-testid="stButton"] button:hover,
-    .stButton > button:hover {
-        transform: translateY(-3px) scale(1.08) !important;
-        background: linear-gradient(135deg, #2a1a3e 0%, #261e4e 50%, #1f4470 100%) !important;
-        border-color: #ff4d8f !important;
-        box-shadow: 
-            0 8px 25px rgba(0, 0, 0, 0.9),
-            0 0 35px rgba(255, 0, 110, 0.7),
-            inset 0 3px 10px rgba(255, 0, 110, 0.2) !important;
-    }
-
-    div[data-testid="stButton"] button:hover p,
-    .stButton > button:hover p {
-        color: #ff77a0 !important;
-        text-shadow: 
-            0 0 15px rgba(255, 0, 110, 0.8),
-            0 0 25px rgba(255, 0, 110, 0.4) !important;
-    }
-
-    div[data-testid="stButton"] button:active,
-    .stButton > button:active {
-        transform: translateY(-1px) scale(1.03) !important;
-    }
 
     /* ========== Selectbox 안정화 (그림자 버그 제거) ========== */
     div[data-baseweb="select"] {
@@ -267,9 +206,26 @@ def apply_theme():
         box-shadow: none !important;
     }
     /* ======================================================= */
-                
+
+
+    /* 한눈에 보기 버튼만 스타일 적용 */
+    div[id="hk-btn-anchor"] + div button[kind="secondary"] {
+        background: #222 !important;
+        color: #ddd !important;
+        border: 1px solid #444 !important;
+        font-size: 0.85rem !important;
+        padding: 0.35rem 0.9rem !important;
+        border-radius: 6px !important;
+    }
+
+    div[id="hk-btn-anchor"] + div button[kind="secondary"]:hover {
+        background: #333 !important;
+        border-color: #666 !important;
+    }
+
     </style>
     """, unsafe_allow_html=True)
+
 
 
 def render_header():
@@ -283,7 +239,8 @@ def render_header():
 def main():
     apply_theme()
     render_header()
-    
+
+
     tab1, tab2, tab3, tab4 = st.tabs(["📊 모델링 시각화", "🚀 소재 업로드", "🌐 로컬라이징", "🎬 동영상 제작"])
     
     with tab1:
@@ -315,6 +272,31 @@ def main():
     
     st.markdown("---")
     st.caption("© 2025 Super Crema - Supercent Marketing Intelligence Team")
+
+
+
+
+# 🔥🔥 여기!! (디버깅 DOM 출력 스크립트 삽입) 🔥🔥
+import streamlit.components.v1 as components
+
+components.html("""
+<script>
+setTimeout(() => {
+    const btn = document.querySelector('button[kind="secondary"]');
+    console.log("BTN:", btn);
+
+    let p = btn;
+    let level = 0;
+    while (p && level < 10) {
+        console.log("LEVEL", level, p);
+        p = p.parentElement;
+        level++;
+    }
+}, 1000);
+</script>
+""", height=0)
+
+
 
 if __name__ == "__main__":
     main()
