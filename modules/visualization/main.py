@@ -188,11 +188,9 @@ def run():
     
     st.markdown("""
         <style>
-        /* 한눈에 보기 버튼 - 네온 테두리 스타일 (viz 탭 전용) */
-        div[data-testid="stVerticalBlock"]:has(> .stElementContainer.st-key-ai_btn) 
+        /* 한눈에 보기 버튼 - 네온 테두리 스타일 */
         .st-key-ai_btn button[data-testid="stBaseButton-secondary"],
-        .st-key-ai_btn button[data-testid="stBaseButton-secondary"],
-        .st-key-ai_btn button.st-emotion-cache-1anq8dj,
+        .st-key-ai_btn button[kind="secondary"],
         .st-key-ai_btn button {
             background: rgba(26, 26, 26, 0.8) !important;
             color: #ffffff !important;
@@ -206,12 +204,12 @@ def run():
                 0 0 20px rgba(255, 0, 110, 0.2),
                 inset 0 0 10px rgba(255, 0, 110, 0.1) !important;
             transition: all 0.3s ease !important;
+            width: auto !important;
+            max-width: 120px !important;
         }
 
-        div[data-testid="stVerticalBlock"]:has(> .stElementContainer.st-key-ai_btn) 
         .st-key-ai_btn button[data-testid="stBaseButton-secondary"]:hover,
-        .st-key-ai_btn button[data-testid="stBaseButton-secondary"]:hover,
-        .st-key-ai_btn button.st-emotion-cache-1anq8dj:hover,
+        .st-key-ai_btn button[kind="secondary"]:hover,
         .st-key-ai_btn button:hover {
             background: rgba(26, 26, 26, 0.95) !important;
             border-color: #ff4d8f !important;
@@ -223,15 +221,15 @@ def run():
             transform: translateY(-2px) !important;
         }
         
-        /* 🔥 버튼 위 여백 줄이기 */
+        /* 버튼 위 여백 */
         .st-key-ai_btn {
-            margin-top: -1.2rem !important;
+            margin-top: -0.5rem !important;
         }
         
-        /* 🔥 viz 탭에서만 적용 (최우선 순위) */
-        div#viz-root .st-key-ai_btn button {
-            max-width: 150px !important;
+        /* 🔥 업로드 탭 버튼 스타일 차단 */
+        #viz-root .st-key-ai_btn button {
             width: auto !important;
+            max-width: 120px !important;
         }
         </style>
 
