@@ -178,40 +178,48 @@ def create_plotly_theme():
         'colorway': ['#ff006e', '#ff4d8f', '#ff77a0', '#a855f7', '#8b00ff']
     }
 
-
 def run():
     """시각화 모듈 메인"""
     
     st.markdown("""
         <style>
-        /* 🔥 viz 탭 한눈에 보기 버튼 - 최우선 순위 격리 */
-        #viz-root .st-key-ai_btn button[data-testid="stBaseButton-secondary"],
-        #viz-root .st-key-ai_btn button[kind="secondary"],
-        #viz-root .st-key-ai_btn button {
+        /* 🔥 viz 탭 한눈에 보기 버튼 - 초강력 격리 (우선순위 9999) */
+        body div[id="viz-root"] .st-key-ai_btn button,
+        body .st-key-ai_btn button[data-testid="stBaseButton-secondary"],
+        body .st-key-ai_btn button[kind="secondary"] {
+            /* 배경 & 색상 */
             background: rgba(26, 26, 26, 0.8) !important;
             color: #ffffff !important;
+            
+            /* 테두리 & 그림자 */
             border: 2px solid #ff006e !important;
             border-radius: 8px !important;
-            padding: 0.4rem 1rem !important;
-            font-size: 0.9rem !important;
-            font-weight: 600 !important;
             box-shadow: 
                 0 0 10px rgba(255, 0, 110, 0.4),
                 0 0 20px rgba(255, 0, 110, 0.2),
                 inset 0 0 10px rgba(255, 0, 110, 0.1) !important;
-            transition: all 0.3s ease !important;
             
-            /* 🚨 업로드 탭 스타일 차단 */
+            /* 크기 & 패딩 */
             width: auto !important;
             max-width: 120px !important;
-            min-width: auto !important;
+            min-width: 0 !important;
             height: auto !important;
-            min-height: auto !important;
+            min-height: 0 !important;
+            padding: 0.4rem 1rem !important;
+            
+            /* 폰트 */
+            font-size: 0.9rem !important;
+            font-weight: 600 !important;
+            
+            /* 애니메이션 */
+            transition: all 0.3s ease !important;
+            transform: none !important;
         }
 
-        #viz-root .st-key-ai_btn button[data-testid="stBaseButton-secondary"]:hover,
-        #viz-root .st-key-ai_btn button[kind="secondary"]:hover,
-        #viz-root .st-key-ai_btn button:hover {
+        /* 호버 */
+        body div[id="viz-root"] .st-key-ai_btn button:hover,
+        body .st-key-ai_btn button[data-testid="stBaseButton-secondary"]:hover,
+        body .st-key-ai_btn button[kind="secondary"]:hover {
             background: rgba(26, 26, 26, 0.95) !important;
             border-color: #ff4d8f !important;
             box-shadow: 
@@ -222,19 +230,27 @@ def run():
             transform: translateY(-2px) !important;
         }
         
-        /* 버튼 텍스트 스타일도 재정의 */
-        #viz-root .st-key-ai_btn button p {
+        /* 텍스트 스타일 강제 */
+        body .st-key-ai_btn button p {
             font-size: 0.9rem !important;
             font-weight: 600 !important;
             color: #ffffff !important;
             text-shadow: none !important;
-            letter-spacing: normal !important;
-            line-height: normal !important;
+            letter-spacing: 0 !important;
+            line-height: 1.4 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            white-space: nowrap !important;
         }
         
-        /* 버튼 위 여백 */
-        #viz-root .st-key-ai_btn {
+        /* 여백 */
+        body .st-key-ai_btn {
             margin-top: -0.5rem !important;
+        }
+        
+        /* 🚨 업로드 탭 스타일 무효화 (최고 우선순위) */
+        body #upload-root .st-key-ai_btn button {
+            all: revert !important;
         }
         </style>
 
