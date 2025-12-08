@@ -179,19 +179,15 @@ def create_plotly_theme():
     }
 
 
-
-# ================================
-# 메인 시각화
-# ================================
 def run():
     """시각화 모듈 메인"""
     
     st.markdown("""
         <style>
-        /* 한눈에 보기 버튼 - 네온 테두리 스타일 */
-        .st-key-ai_btn button[data-testid="stBaseButton-secondary"],
-        .st-key-ai_btn button[kind="secondary"],
-        .st-key-ai_btn button {
+        /* 🔥 viz 탭 한눈에 보기 버튼 - 최우선 순위 격리 */
+        #viz-root .st-key-ai_btn button[data-testid="stBaseButton-secondary"],
+        #viz-root .st-key-ai_btn button[kind="secondary"],
+        #viz-root .st-key-ai_btn button {
             background: rgba(26, 26, 26, 0.8) !important;
             color: #ffffff !important;
             border: 2px solid #ff006e !important;
@@ -204,13 +200,18 @@ def run():
                 0 0 20px rgba(255, 0, 110, 0.2),
                 inset 0 0 10px rgba(255, 0, 110, 0.1) !important;
             transition: all 0.3s ease !important;
+            
+            /* 🚨 업로드 탭 스타일 차단 */
             width: auto !important;
             max-width: 120px !important;
+            min-width: auto !important;
+            height: auto !important;
+            min-height: auto !important;
         }
 
-        .st-key-ai_btn button[data-testid="stBaseButton-secondary"]:hover,
-        .st-key-ai_btn button[kind="secondary"]:hover,
-        .st-key-ai_btn button:hover {
+        #viz-root .st-key-ai_btn button[data-testid="stBaseButton-secondary"]:hover,
+        #viz-root .st-key-ai_btn button[kind="secondary"]:hover,
+        #viz-root .st-key-ai_btn button:hover {
             background: rgba(26, 26, 26, 0.95) !important;
             border-color: #ff4d8f !important;
             box-shadow: 
@@ -221,15 +222,19 @@ def run():
             transform: translateY(-2px) !important;
         }
         
-        /* 버튼 위 여백 */
-        .st-key-ai_btn {
-            margin-top: -0.5rem !important;
+        /* 버튼 텍스트 스타일도 재정의 */
+        #viz-root .st-key-ai_btn button p {
+            font-size: 0.9rem !important;
+            font-weight: 600 !important;
+            color: #ffffff !important;
+            text-shadow: none !important;
+            letter-spacing: normal !important;
+            line-height: normal !important;
         }
         
-        /* 🔥 업로드 탭 버튼 스타일 차단 */
-        #viz-root .st-key-ai_btn button {
-            width: auto !important;
-            max-width: 120px !important;
+        /* 버튼 위 여백 */
+        #viz-root .st-key-ai_btn {
+            margin-top: -0.5rem !important;
         }
         </style>
 
@@ -923,56 +928,6 @@ def run():
     st.markdown("---")
     st.caption(f"🕐 Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} KST")
 
-
-    # 🔥 개선된 디버깅: DOM 로딩 기다리기
-    components.html("""
-    <script>
-    let attempts = 0;
-    const maxAttempts = 10;
-    
-    function findButton() {
-        attempts++;
-        console.log(`🔍 시도 ${attempts}/${maxAttempts}`);
-        
-        const allButtons = document.querySelectorAll('button');
-        console.log("전체 버튼 개수:", allButtons.length);
-        
-        let found = false;
-        allButtons.forEach((btn, idx) => {
-            if (btn.textContent.includes('한눈에 보기')) {
-                found = true;
-                console.log("🎯 타겟 버튼 발견!", idx);
-                console.log("- textContent:", btn.textContent);
-                console.log("- kind attribute:", btn.getAttribute('kind'));
-                console.log("- data-testid:", btn.getAttribute('data-testid'));
-                console.log("- class:", btn.className);
-                console.log("- computed background:", window.getComputedStyle(btn).background);
-                
-                // 부모 구조
-                let parent = btn.parentElement;
-                let level = 0;
-                while (parent && level < 5) {
-                    console.log(`  부모 ${level}:`, parent.tagName, parent.className, parent.getAttribute('data-testid'));
-                    parent = parent.parentElement;
-                    level++;
-                }
-            }
-        });
-        
-        if (!found && attempts < maxAttempts) {
-            console.log("⏳ 버튼 못 찾음, 1초 후 재시도...");
-            setTimeout(findButton, 1000);
-        } else if (!found) {
-            console.log("❌ 최대 시도 횟수 초과");
-        } else {
-            console.log("✅ 디버깅 완료");
-        }
-    }
-    
-    // 3초 후 시작
-    setTimeout(findButton, 3000);
-    </script>
-    """, height=0)
 
 
 if __name__ == "__main__":
