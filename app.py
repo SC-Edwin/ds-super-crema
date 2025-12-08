@@ -259,7 +259,6 @@ def main():
 
 
     with tab2:
-<<<<<<< HEAD
         try:
             from modules.upload_automation import main as upload_main
             upload_main.run()
@@ -267,13 +266,7 @@ def main():
             st.error(f"소재 업로드 모듈 로드 실패: {str(e)}")
             import traceback
             st.code(traceback.format_exc())
-=======
-        st.markdown('<div id="upload-root">', unsafe_allow_html=True)
-        from modules.upload_automation import main as upload_main
-        upload_main.run()
-        st.markdown('</div>', unsafe_allow_html=True)
 
->>>>>>> origin/main
     
 
     with tab3:
