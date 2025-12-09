@@ -20,6 +20,12 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------
 # Unity config from secrets.toml
 # --------------------------------------------------------------------
+# --------------------------------------------------------------------
+# Unity config from secrets.toml
+# --------------------------------------------------------------------
+# --------------------------------------------------------------------
+# Unity config from secrets.toml
+# --------------------------------------------------------------------
 unity_cfg = st.secrets.get("unity", {}) or {}
 
 UNITY_ORG_ID_DEFAULT = unity_cfg.get("organization_id", "")
@@ -27,28 +33,288 @@ UNITY_CLIENT_ID_DEFAULT = unity_cfg.get("client_id", "")
 UNITY_CLIENT_SECRET_DEFAULT = unity_cfg.get("client_secret", "")
 UNITY_AUTH_HEADER_DEFAULT = unity_cfg.get("authorization_header", "")
 
-_raw_game_ids = unity_cfg.get("game_ids", {}) or {}
-_raw_campaign_ids = unity_cfg.get("campaign_ids", {}) or {}
+# Raw sections from secrets.toml
+_raw_game_ids      = unity_cfg.get("game_ids", {}) or {}       # per-game app ids + maybe campaign-sets (XP HERO)
+_raw_campaign_sets = unity_cfg.get("campaign_sets", {}) or {}  # per-game campaign-set IDs (Dino, Snake, Pizza…)
+_raw_campaign_ids  = unity_cfg.get("campaign_ids", {}) or {}   # per-game campaign IDs
 
-UNITY_GAME_IDS: Dict[str, str] = {
-    str(game): str(title_id)
-    for game, title_id in _raw_game_ids.items()
-}
+# --------------------------------------------------------------------
+# App (title) IDs & Campaign-set IDs per game (multi-platform)
+# --------------------------------------------------------------------
+# We want:
+#   UNITY_APP_IDS_ALL["XP HERO"]           = {"aos": "500230240", "ios": "500236189"}
+#   UNITY_CAMPAIGN_SET_IDS_ALL["XP HERO"]  = {"aos": "67d0...",    "ios": "683d..."}
+#
+UNITY_APP_IDS_ALL: Dict[str, Dict[str, str]] = {}
+UNITY_CAMPAIGN_SET_IDS_ALL: Dict[str, Dict[str, str]] = {}
 
+# Defaults for operator mode:
+# - UNITY_GAME_IDS[game]: default app (title) ID (AOS if present)
+# - UNITY_CAMPAIGN_SET_IDS_DEFAULT[game]: default campaign-set ID (AOS if present)
+UNITY_GAME_IDS: Dict[str, str] = {}
+UNITY_CAMPAIGN_SET_IDS_DEFAULT: Dict[str, str] = {}
+
+# Campaign IDs per game (operator mode default uses AOS entry)
+UNITY_CAMPAIGN_IDS_ALL: Dict[str, Dict[str, List[str]]] = {}
 UNITY_CAMPAIGN_IDS: Dict[str, List[str]] = {}
-for game, val in _raw_campaign_ids.items():
-    if isinstance(val, dict) and "ids" in val:
-        UNITY_CAMPAIGN_IDS[str(game)] = [str(x) for x in (val.get("ids") or [])]
-    elif isinstance(val, (list, tuple)):
-        UNITY_CAMPAIGN_IDS[str(game)] = [str(x) for x in val]
-    elif isinstance(val, str):
-        UNITY_CAMPAIGN_IDS[str(game)] = [val]
 
 UNITY_BASE_URL = "https://services.api.unity.com/advertise/v1"
 
 # --------------------------------------------------------------------
-# Session-state helpers
+# Build derived maps from unity_cfg (for defaults)
 # --------------------------------------------------------------------
+
+# 1) App (title) IDs & campaign-set IDs per game (multi-platform)
+for game, val in _raw_game_ids.items():
+    gname = str(game)
+    app_ids: Dict[str, str] = {}
+    camp_sets: Dict[str, str] = {}
+
+    if isinstance(val, dict):
+        for k, v in val.items():
+            key = str(k)
+            sval = str(v)
+
+            # App (title) IDs
+            if key in ("aos_app_id", "android_app_id"):
+                app_ids["aos"] = sval
+            elif key in ("ios_app_id", "ios_appid"):
+                app_ids["ios"] = sval
+
+            # Campaign-set IDs in game_ids (XP HERO style)
+            elif key in ("aos", "aos_campaign_set"):
+                camp_sets["aos"] = sval
+            elif key in ("ios", "ios_campaign_set"):
+                camp_sets["ios"] = sval
+
+    elif isinstance(val, str):
+        # Old-style single ID: treat as AOS app ID
+        app_ids["aos"] = str(val)
+
+    if app_ids:
+        UNITY_APP_IDS_ALL[gname] = app_ids
+        # default app ID for operator mode (prefer AOS)
+        UNITY_GAME_IDS[gname] = app_ids.get("aos") or next(iter(app_ids.values()))
+
+    if camp_sets:
+        existing = UNITY_CAMPAIGN_SET_IDS_ALL.get(gname, {})
+        existing.update(camp_sets)
+        UNITY_CAMPAIGN_SET_IDS_ALL[gname] = existing
+        if gname not in UNITY_CAMPAIGN_SET_IDS_DEFAULT:
+            UNITY_CAMPAIGN_SET_IDS_DEFAULT[gname] = camp_sets.get("aos") or next(
+                iter(camp_sets.values())
+            )
+
+# 2) Campaign-set IDs from unity.campaign_sets (Dino, Snake, Pizza, ...)
+for game, val in _raw_campaign_sets.items():
+    gname = str(game)
+    if not isinstance(val, dict):
+        continue
+
+    camp_sets: Dict[str, str] = {}
+    for k, v in val.items():
+        key = str(k)
+        sval = str(v)
+        if key in ("aos", "aos_campaign_set"):
+            camp_sets["aos"] = sval
+        elif key in ("ios", "ios_campaign_set"):
+            camp_sets["ios"] = sval
+
+    if not camp_sets:
+        continue
+
+    existing = UNITY_CAMPAIGN_SET_IDS_ALL.get(gname, {})
+    existing.update(camp_sets)
+    UNITY_CAMPAIGN_SET_IDS_ALL[gname] = existing
+
+    if gname not in UNITY_CAMPAIGN_SET_IDS_DEFAULT:
+        UNITY_CAMPAIGN_SET_IDS_DEFAULT[gname] = camp_sets.get("aos") or next(
+            iter(camp_sets.values())
+        )
+
+# 3) Campaign IDs per game (operator-mode default uses AOS entry)
+for game, val in _raw_campaign_ids.items():
+    gname = str(game)
+    if isinstance(val, dict):
+        plat_map: Dict[str, List[str]] = {}
+        for plat, v in val.items():
+            if isinstance(v, (list, tuple)):
+                plat_map[str(plat)] = [str(x) for x in v]
+            elif isinstance(v, str):
+                plat_map[str(plat)] = [v]
+        if plat_map:
+            UNITY_CAMPAIGN_IDS_ALL[gname] = plat_map
+            # Default: prefer "aos", else first platform
+            UNITY_CAMPAIGN_IDS[gname] = plat_map.get("aos") or next(iter(plat_map.values()))
+    elif isinstance(val, (list, tuple)):
+        lst = [str(x) for x in val]
+        UNITY_CAMPAIGN_IDS_ALL[gname] = {"default": lst}
+        UNITY_CAMPAIGN_IDS[gname] = lst
+    elif isinstance(val, str):
+        UNITY_CAMPAIGN_IDS_ALL[gname] = {"default": [val]}
+        UNITY_CAMPAIGN_IDS[gname] = [val]
+# --------------------------------------------------------------------
+# Internal helpers to build & use maps
+# --------------------------------------------------------------------
+
+
+def _normalize_game_name(name: str) -> str:
+    """Normalize game name for tolerant matching (remove spaces, lowercase)."""
+    return "".join(str(name).split()).lower()
+
+
+
+def get_unity_app_id(game: str, platform: str = "aos") -> str:
+    """
+    Return Unity app (title) ID for a given game + platform.
+    """
+    game_ids_section = unity_cfg.get("game_ids")
+    
+    # ❌ 삭제: isinstance(game_ids_section, dict) 체크
+    if not game_ids_section:
+        raise RuntimeError(f"❌ unity.game_ids is missing")
+    
+    # Exact key match
+    if game in game_ids_section:
+        block = game_ids_section[game]
+        # ❌ 삭제: isinstance(block, dict) 체크
+        
+        key = "aos_app_id" if platform == "aos" else "ios_app_id"
+        val = block.get(key)
+        
+        if val is not None:
+            result = str(val).strip()
+            if result:
+                return result
+    
+    # Normalized key match
+    target = _normalize_game_name(game)
+    for k in game_ids_section:
+        if _normalize_game_name(k) == target:
+            v = game_ids_section[k]
+            key = "aos_app_id" if platform == "aos" else "ios_app_id"
+            val = v.get(key) if hasattr(v, 'get') else None
+            
+            if val is not None:
+                result = str(val).strip()
+                if result:
+                    return result
+    
+    # Fallback
+    legacy = UNITY_GAME_IDS.get(game)
+    if legacy:
+        return str(legacy).strip()
+    
+    raise RuntimeError(
+        f"❌ No app_id for '{game}' [{platform}]\n"
+        f"Available: {list(game_ids_section.keys()) if hasattr(game_ids_section, 'keys') else 'N/A'}"
+    )
+
+# ━━━ unity_ads.py에서 이 함수를 완전히 교체하세요 ━━━
+
+def get_unity_campaign_set_id(game: str, platform: str = "aos") -> str:
+    """
+    Return Unity campaign-set ID for a given game + platform.
+    """
+    plat = "aos" if platform == "aos" else "ios"
+    
+    # 1) Check unity.game_ids (XP HERO)
+    game_ids_section = unity_cfg.get("game_ids")
+    
+    if game_ids_section:
+        # Exact key
+        if game in game_ids_section:
+            block = game_ids_section[game]
+            
+            # Try direct key: 'aos' or 'ios'
+            val = block.get(plat) if hasattr(block, 'get') else None
+            if val is not None:
+                result = str(val).strip()
+                if result:
+                    return result
+            
+            # Try alternative: 'aos_campaign_set' or 'ios_campaign_set'
+            val = block.get(f"{plat}_campaign_set") if hasattr(block, 'get') else None
+            if val is not None:
+                result = str(val).strip()
+                if result:
+                    return result
+        
+        # Normalized key
+        target = _normalize_game_name(game)
+        for k in game_ids_section:
+            if _normalize_game_name(k) == target:
+                v = game_ids_section[k]
+                if hasattr(v, 'get'):
+                    val = v.get(plat) or v.get(f"{plat}_campaign_set")
+                    if val is not None:
+                        result = str(val).strip()
+                        if result:
+                            return result
+    
+    # 2) Check unity.campaign_sets (other games)
+    cs_section = unity_cfg.get("campaign_sets")
+    
+    if cs_section:
+        # Exact key
+        if game in cs_section:
+            block = cs_section[game]
+            
+            if hasattr(block, 'get'):
+                val = block.get(plat) or block.get(f"{plat}_campaign_set")
+                if val is not None:
+                    result = str(val).strip()
+                    if result:
+                        return result
+        
+        # Normalized key
+        target = _normalize_game_name(game)
+        for k in cs_section:
+            if _normalize_game_name(k) == target:
+                v = cs_section[k]
+                if hasattr(v, 'get'):
+                    val = v.get(plat) or v.get(f"{plat}_campaign_set")
+                    if val is not None:
+                        result = str(val).strip()
+                        if result:
+                            return result
+    
+    raise RuntimeError(
+        f"❌ No campaign-set ID for '{game}' [{platform}]"
+    )
+
+def debug_unity_ids(game: str = "XP HERO") -> None:
+    """
+    Streamlit debug helper: shows exactly what unity_cfg contains
+    and what IDs we resolve for a given game.
+    """
+    st.write("unity_cfg.game_ids keys:", list((unity_cfg.get("game_ids") or {}).keys()))
+    st.write("unity_cfg.campaign_sets keys:", list((unity_cfg.get("campaign_sets") or {}).keys()))
+
+    game_ids_section = unity_cfg.get("game_ids") or {}
+    cs_section = unity_cfg.get("campaign_sets") or {}
+
+    block_g = game_ids_section.get(game)
+    block_cs = cs_section.get(game)
+
+    st.write("game_ids block (raw, exact):", block_g)
+    st.write("campaign_sets block (raw, exact):", block_cs)
+
+    try:
+        aos_app = get_unity_app_id(game, "aos")
+    except Exception as e:
+        aos_app = f"ERROR: {e}"
+
+    try:
+        aos_cs = get_unity_campaign_set_id(game, "aos")
+    except Exception as e:
+        aos_cs = f"ERROR: {e}"
+
+    st.write("get_unity_app_id(game, 'aos'):", aos_app)
+    st.write("get_unity_campaign_set_id(game, 'aos'):", aos_cs)
+
+
+
 def _ensure_unity_settings_state() -> None:
     if "unity_settings" not in st.session_state:
         st.session_state.unity_settings = {}
@@ -76,7 +342,7 @@ def render_unity_settings_panel(right_col, game: str, idx: int) -> None:
 
         if st.session_state.get(title_key) == "" and secret_title_id:
             st.session_state[title_key] = secret_title_id
-        if (not secret_campaign_ids and st.session_state.get(campaign_key) == "" and default_campaign_id_val):
+        if secret_campaign_ids and not st.session_state.get(campaign_key) and default_campaign_id_val:
             st.session_state[campaign_key] = default_campaign_id_val
 
         current_title_id = cur.get("title_id") or st.session_state.get(title_key) or secret_title_id
@@ -897,3 +1163,4 @@ def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List
         "removed_assignments": removed_ids,
         "errors": errors,
     }
+

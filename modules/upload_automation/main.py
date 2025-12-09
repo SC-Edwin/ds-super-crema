@@ -46,7 +46,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
-
+ 
 # =========================================================
 # 3. 디버깅 및 모듈 임포트 (수정된 부분)
 # =========================================================
@@ -88,12 +88,24 @@ from modules.upload_automation import facebook_ads as fb_ops  # ← 수정
 from modules.upload_automation import unity_ads as uni_ops  # ← 수정
 
 # 3. Marketer Modules (Simplified/Restricted)
+# 3. Marketer Modules (Simplified/Restricted)
 try:
     from modules.upload_automation import fb as fb_marketer  # ← 수정
     from modules.upload_automation import uni as uni_marketer  # ← 수정
 except ImportError as e:
     st.error(f"Module Import Error: {e}. Please ensure fb.py and uni.py are in {current_dir}")
     st.stop()
+
+# Optional: safe debug helper (won't crash app even if IDs are missing)
+try:
+    st.write("unity_cfg", uni_ops.unity_cfg)
+    # This prints game_ids / campaign_sets blocks and then calls
+    # get_unity_app_id / get_unity_campaign_set_id **inside try/except**
+    # so any error is shown as text, not an exception.
+    uni_ops.debug_unity_ids("XP HERO")
+except Exception as e:
+    st.warning(f"Unity debug helper failed: {e}")
+    st.error(f"Unity debug failed: {e}")
 
 
 # ----- CONFIG & STATE --------------------------------------------------
@@ -174,6 +186,22 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
     st.title(title)
     
     # --- [MARKETER ONLY] Add New Game Sidebar Form ---
+    if is_marketer:
+        with st.expander("🔍 Unity Config Debug (XP HERO)", expanded=False):
+            try:
+                st.write("**unity_cfg.game_ids:**")
+                st.json(dict(uni_ops.unity_cfg.get("game_ids", {})))
+                
+                st.write("**Test get_unity_app_id('XP HERO', 'aos'):**")
+                app_id = uni_ops.get_unity_app_id("XP HERO", "aos")
+                st.success(f"✅ App ID: {app_id}")
+                
+                st.write("**Test get_unity_campaign_set_id('XP HERO', 'aos'):**")
+                cs_id = uni_ops.get_unity_campaign_set_id("XP HERO", "aos")
+                st.success(f"✅ Campaign Set ID: {cs_id}")
+                
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
     if is_marketer:
         with st.sidebar:
             st.divider()
@@ -323,19 +351,23 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
             # =========================
             # RIGHT COLUMN: Settings
             # =========================
+            # ━━━ 수정 후 (XP HERO만 Marketer UI) ━━━
+            # RIGHT COLUMN: Settings
             if platform == "Facebook":
                 with right_col:
-                    # FIX: Create the container object specifically
                     fb_card = st.container(border=True)
-                    # Pass the CONTAINER object (fb_card), NOT the module (st)
                     fb_module.render_facebook_settings_panel(fb_card, game, i)
 
             elif platform == "Unity Ads":
                 with right_col:
-                    # FIX: Create the container object specifically
                     unity_card = st.container(border=True)
-                    # Pass the CONTAINER object (unity_card), NOT the module (st)
-                    unity_module.render_unity_settings_panel(unity_card, game, i)
+                    
+                    # XP HERO만 Marketer Mode 지원
+                    if is_marketer and game == "XP HERO":
+                        unity_module.render_unity_settings_panel(unity_card, game, i)
+                    else:
+                        # 다른 게임들은 기존 Operation Mode 사용
+                        uni_ops.render_unity_settings_panel(unity_card, game, i)
 
             # =========================
             # EXECUTION LOGIC
@@ -600,3 +632,5 @@ def run():
 # Allow standalone execution
 if __name__ == "__main__":
     run()
+
+    
