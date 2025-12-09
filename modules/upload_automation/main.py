@@ -96,16 +96,16 @@ except ImportError as e:
     st.error(f"Module Import Error: {e}. Please ensure fb.py and uni.py are in {current_dir}")
     st.stop()
 
-# Optional: safe debug helper (won't crash app even if IDs are missing)
-try:
-    st.write("unity_cfg", uni_ops.unity_cfg)
-    # This prints game_ids / campaign_sets blocks and then calls
-    # get_unity_app_id / get_unity_campaign_set_id **inside try/except**
-    # so any error is shown as text, not an exception.
-    uni_ops.debug_unity_ids("XP HERO")
-except Exception as e:
-    st.warning(f"Unity debug helper failed: {e}")
-    st.error(f"Unity debug failed: {e}")
+# # Optional: safe debug helper (won't crash app even if IDs are missing)
+# try:
+#     st.write("unity_cfg", uni_ops.unity_cfg)
+#     # This prints game_ids / campaign_sets blocks and then calls
+#     # get_unity_app_id / get_unity_campaign_set_id **inside try/except**
+#     # so any error is shown as text, not an exception.
+#     uni_ops.debug_unity_ids("XP HERO")
+# except Exception as e:
+#     st.warning(f"Unity debug helper failed: {e}")
+#     st.error(f"Unity debug failed: {e}")
 
 
 # ----- CONFIG & STATE --------------------------------------------------
@@ -362,12 +362,17 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 with right_col:
                     unity_card = st.container(border=True)
                     
-                    # XP HERO만 Marketer Mode 지원
-                    if is_marketer and game == "XP HERO":
-                        unity_module.render_unity_settings_panel(unity_card, game, i)
-                    else:
-                        # 다른 게임들은 기존 Operation Mode 사용
-                        uni_ops.render_unity_settings_panel(unity_card, game, i)
+                    try:
+                        # XP HERO만 Marketer Mode 지원
+                        if is_marketer and game == "XP HERO":
+                            unity_module.render_unity_settings_panel(unity_card, game, i, is_marketer=True)
+                        else:
+                            # 다른 게임들은 기존 Operation Mode 사용
+                            uni_ops.render_unity_settings_panel(unity_card, game, i, is_marketer=False)
+                    except Exception as e:
+                        st.error(f"Unity 설정 패널 로드 실패: {e}")
+                        import traceback
+                        st.code(traceback.format_exc())
 
             # =========================
             # EXECUTION LOGIC

@@ -25,9 +25,14 @@ from unity_ads import (
     get_unity_campaign_set_id,
     _unity_get,
     _unity_list_playable_creatives,
-    get_unity_settings,
+    get_unity_settings as _get_unity_settings,
     _ensure_unity_settings_state,
 )
+
+# Re-export for compatibility
+def get_unity_settings(game: str) -> Dict:
+    """Re-export from unity_ads for compatibility."""
+    return _get_unity_settings(game)
 
 logger = logging.getLogger(__name__)
 UNITY_BASE_URL = "https://services.api.unity.com/advertise/v1"
@@ -140,7 +145,7 @@ def fetch_playables_for_game(game: str, platform: str = "aos") -> List[Dict]:
 # -------------------------------------------------------------------------
 # 3. Marketer-mode Unity settings panel
 # -------------------------------------------------------------------------
-def render_unity_settings_panel(container, game: str, idx: int) -> None:
+def render_unity_settings_panel(container, game: str, idx: int, is_marketer: bool = True) -> None:
     """
     Marketer-mode Unity panel (XP HERO only)
     """

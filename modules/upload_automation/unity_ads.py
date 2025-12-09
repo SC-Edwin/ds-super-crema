@@ -326,14 +326,25 @@ def get_unity_settings(game: str) -> Dict:
 # --------------------------------------------------------------------
 # Unity settings UI
 # --------------------------------------------------------------------
-def render_unity_settings_panel(right_col, game: str, idx: int) -> None:
+def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: bool = False) -> None:
     _ensure_unity_settings_state()
 
     with right_col:
         st.markdown(f"#### {game} Unity Settings")
         cur = st.session_state.unity_settings.get(game, {})
 
-        secret_title_id = str(UNITY_GAME_IDS.get(game, ""))
+        # Test Mode: campaign set ID를 title_id로 사용
+        # Marketer Mode: app ID를 title_id로 사용
+        if is_marketer:
+            secret_title_id = str(UNITY_GAME_IDS.get(game, ""))
+        else:
+            # Test Mode: campaign set ID를 title_id로 사용
+            try:
+                secret_title_id = get_unity_campaign_set_id(game, "aos")
+            except Exception as e:
+                logger.warning(f"Failed to get campaign set ID for {game}: {e}")
+                secret_title_id = str(UNITY_GAME_IDS.get(game, ""))
+        
         secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
         default_campaign_id_val = secret_campaign_ids[0] if secret_campaign_ids else ""
 
@@ -388,20 +399,78 @@ def render_unity_settings_panel(right_col, game: str, idx: int) -> None:
         try:
             org_for_list = (unity_org_id or UNITY_ORG_ID_DEFAULT).strip()
             title_for_list = (unity_title_id or secret_title_id).strip()
+            campaign_for_list = (unity_campaign_id or "").strip()
 
-            if org_for_list and title_for_list:
-                # STRICT FILTER: Playables only
-                playable_creatives = _unity_list_playable_creatives(org_id=org_for_list, title_id=title_for_list)
-                for cr in playable_creatives:
-                    cr_id = str(cr.get("id") or "")
-                    cr_name = cr.get("name") or "(no name)"
-                    cr_type = cr.get("type", "")
-                    if not cr_id: continue
-                    label = f"{cr_name} ({cr_type}) [{cr_id}]"
-                    existing_labels.append(label)
-                    existing_id_by_label[label] = cr_id
+            if org_for_list:
+                # Marketer: App 레벨 전체 조회
+                # Operator (Test Mode): Campaign Set ID를 title_id로 사용하여 App 레벨에서 playable 조회
+                if is_marketer:
+                    if not title_for_list:
+                        st.warning("⚠️ Title ID가 설정되지 않았습니다.")
+                        playable_creatives = []
+                    else:
+                        playable_creatives = _unity_list_playable_creatives(
+                            org_id=org_for_list, 
+                            title_id=title_for_list
+                        )
+                else:
+                    # Test Mode: campaign set ID를 title_id로 사용
+                    # unity.game_ids의 aos 값이 campaign set ID이므로 이를 title_id로 사용
+                    try:
+                        campaign_set_id = get_unity_campaign_set_id(game, "aos")
+                        logger.info(f"Test Mode: Using campaign set ID as title_id: {campaign_set_id} for game: {game}")
+                        with st.expander("🔍 Debug: Unity Playable 조회 정보", expanded=False):
+                            st.write(f"**Game:** {game}")
+                            st.write(f"**Org ID:** {org_for_list}")
+                            st.write(f"**Campaign Set ID (title_id로 사용):** {campaign_set_id}")
+                        playable_creatives = _unity_list_playable_creatives(
+                            org_id=org_for_list,
+                            title_id=campaign_set_id
+                        )
+                        logger.info(f"Found {len(playable_creatives)} playables using campaign set ID")
+                        if len(playable_creatives) == 0:
+                            st.info(f"ℹ️ Campaign Set ID `{campaign_set_id}`에서 playable을 찾지 못했습니다. Unity에 playable이 등록되어 있는지 확인하세요.")
+                    except Exception as e:
+                        logger.warning(f"Failed to get campaign set ID for {game}, error: {e}")
+                        import traceback
+                        logger.warning(traceback.format_exc())
+                        st.error(f"❌ Campaign Set ID 조회 실패: {e}")
+                        with st.expander("🔍 에러 상세 정보", expanded=False):
+                            st.code(traceback.format_exc())
+                        # Fallback: 기존 title_id 사용 (있는 경우)
+                        if title_for_list:
+                            logger.info(f"Fallback: Using title_id: {title_for_list}")
+                            st.info(f"⚠️ Fallback: Title ID `{title_for_list}`를 사용합니다.")
+                            try:
+                                playable_creatives = _unity_list_playable_creatives(
+                                    org_id=org_for_list,
+                                    title_id=title_for_list
+                                )
+                            except Exception as e2:
+                                logger.warning(f"Fallback also failed: {e2}")
+                                playable_creatives = []
+                                st.error(f"❌ Fallback도 실패: {e2}")
+                        else:
+                            playable_creatives = []
+                            st.warning("⚠️ Title ID도 설정되지 않아 playable을 조회할 수 없습니다.")
+                
+                if playable_creatives:
+                    for cr in playable_creatives:
+                        cr_id = str(cr.get("id") or "")
+                        cr_name = cr.get("name") or "(no name)"
+                        cr_type = cr.get("type", "")
+                        if not cr_id: continue
+                        label = f"{cr_name} ({cr_type}) [{cr_id}]"
+                        existing_labels.append(label)
+                        existing_id_by_label[label] = cr_id
+                else:
+                    logger.info(f"No playables found for game: {game}, org: {org_for_list}")
         except Exception as e:
-            st.info(f"Unity playable 목록을 불러오지 못했습니다: {e}")
+            import traceback
+            error_msg = f"Unity playable 목록을 불러오지 못했습니다: {e}"
+            logger.exception(error_msg)
+            st.error(f"❌ {error_msg}")
+            st.code(traceback.format_exc())
 
         try:
             existing_default_idx = existing_labels.index(prev_existing_label)
@@ -495,6 +564,68 @@ def unity_creative_name_from_filename(filename: str) -> str:
     m = re.search(r"(\d{3})(?!.*\d)", stem)
     code = m.group(1) if m else "000"
     return f"video{code}"
+
+def _extract_video_part_from_base(base: str) -> str:
+    """
+    Extract video part from base name (e.g., 'video001' from 'video001_1080x1920').
+    Returns the part that starts with 'video' followed by digits.
+    """
+    # Try to find 'video' followed by digits
+    m = re.search(r"(video\d+)", base, re.IGNORECASE)
+    if m:
+        return m.group(1).lower()
+    # Fallback: use unity_creative_name_from_filename logic
+    m = re.search(r"(\d{3})(?!.*\d)", base)
+    code = m.group(1) if m else "000"
+    return f"video{code}"
+
+def _clean_playable_name_for_pack(playable_name_or_label: str) -> str:
+    """
+    Clean playable name for creative pack naming.
+    
+    Rules:
+    1. If label format "name (type) [id]", extract just the name part
+    2. If playable name starts with something before underscore (e.g., "hello_playablexxx"),
+       remove everything before and including the first underscore (result: "playablexxx")
+    3. Remove "_unityads.html" or ".html" suffix
+    4. Remove all underscores
+    5. Return cleaned name
+    
+    Examples:
+    - "playable_003_escalater_감옥_unityads.html" -> "playable003escalater감옥"
+    - "playable_003_escalater_감옥.html" -> "playable003escalater감옥"
+    - "hello_playable_003" -> "playable003"
+    - "playable_name (playable) [12345]" -> "playablename"
+    """
+    if not playable_name_or_label:
+        return ""
+    
+    # Step 1: Extract name from label format "name (type) [id]"
+    name = playable_name_or_label.split(" (")[0].strip()
+    
+    # Step 2: Remove file extension and suffixes (.html, _unityads.html, _Default Version, _Default Creative) - do this first
+    name = re.sub(r"_unityads\.html$", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\.html$", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"_Default Version$", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"_Default Creative$", "", name, flags=re.IGNORECASE)
+    
+    # Step 3: If there's text before the first underscore and 'playable' appears after it,
+    # remove everything before and including the first underscore
+    # Example: "hello_playable_003" -> "playable_003"
+    # Find the first underscore, and if 'playable' (case-insensitive) appears after it,
+    # remove everything up to and including that underscore
+    first_underscore_idx = name.find("_")
+    if first_underscore_idx >= 0:
+        # Check if 'playable' appears after the first underscore
+        after_underscore = name[first_underscore_idx + 1:]
+        if "playable" in after_underscore.lower():
+            # Remove everything before and including the first underscore
+            name = after_underscore
+    
+    # Step 4: Remove all underscores
+    name = name.replace("_", "")
+    
+    return name
 
 # --------------------------------------------------------------------
 # API Helpers
@@ -727,7 +858,52 @@ def _unity_list_playable_creatives(*, org_id: str, title_id: str) -> List[dict]:
 
     return playables
 
-
+def _unity_list_campaign_playables(*, org_id: str, title_id: str, campaign_id: str) -> List[dict]:
+    """특정 Campaign의 할당된 Playable 크리에이티브 조회 (Operator용)"""
+    try:
+        # 1. 캠페인에 할당된 모든 Creative Pack 가져오기
+        assigned_packs = _unity_list_assigned_creative_packs(
+            org_id=org_id, 
+            title_id=title_id, 
+            campaign_id=campaign_id
+        )
+        
+        playable_ids = set()
+        
+        # 2. 각 Pack의 creativeIds에서 Playable 추출
+        for pack in assigned_packs:
+            pack_id = pack.get("id")
+            if not pack_id:
+                continue
+            
+            # Pack 상세정보 조회
+            pack_path = f"organizations/{org_id}/apps/{title_id}/creative-packs/{pack_id}"
+            pack_detail = _unity_get(pack_path)
+            
+            creative_ids = pack_detail.get("creativeIds", [])
+            for cid in creative_ids:
+                playable_ids.add(str(cid))
+        
+        # 3. 각 Creative ID의 타입 확인 후 Playable만 필터링
+        playables = []
+        for cid in playable_ids:
+            try:
+                creative = _unity_get_creative(org_id=org_id, title_id=title_id, creative_id=cid)
+                c_type = (creative.get("type") or "").lower()
+                
+                if "playable" in c_type or "cpe" in c_type:
+                    playables.append(creative)
+                    
+            except Exception as e:
+                logger.warning(f"Failed to fetch creative {cid}: {e}")
+                continue
+        
+        return playables
+        
+    except Exception as e:
+        logger.warning(f"Failed to list campaign playables: {e}")
+        return []
+        
 def _save_upload_state(game: str, campaign_id: str, state: Dict):
     """Save upload state to session."""
     key = _get_upload_state_key(game, campaign_id)
@@ -807,7 +983,18 @@ def upload_unity_creatives_to_campaign(
     - Only upload missing items
     - Resume from where it left off
     """
-    title_id = (settings.get("title_id") or "").strip() or str(UNITY_GAME_IDS.get(game, ""))
+    # Get title_id: Test Mode에서는 campaign set ID를 사용, Marketer Mode에서는 app ID 사용
+    title_id = (settings.get("title_id") or "").strip()
+    if not title_id:
+        # Try to get from UNITY_GAME_IDS (for Marketer Mode) or campaign set ID (for Test Mode)
+        title_id = str(UNITY_GAME_IDS.get(game, ""))
+        # If still empty, try campaign set ID (Test Mode)
+        if not title_id:
+            try:
+                title_id = get_unity_campaign_set_id(game, "aos")
+            except Exception as e:
+                logger.warning(f"Failed to get campaign set ID for {game}: {e}")
+    
     campaign_id = (settings.get("campaign_id") or "").strip()
     if not campaign_id:
         ids_for_game = UNITY_CAMPAIGN_IDS.get(game) or []
@@ -817,7 +1004,14 @@ def upload_unity_creatives_to_campaign(
     org_id = (settings.get("org_id") or "").strip() or UNITY_ORG_ID_DEFAULT
     
     if not all([title_id, campaign_id, org_id]):
-        raise RuntimeError("Unity Settings Missing for upload.")
+        missing = []
+        if not title_id:
+            missing.append("title_id")
+        if not campaign_id:
+            missing.append("campaign_id")
+        if not org_id:
+            missing.append("org_id")
+        raise RuntimeError(f"Unity Settings Missing for upload. Missing: {', '.join(missing)}")
 
     start_iso = next_sat_0000_kst()
     errors: List[str] = []
@@ -936,10 +1130,21 @@ def upload_unity_creatives_to_campaign(
             continue
         
         # Generate pack name
-        clean_base = base.replace("_", "")
-        raw_p_name = playable_name if playable_name else settings.get("existing_playable_label", "").split(" ")[0]
-        clean_p = pathlib.Path(raw_p_name).stem.replace("_unityads", "").replace("_", "")
-        final_pack_name = f"{clean_base}_{clean_p}"
+        # Extract video part (e.g., "video001")
+        video_part = _extract_video_part_from_base(base)
+        
+        # Get playable name or label
+        raw_p_name = playable_name if playable_name else settings.get("existing_playable_label", "")
+        
+        # Clean playable name according to rules
+        playable_part = _clean_playable_name_for_pack(raw_p_name)
+        
+        # Final pack name: videoxxx_playable003escalater감옥 (underscore between video and playable)
+        if playable_part:
+            final_pack_name = f"{video_part}_{playable_part}"
+        else:
+            # Fallback if no playable name
+            final_pack_name = f"{video_part}_playable"
         
         # Check if pack already exists
         if final_pack_name in upload_state["creative_packs"] and upload_state["creative_packs"][final_pack_name]:
