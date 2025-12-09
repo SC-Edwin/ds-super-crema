@@ -164,10 +164,22 @@ try:
         page_title="Creative 자동 업로드",
         page_icon="🎮",
         layout="wide",
-        initial_sidebar_state="expanded",
+        initial_sidebar_state="collapsed",
     )
 except Exception:
     pass # Ignore if page config was already set by parent app
+
+# Hide sidebar completely
+st.markdown("""
+<style>
+    section[data-testid="stSidebar"] {
+        display: none !important;
+    }
+    .stApp > div:first-child {
+        padding-right: 1rem !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 init_state()
 init_remote_state()
@@ -185,7 +197,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
     """
     st.title(title)
     
-    # --- [MARKETER ONLY] Add New Game Sidebar Form ---
+    # --- [MARKETER ONLY] Unity Config Debug (removed Add New Game sidebar) ---
     if is_marketer:
         with st.expander("🔍 Unity Config Debug (XP HERO)", expanded=False):
             try:
@@ -202,39 +214,6 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 
             except Exception as e:
                 st.error(f"❌ Error: {e}")
-    if is_marketer:
-        with st.sidebar:
-            st.divider()
-            with st.expander("➕ Add New Game", expanded=False):
-                with st.form("add_game_form"):
-                    st.caption("Add a new game configuration to BigQuery.")
-                    new_game_name = st.text_input("Game Name (e.g. My New RPG)")
-                    st.markdown("**Facebook Details**")
-                    new_fb_act = st.text_input("Ad Account ID", placeholder="act_12345678")
-                    new_fb_page = st.text_input("Page ID", placeholder="1234567890")
-                    st.markdown("**Unity Details**")
-                    new_unity_id = st.text_input("Unity Game ID (Optional)")
-                    
-                    if st.form_submit_button("Save Game"):
-                        if not new_game_name or not new_fb_act:
-                            st.error("Name and Ad Account are required.")
-                        else:
-                            try:
-                                # Validation (Simple Auth Check)
-                                fb_ops.init_fb_from_secrets()
-                                from facebook_business.adobjects.adaccount import AdAccount
-                                AdAccount(new_fb_act.strip()).api_get(fields=["name"])
-                                
-                                # Save to BigQuery
-                                game_manager.save_new_game(
-                                    new_game_name, new_fb_act, new_fb_page, new_unity_id
-                                )
-                                st.success(f"Saved **{new_game_name}**!")
-                                import time
-                                time.sleep(1)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Validation/Save Failed: {e}")
 
     # --- LOAD GAMES FROM DB ---
     GAMES = game_manager.get_all_game_names(include_custom=is_marketer)
@@ -405,6 +384,39 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             st.write(f"**New Videos to Upload:** {preview['n_videos']}")
                             st.write(f"**Creative Type:** {preview['creative_type']}")
                             
+                            # Capacity Information
+                            capacity = preview.get('capacity_info', {})
+                            st.markdown("### Ad Set Capacity")
+                            st.write(f"**Current Creatives:** {capacity.get('current_count', 0)}")
+                            st.write(f"**Creative Limit:** {capacity.get('limit', 50)}")
+                            st.write(f"**Available Slots:** {capacity.get('available_slots', 0)}")
+                            st.write(f"**New Creatives to Upload:** {capacity.get('new_creatives_count', 0)}")
+                            
+                            if capacity.get('will_exceed', False):
+                                st.warning(f"⚠️ 업로드 후 제한을 초과합니다! ({capacity.get('current_count', 0)} + {capacity.get('new_creatives_count', 0)} > {capacity.get('limit', 50)})")
+                                
+                                ads_to_delete = capacity.get('ads_to_delete', [])
+                                if ads_to_delete:
+                                    st.markdown("#### 🗑️ 삭제될 Creative 목록")
+                                    st.write(f"**삭제 예정 Creative 수:** {len(ads_to_delete)}")
+                                    
+                                    for idx, ad_info in enumerate(ads_to_delete, 1):
+                                        st.markdown(f"**{idx}. {ad_info.get('name', 'N/A')}** (ID: `{ad_info.get('id', 'N/A')}`)")
+                                        st.write(f"   - 14일 누적 Spend: ${ad_info.get('spend_14d', 0):.2f}")
+                                        st.write(f"   - 7일 누적 Spend: ${ad_info.get('spend_7d', 0):.2f}")
+                                        if ad_info.get('spend_14d', 0) < 1.0:
+                                            st.write(f"   - 삭제 이유: 14일 누적 Spend < $1")
+                                        elif ad_info.get('spend_7d', 0) < 1.0:
+                                            st.write(f"   - 삭제 이유: 7일 누적 Spend < $1")
+                            else:
+                                remaining = capacity.get('available_slots', 0) - capacity.get('new_creatives_count', 0)
+                                if remaining >= 0:
+                                    st.success(f"✅ 충분한 공간이 있습니다. 업로드 후 남은 슬롯: {remaining}")
+                                else:
+                                    st.warning(f"⚠️ 공간이 부족합니다. 추가로 {abs(remaining)}개의 슬롯이 필요합니다.")
+                            
+                            st.divider()
+                            
                             st.markdown("### Template Settings (from existing ads)")
                             template = preview['template_source']
                             st.write(f"**Headlines Found:** {template['headlines_found']}")
@@ -414,7 +426,12 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             if template['message_example']:
                                 st.write(f"**Example Message:** `{template['message_example']}`")
                             if template['cta']:
-                                st.write(f"**CTA:** `{template['cta'].get('type', 'N/A')}`")
+                                # Handle both dict and string CTA formats
+                                if isinstance(template['cta'], dict):
+                                    cta_type = template['cta'].get('type', 'N/A')
+                                    st.write(f"**CTA:** `{cta_type}`")
+                                else:
+                                    st.write(f"**CTA:** `{template['cta']}`")
                             if preview['store_url']:
                                 st.write(f"**Store URL:** {preview['store_url']}")
                             
@@ -422,12 +439,73 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             for idx, creative in enumerate(preview['preview_creatives'], 1):
                                 st.markdown(f"#### Creative {idx}: {creative['name']}")
                                 st.write(f"**Type:** {creative['type']}")
-                                if creative.get('videos'):
-                                    st.write(f"**Videos:** {', '.join(creative['videos'])}")
-                                st.write(f"**Headline:** `{creative['headline']}`")
-                                st.write(f"**Message:** `{creative['message']}`")
+                                
+                                # For single video mode, show detailed video size and placement info
+                                if creative.get('type') == 'Single Video (3 sizes)' and creative.get('videos'):
+                                    videos = creative['videos']
+                                    placements = creative.get('placements', {})
+                                    placements_kr = creative.get('placements_kr', {})
+                                    
+                                    for size in ['1080x1080', '1920x1080', '1080x1920']:
+                                        if size in videos:
+                                            st.markdown(f"**{size}:**")
+                                            st.write(f"  - Video: `{videos[size]}`")
+                                            if size in placements:
+                                                st.write(f"  - Placements: {', '.join(placements[size])}")
+                                            if size in placements_kr:
+                                                st.write(f"  - Placements (KR): {', '.join(placements_kr[size])}")
+                                elif creative.get('videos'):
+                                    # For dynamic mode or other types
+                                    if isinstance(creative['videos'], list):
+                                        st.write(f"**Videos:** {', '.join(creative['videos'])}")
+                                    elif isinstance(creative['videos'], dict):
+                                        st.write(f"**Videos:** {', '.join(creative['videos'].values())}")
+                                
+                                # Show ALL Headlines
+                                if creative.get('headline'):
+                                    headlines = creative['headline'] if isinstance(creative['headline'], list) else [creative['headline']]
+                                    st.markdown(f"**Headlines ({len(headlines)} total):**")
+                                    for idx, h in enumerate(headlines, 1):
+                                        st.write(f"  {idx}. `{h}`")
+                                
+                                # Show ALL Messages (Primary Text)
+                                if creative.get('message'):
+                                    messages = creative['message'] if isinstance(creative['message'], list) else [creative['message']]
+                                    st.markdown(f"**Primary Text / Messages ({len(messages)} total):**")
+                                    for idx, m in enumerate(messages, 1):
+                                        st.write(f"  {idx}. `{m}`")
+                                
+                                # Show CTA details
                                 if creative.get('cta'):
-                                    st.write(f"**CTA:** `{creative['cta'].get('type', 'N/A')}`")
+                                    cta = creative['cta']
+                                    st.markdown("**Call-to-Action (CTA):**")
+                                    if isinstance(cta, dict):
+                                        cta_type = cta.get('type', 'N/A')
+                                        st.write(f"  - Type: `{cta_type}`")
+                                        if 'value' in cta:
+                                            value = cta['value']
+                                            if isinstance(value, dict):
+                                                if 'link' in value:
+                                                    st.write(f"  - Link: `{value['link']}`")
+                                                for k, v in value.items():
+                                                    if k != 'link':
+                                                        st.write(f"  - {k}: `{v}`")
+                                            else:
+                                                st.write(f"  - Value: `{value}`")
+                                        # Show all CTA fields
+                                        for k, v in cta.items():
+                                            if k not in ['type', 'value']:
+                                                st.write(f"  - {k}: `{v}`")
+                                    else:
+                                        st.write(f"  - `{cta}`")
+                                
+                                # Show Store URL if available
+                                if preview.get('store_url'):
+                                    st.write(f"**Store URL:** `{preview['store_url']}`")
+                                
+                                # Show Aspect Ratio for dynamic creatives
+                                if creative.get('aspect_ratio'):
+                                    st.write(f"**Aspect Ratio:** {creative['aspect_ratio']}")
                                 if creative.get('aspect_ratio'):
                                     st.write(f"**Aspect Ratio:** {creative['aspect_ratio']}")
                                 st.divider()
