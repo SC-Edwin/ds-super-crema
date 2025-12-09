@@ -609,13 +609,17 @@ def upload_videos_create_ads(
             v = account.create_ad_video(params={"file": path, "content_category": "VIDEO_GAMING"})
             return v["id"]
 
-    def wait_all_videos_ready(video_ids: list[str], *, timeout_s: int = 120, sleep_s: int = 3) -> dict[str, bool]:
-        """Poll advideo thumbnails for all video_ids to avoid blank previews."""
+    def wait_all_videos_ready(video_ids: list[str], *, timeout_s: int = 300, sleep_s: int = 5) -> dict[str, bool]:
+        """
+        Poll advideo thumbnails for all video_ids to avoid blank previews.
+        Waits until ALL videos have thumbnails or timeout is reached.
+        """
         from facebook_business.adobjects.advideo import AdVideo
         import time
 
         ready = {vid: False for vid in video_ids}
         deadline = time.time() + timeout_s
+        start_time = time.time()
 
         while time.time() < deadline:
             all_done = True
@@ -623,18 +627,43 @@ def upload_videos_create_ads(
                 if ready[vid]:
                     continue
                 try:
-                    info = AdVideo(vid).api_get(fields=["thumbnails", "picture"])
+                    # Check video status and thumbnails
+                    info = AdVideo(vid).api_get(fields=["status", "thumbnails", "picture", "processing_progress"])
+                    status = info.get("status")
                     has_pic = bool(info.get("picture"))
                     has_thumbs = bool(info.get("thumbnails"))
-                    if has_pic or has_thumbs:
+                    progress = info.get("processing_progress", 0)
+                    
+                    # Video is ready if it has picture or thumbnails, and status is READY or PUBLISHED
+                    if (has_pic or has_thumbs) and status in ("READY", "PUBLISHED"):
                         ready[vid] = True
-                    else:
+                    elif status == "PROCESSING" and progress < 100:
+                        # Still processing, wait more
                         all_done = False
-                except Exception:
+                    else:
+                        # No thumbnail yet, keep waiting
+                        all_done = False
+                except Exception as e:
+                    # If we can't get info, assume not ready yet
                     all_done = False
+                    logger.warning(f"Error checking video {vid}: {e}")
+            
             if all_done:
+                elapsed = time.time() - start_time
+                logger.info(f"All {len(video_ids)} videos have thumbnails after {elapsed:.1f}s")
                 break
+            
             time.sleep(sleep_s)
+        
+        # Log which videos are ready/not ready
+        not_ready = [vid for vid, is_ready in ready.items() if not is_ready]
+        if not_ready:
+            elapsed = time.time() - start_time
+            logger.warning(f"Timeout after {elapsed:.1f}s: {len(not_ready)} videos still don't have thumbnails: {not_ready}")
+        else:
+            elapsed = time.time() - start_time
+            logger.info(f"All videos ready after {elapsed:.1f}s")
+        
         return ready
 
     def resolve_instagram_actor_id(page_id: str) -> str | None:
@@ -700,7 +729,15 @@ def upload_videos_create_ads(
 
     # Wait for all videos to have thumbnails
     video_ids = [u["video_id"] for u in uploads]
-    _ = wait_all_videos_ready(video_ids, timeout_s=300, sleep_s=5)
+    if video_ids:
+        ready_status = wait_all_videos_ready(video_ids, timeout_s=600, sleep_s=5)  # Increased timeout to 10 minutes
+        not_ready = [vid for vid, is_ready in ready_status.items() if not is_ready]
+        if not_ready:
+            st.warning(f"⚠️ {len(not_ready)} video(s) still processing thumbnails. Continuing anyway, but some creatives may have gray thumbnails.")
+            # Mark not-ready videos for retry in _process_one_video
+            for u in uploads:
+                if u["video_id"] in not_ready:
+                    u["needs_thumbnail_retry"] = True
 
     # Create creatives + ads in parallel
     results = []
@@ -716,11 +753,49 @@ def upload_videos_create_ads(
         import time
 
         name, video_id = up["name"], up["video_id"]
+        needs_retry = up.get("needs_thumbnail_retry", False)
+        
+        # If thumbnail wasn't ready, wait a bit more and retry
+        if needs_retry:
+            logger.info(f"Video {video_id} ({name}) needs thumbnail retry, waiting additional 30s...")
+            time.sleep(30)
+        
         try:
-            video_info = AdVideo(video_id).api_get(fields=["picture"])
-            thumbnail_url = video_info.get("picture")
+            # Try to get thumbnail with retries
+            max_retries = 3 if needs_retry else 1
+            thumbnail_url = None
+            
+            for attempt in range(max_retries):
+                try:
+                    video_info = AdVideo(video_id).api_get(fields=["status", "thumbnails", "picture", "processing_progress"])
+                    thumbnail_url = video_info.get("picture")
+                    
+                    # If no picture, try to get from thumbnails
+                    if not thumbnail_url:
+                        thumbnails = video_info.get("thumbnails")
+                        if thumbnails and isinstance(thumbnails, list) and len(thumbnails) > 0:
+                            # Get the first thumbnail URL
+                            thumbnail_url = thumbnails[0].get("uri") if isinstance(thumbnails[0], dict) else None
+                    
+                    if thumbnail_url:
+                        break
+                    
+                    # If still no thumbnail and not last attempt, wait and retry
+                    if attempt < max_retries - 1:
+                        wait_time = 30 * (attempt + 1)  # 30s, 60s, 90s
+                        logger.info(f"Video {video_id} ({name}) thumbnail not ready, waiting {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                        time.sleep(wait_time)
+                        
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        wait_time = 30 * (attempt + 1)
+                        logger.warning(f"Error getting thumbnail for {video_id} ({name}): {e}, retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        raise
+            
             if not thumbnail_url:
-                raise RuntimeError("Video processed but no 'picture' (thumbnail) URL was returned.")
+                raise RuntimeError(f"Video {video_id} ({name}) processed but no 'picture' or 'thumbnails' URL was returned after {max_retries} attempts.")
 
             def _create_once(allow_ig: bool) -> str:
                 vd = {

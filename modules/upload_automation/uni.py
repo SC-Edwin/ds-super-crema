@@ -27,12 +27,27 @@ from unity_ads import (
     _unity_list_playable_creatives,
     get_unity_settings as _get_unity_settings,
     _ensure_unity_settings_state,
+    preview_unity_upload as _preview_unity_upload,
+    apply_unity_creative_packs_to_campaign as _apply_unity_creative_packs_to_campaign,
+    upload_unity_creatives_to_campaign as _upload_unity_creatives_to_campaign,
 )
 
 # Re-export for compatibility
 def get_unity_settings(game: str) -> Dict:
     """Re-export from unity_ads for compatibility."""
     return _get_unity_settings(game)
+
+def preview_unity_upload(*, game: str, videos: List[Dict], settings: Dict, is_marketer: bool = True) -> Dict:
+    """Re-export from unity_ads for compatibility. Default is_marketer=True for marketer mode."""
+    return _preview_unity_upload(game=game, videos=videos, settings=settings, is_marketer=is_marketer)
+
+def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List[str], settings: Dict, is_marketer: bool = True) -> Dict:
+    """Re-export from unity_ads for compatibility. Default is_marketer=True for marketer mode."""
+    return _apply_unity_creative_packs_to_campaign(game=game, creative_pack_ids=creative_pack_ids, settings=settings, is_marketer=is_marketer)
+
+def upload_unity_creatives_to_campaign(*, game: str, videos: List[Dict], settings: Dict) -> Dict:
+    """Re-export from unity_ads for compatibility."""
+    return _upload_unity_creatives_to_campaign(game=game, videos=videos, settings=settings)
 
 logger = logging.getLogger(__name__)
 UNITY_BASE_URL = "https://services.api.unity.com/advertise/v1"

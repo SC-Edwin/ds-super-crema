@@ -338,12 +338,20 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         # [수정 3] 업로드 및 전체 초기화 버튼: 너비 꽉 채우기
                         # 간격을 두어 시각적으로 분리
                         st.write("") 
+                        if is_marketer:
+                            # Marketer mode: Add dry run button
+                            dry_run_fb = st.button("🔍 Dry Run (Preview)", key=f"dry_run_fb_{i}", use_container_width=True)
+                            st.write("")
                         cont = st.button(btn_label, key=f"continue_{i}", use_container_width=True)
                         clr = st.button("전체 초기화", key=f"clear_{i}", use_container_width=True)
                     else:
                         unity_ok_placeholder = st.empty()
                         # Unity 버튼들도 동일하게 적용
                         st.write("")
+                        if is_marketer and game == "XP HERO":
+                            # Marketer mode: Add dry run button for Unity
+                            dry_run_unity = st.button("🔍 Dry Run (Preview)", key=f"dry_run_unity_{i}", use_container_width=True)
+                            st.write("")
                         cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{i}", use_container_width=True)
                         cont_unity_apply = st.button("캠페인에 적용", key=f"unity_apply_{i}", use_container_width=True)
                         clr_unity = st.button("전체 초기화 (Unity)", key=f"unity_clear_{i}", use_container_width=True)
@@ -378,6 +386,58 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
             # EXECUTION LOGIC
             # =========================
             
+            # --- FACEBOOK DRY RUN ---
+            if platform == "Facebook" and is_marketer and "dry_run_fb" in locals() and dry_run_fb:
+                remote_list = st.session_state.remote_videos.get(game, [])
+                ok, msg = validate_count(remote_list)
+                if not ok:
+                    ok_msg_placeholder.error(msg)
+                else:
+                    try:
+                        settings = st.session_state.settings.get(game, {})
+                        preview = fb_module.preview_facebook_upload(game, remote_list, settings)
+                        
+                        with st.expander("📋 Facebook Upload Preview", expanded=True):
+                            st.markdown("### Campaign & Ad Set")
+                            st.write(f"**Campaign ID:** {preview['campaign_id']}")
+                            st.write(f"**Ad Set ID:** {preview['adset_id']}")
+                            st.write(f"**Current Active Ads:** {preview['current_ad_count']}")
+                            st.write(f"**New Videos to Upload:** {preview['n_videos']}")
+                            st.write(f"**Creative Type:** {preview['creative_type']}")
+                            
+                            st.markdown("### Template Settings (from existing ads)")
+                            template = preview['template_source']
+                            st.write(f"**Headlines Found:** {template['headlines_found']}")
+                            if template['headline_example']:
+                                st.write(f"**Example Headline:** `{template['headline_example']}`")
+                            st.write(f"**Messages Found:** {template['messages_found']}")
+                            if template['message_example']:
+                                st.write(f"**Example Message:** `{template['message_example']}`")
+                            if template['cta']:
+                                st.write(f"**CTA:** `{template['cta'].get('type', 'N/A')}`")
+                            if preview['store_url']:
+                                st.write(f"**Store URL:** {preview['store_url']}")
+                            
+                            st.markdown("### Creatives That Would Be Created")
+                            for idx, creative in enumerate(preview['preview_creatives'], 1):
+                                st.markdown(f"#### Creative {idx}: {creative['name']}")
+                                st.write(f"**Type:** {creative['type']}")
+                                if creative.get('videos'):
+                                    st.write(f"**Videos:** {', '.join(creative['videos'])}")
+                                st.write(f"**Headline:** `{creative['headline']}`")
+                                st.write(f"**Message:** `{creative['message']}`")
+                                if creative.get('cta'):
+                                    st.write(f"**CTA:** `{creative['cta'].get('type', 'N/A')}`")
+                                if creative.get('aspect_ratio'):
+                                    st.write(f"**Aspect Ratio:** {creative['aspect_ratio']}")
+                                st.divider()
+                            
+                            st.info("💡 This is a preview. No actual uploads or changes have been made.")
+                    except Exception as e:
+                        import traceback
+                        st.error(f"Preview failed: {e}")
+                        st.code(traceback.format_exc())
+            
             # --- FACEBOOK ACTIONS ---
             if platform == "Facebook" and cont:
                 remote_list = st.session_state.remote_videos.get(game, [])
@@ -406,6 +466,76 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 st.session_state.settings.pop(game, None)
                 st.rerun()
 
+            # --- UNITY DRY RUN ---
+            if platform == "Unity Ads" and is_marketer and game == "XP HERO" and "dry_run_unity" in locals() and dry_run_unity:
+                remote_list = st.session_state.remote_videos.get(game, [])
+                ok, msg = validate_count(remote_list)
+                if not ok:
+                    unity_ok_placeholder.error(msg)
+                else:
+                    try:
+                        unity_settings = unity_module.get_unity_settings(game)
+                        is_unity_marketer = is_marketer and game == "XP HERO"
+                        preview = unity_module.preview_unity_upload(
+                            game=game,
+                            videos=remote_list,
+                            settings=unity_settings,
+                            is_marketer=is_unity_marketer
+                        )
+                        
+                        with st.expander("📋 Unity Ads Upload Preview", expanded=True):
+                            st.markdown("### Campaign Settings")
+                            st.write(f"**Game:** {preview['game']}")
+                            st.write(f"**Org ID:** {preview['org_id']}")
+                            st.write(f"**Title ID:** {preview['title_id']}")
+                            st.write(f"**Campaign ID:** {preview['campaign_id']}")
+                            
+                            st.markdown("### Playable Info")
+                            playable_info = preview['playable_info']
+                            if playable_info['selected_playable']:
+                                st.write(f"**Selected Playable:** {playable_info['selected_playable']}")
+                            elif playable_info['existing_playable_label']:
+                                st.write(f"**Existing Playable:** {playable_info['existing_playable_label']}")
+                            else:
+                                st.warning("⚠️ No playable selected")
+                            
+                            st.markdown("### Creative Packs That Would Be Created")
+                            st.write(f"**Total Packs:** {preview['total_packs_to_create']}")
+                            for idx, pack in enumerate(preview['preview_packs'], 1):
+                                st.markdown(f"#### Pack {idx}: `{pack['pack_name']}`")
+                                st.write(f"**Portrait Video:** {pack['portrait_video']}")
+                                st.write(f"**Landscape Video:** {pack['landscape_video']}")
+                                st.write(f"**Playable:** {pack['playable']}")
+                                st.divider()
+                            
+                            st.markdown("### Current Assignment Status")
+                            current = preview['current_assigned_packs']
+                            if current:
+                                st.write(f"**Currently Assigned Packs:** {len(current)}")
+                                for pack in current:
+                                    st.write(f"- `{pack['name']}` (ID: {pack['id']})")
+                            else:
+                                st.info("No packs currently assigned to this campaign")
+                            
+                            st.markdown("### Action Summary")
+                            summary = preview['action_summary']
+                            st.write(f"**Will Create:** {summary['will_create_packs']} new creative pack(s)")
+                            
+                            if summary['is_marketer_mode']:
+                                st.write(f"**Will Assign:** {summary['will_assign_new']} new pack(s)")
+                                st.info("ℹ️ Marketer Mode: Existing packs will remain assigned. New packs will be added.")
+                            else:
+                                st.write(f"**Will Unassign:** {summary['will_unassign_existing']} existing pack(s)")
+                                st.write(f"**Will Assign:** {summary['will_assign_new']} new pack(s)")
+                                if summary['will_unassign_existing'] > 0:
+                                    st.warning("⚠️ Test Mode: Existing creative packs will be unassigned before assigning new ones.")
+                            
+                            st.info("💡 This is a preview. No actual uploads or changes have been made.")
+                    except Exception as e:
+                        import traceback
+                        st.error(f"Preview failed: {e}")
+                        st.code(traceback.format_exc())
+            
             # --- UNITY ACTIONS ---
             if platform == "Unity Ads":
                 unity_settings = unity_module.get_unity_settings(game)
@@ -444,8 +574,10 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         unity_ok_placeholder.error("No packs found. Create them first.")
                     else:
                         try:
+                            # Check if marketer mode for Unity (XP HERO only)
+                            is_unity_marketer = is_marketer and game == "XP HERO"
                             res = unity_module.apply_unity_creative_packs_to_campaign(
-                                game=game, creative_pack_ids=pack_ids, settings=unity_settings
+                                game=game, creative_pack_ids=pack_ids, settings=unity_settings, is_marketer=is_unity_marketer
                             )
                             assigned = res.get("assigned_packs", [])
                             if assigned:

@@ -966,6 +966,127 @@ def _check_existing_pack(org_id: str, title_id: str, pack_name: str) -> str | No
         logger.warning(f"Could not check existing pack: {e}")
         return None
 # --------------------------------------------------------------------
+# Dry Run / Preview Functions
+# --------------------------------------------------------------------
+def preview_unity_upload(
+    *,
+    game: str,
+    videos: List[Dict[str, Any]],
+    settings: Dict[str, Any],
+    is_marketer: bool = False
+) -> Dict[str, Any]:
+    """
+    Preview what would happen if Unity upload is executed.
+    Returns a dict with preview information without actually uploading.
+    """
+    # Get title_id: Test Mode에서는 campaign set ID를 사용, Marketer Mode에서는 app ID 사용
+    title_id = (settings.get("title_id") or "").strip()
+    if not title_id:
+        title_id = str(UNITY_GAME_IDS.get(game, ""))
+        if not title_id:
+            try:
+                title_id = get_unity_campaign_set_id(game, "aos")
+            except Exception as e:
+                logger.warning(f"Failed to get campaign set ID for {game}: {e}")
+    
+    campaign_id = (settings.get("campaign_id") or "").strip()
+    if not campaign_id:
+        ids_for_game = UNITY_CAMPAIGN_IDS.get(game) or []
+        if ids_for_game:
+            campaign_id = str(ids_for_game[0])
+    
+    org_id = (settings.get("org_id") or "").strip() or UNITY_ORG_ID_DEFAULT
+    
+    if not all([title_id, campaign_id, org_id]):
+        missing = []
+        if not title_id:
+            missing.append("title_id")
+        if not campaign_id:
+            missing.append("campaign_id")
+        if not org_id:
+            missing.append("org_id")
+        raise RuntimeError(f"Unity Settings Missing for preview. Missing: {', '.join(missing)}")
+    
+    # Get playable info
+    playable_name = settings.get("selected_playable") or ""
+    existing_playable_id = settings.get("existing_playable_id") or ""
+    existing_playable_label = settings.get("existing_playable_label", "")
+    
+    # Group videos by base name
+    subjects: dict[str, list[dict]] = {}
+    for v in videos or []:
+        n = v.get("name") or ""
+        if "playable" in n.lower():
+            continue
+        base = n.split("_")[0]
+        subjects.setdefault(base, []).append(v)
+    
+    # Generate preview pack names
+    preview_packs = []
+    for base, items in subjects.items():
+        portrait = next((x for x in items if "1080x1920" in (x.get("name") or "")), None)
+        landscape = next((x for x in items if "1920x1080" in (x.get("name") or "")), None)
+        
+        if not portrait or not landscape:
+            continue
+        
+        # Generate pack name
+        video_part = _extract_video_part_from_base(base)
+        raw_p_name = playable_name if playable_name else existing_playable_label
+        playable_part = _clean_playable_name_for_pack(raw_p_name)
+        
+        if playable_part:
+            final_pack_name = f"{video_part}_{playable_part}"
+        else:
+            final_pack_name = f"{video_part}_playable"
+        
+        preview_packs.append({
+            "pack_name": final_pack_name,
+            "portrait_video": portrait.get("name"),
+            "landscape_video": landscape.get("name"),
+            "playable": playable_name or existing_playable_label or "(No playable selected)",
+        })
+    
+    # Check currently assigned creative packs
+    try:
+        assigned_packs = _unity_list_assigned_creative_packs(
+            org_id=org_id,
+            title_id=title_id,
+            campaign_id=campaign_id
+        )
+        current_assigned = [
+            {
+                "id": pack.get("id") or pack.get("assignedCreativePackId"),
+                "name": pack.get("name", "Unknown"),
+            }
+            for pack in assigned_packs
+        ]
+    except Exception as e:
+        logger.warning(f"Could not fetch assigned packs: {e}")
+        current_assigned = []
+    
+    return {
+        "game": game,
+        "org_id": org_id,
+        "title_id": title_id,
+        "campaign_id": campaign_id,
+        "total_packs_to_create": len(preview_packs),
+        "preview_packs": preview_packs,
+        "current_assigned_packs": current_assigned,
+        "playable_info": {
+            "selected_playable": playable_name,
+            "existing_playable_id": existing_playable_id,
+            "existing_playable_label": existing_playable_label,
+        },
+        "action_summary": {
+            "will_create_packs": len(preview_packs),
+            "will_unassign_existing": 0 if is_marketer else len(current_assigned),
+            "will_assign_new": len(preview_packs),
+            "is_marketer_mode": is_marketer,
+        }
+    }
+
+# --------------------------------------------------------------------
 # Main Helpers
 # --------------------------------------------------------------------
 
@@ -1284,7 +1405,7 @@ def upload_unity_creatives_to_campaign(
         "total_expected": total_pairs
     }
 
-def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List[str], settings: Dict[str, Any]) -> Dict[str, Any]:
+def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List[str], settings: Dict[str, Any], is_marketer: bool = False) -> Dict[str, Any]:
     if not creative_pack_ids:
         raise RuntimeError("No creative pack IDs to apply.")
 
@@ -1302,54 +1423,65 @@ def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List
     # --- PROGRESS BAR FOR APPLY STEP ---
     progress_bar = st.progress(0, text="Fetching existing assignments...")
 
-    # 1. Unassign existing (Loop to handle pagination)
-    max_loops = 20 # Safety limit
-    loop_count = 0
-    
-    while loop_count < max_loops:
+    # 1. Unassign existing (Only for Test Mode, not Marketer Mode)
+    if not is_marketer:
+        # Test Mode: Unassign existing packs first
+        max_loops = 20 # Safety limit
+        loop_count = 0
+        
+        while loop_count < max_loops:
+            try:
+                assigned = _unity_list_assigned_creative_packs(org_id=org_id, title_id=title_id, campaign_id=campaign_id)
+                if not assigned:
+                    break
+                    
+                total_unassign = len(assigned)
+                loop_count += 1
+                
+                for idx, item in enumerate(assigned):
+                    assigned_id = item.get("id") or item.get("assignedCreativePackId")
+                    if assigned_id:
+                        # Update progress bar
+                        progress_bar.progress(
+                            int((idx + 1) / max(total_unassign, 1) * 50), 
+                            text=f"Unassigning batch {loop_count}: {idx + 1}/{total_unassign}..."
+                        )
+                        
+                        try:
+                            _unity_unassign_with_retry(  # 새 함수 사용
+                                org_id=org_id,
+                                title_id=title_id,
+                                campaign_id=campaign_id,
+                                assigned_creative_pack_id=str(assigned_id)
+                            )
+                            removed_ids.append(str(assigned_id))
+                            time.sleep(1.0)  # 0.2 → 1.0으로 증가
+                        except Exception as e:
+                            errors.append(f"Unassign error {assigned_id}: {e}")
+                
+                # Short sleep between pages
+                time.sleep(1)
+                
+            except Exception as e:
+                errors.append(f"List assigned error: {e}")
+                break
+    else:
+        # Marketer Mode: Skip unassign, just show current assignments
         try:
             assigned = _unity_list_assigned_creative_packs(org_id=org_id, title_id=title_id, campaign_id=campaign_id)
-            if not assigned:
-                break
-                
-            total_unassign = len(assigned)
-            loop_count += 1
-            
-            for idx, item in enumerate(assigned):
-                assigned_id = item.get("id") or item.get("assignedCreativePackId")
-                if assigned_id:
-                    # Update progress bar
-                    progress_bar.progress(
-                        int((idx + 1) / max(total_unassign, 1) * 50), 
-                        text=f"Unassigning batch {loop_count}: {idx + 1}/{total_unassign}..."
-                    )
-                    
-                    try:
-                        _unity_unassign_with_retry(  # 새 함수 사용
-                            org_id=org_id,
-                            title_id=title_id,
-                            campaign_id=campaign_id,
-                            assigned_creative_pack_id=str(assigned_id)
-                        )
-                        removed_ids.append(str(assigned_id))
-                        time.sleep(1.0)  # 0.2 → 1.0으로 증가
-                    except Exception as e:
-                        errors.append(f"Unassign error {assigned_id}: {e}")
-            
-            # Short sleep between pages
-            time.sleep(1)
-            
+            if assigned:
+                st.info(f"ℹ️ Marketer Mode: {len(assigned)} existing pack(s) will remain assigned. New packs will be added.")
         except Exception as e:
-            errors.append(f"List assigned error: {e}")
-            break
+            logger.warning(f"Could not fetch existing assignments: {e}")
 
     # 2. Assign new
     total_assign = len(creative_pack_ids)
     count_a = 0
+    start_pct = 0 if is_marketer else 50  # Marketer mode starts at 0% since no unassign
     
     for pack_id in creative_pack_ids:
         count_a += 1
-        pct = 50 + int(count_a / max(total_assign, 1) * 50)
+        pct = start_pct + int(count_a / max(total_assign, 1) * (100 - start_pct))
         progress_bar.progress(pct, text=f"Assigning new packs {count_a}/{total_assign}...")
         
         try:
