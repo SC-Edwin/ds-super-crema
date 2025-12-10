@@ -28,6 +28,8 @@ from facebook_ads import (     # 'from .facebook_ads'에서 점(.) 제거
     FB_GAME_MAPPING,
     GAME_DEFAULTS,
     OPT_GOAL_LABEL_TO_API,
+    extract_thumbnail_from_video,
+    upload_thumbnail_image,
     init_fb_from_secrets,
     validate_page_binding,
     _plan_upload,
@@ -562,22 +564,41 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             key=f"fb_store_url_input_{idx}",
             placeholder="https://play.google.com/store/apps/details?id=...",
         )
-        
+
         if creative_type == "다이나믹":
             dco_aspect_ratio = st.selectbox(
                 "Aspect Ratio",
-                options=["1:1", "4:5", "9:16", "16:9"],
-                index=0,
+                options=["1:1", "9:16", "16:9", "single video"],
+                index=0, 
                 key=f"fb_dco_ratio_{idx}",
             )
-            dco_creative_name = st.text_input(
-                "Creative Name (Optional)",
-                value=st.session_state.get(f"fb_dco_name_{idx}", ""),
-                key=f"fb_dco_name_input_{idx}",
-            )
+            
+            # Show creative name input for all 다이나믹 modes
+            if dco_aspect_ratio == "single video":
+                # For single video mode, show per-video creative title input
+                st.info("💡 Single Video 모드: 각 비디오당 3개 사이즈(1080x1080, 1920x1080, 1080x1920)가 필요합니다.")
+                dco_creative_name = st.text_input(
+                    "Creative Title (Optional, 기본값: videoxxx)",
+                    value=st.session_state.get(f"fb_dco_name_{idx}", ""),
+                    key=f"fb_dco_name_input_{idx}",
+                    help="비워두면 비디오 이름에서 자동 추출됩니다 (예: video263 → video263)"
+                )
+            else:
+                dco_creative_name = st.text_input(
+                    "Creative Name (Optional)",
+                    value=st.session_state.get(f"fb_dco_name_{idx}", ""),
+                    key=f"fb_dco_name_input_{idx}",
+                )
+            single_creative_name = None
         else:
             dco_aspect_ratio = None
             dco_creative_name = None
+            single_creative_name = st.text_input(
+                "Creative Title (Optional, 기본값: videoxxx)",
+                value=st.session_state.get(f"fb_single_name_{idx}", ""),
+                key=f"fb_single_name_input_{idx}",
+                help="비워두면 비디오 이름에서 자동 추출됩니다 (예: video263 → video263)"
+            )
         
         st.session_state.settings[game] = {
             "campaign_id": selected_campaign_id,
@@ -586,6 +607,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "store_url": store_url,
             "dco_aspect_ratio": dco_aspect_ratio,
             "dco_creative_name": dco_creative_name,
+            "single_creative_name": single_creative_name if creative_type == "단일 영상" else None,
         }
 
 # -------------------------------------------------------------------------
@@ -650,58 +672,301 @@ def preview_facebook_upload(
     # Preview creatives that would be created
     preview_creatives = []
     if creative_type == "다이나믹":
-        # Single creative with multiple videos
-        creative_name = settings.get("dco_creative_name") or f"Flexible_{len(video_names)}vids_{video_names[0] if video_names else 'Creative'}"
-        preview_creatives.append({
-            "name": creative_name,
-            "type": "Dynamic (Flexible Format)",
-            "videos": video_names,
-            "headline": headlines_found,  # All headlines
-            "message": messages_found,     # All messages
-            "cta": cta_found,
-            "aspect_ratio": settings.get("dco_aspect_ratio"),
-        })
-    else:
-        # 단일 영상 모드: 3가지 사이즈 검증 및 그룹화
-        def _get_base_name(filename: str) -> str:
-            return filename.split("_")[0] if "_" in filename else filename.split(".")[0]
+        # Validate video sizes based on aspect ratio
+        dco_aspect_ratio = settings.get("dco_aspect_ratio")
         
-        def _get_video_size(filename: str) -> str | None:
-            if "1080x1080" in filename:
-                return "1080x1080"
-            elif "1920x1080" in filename:
-                return "1920x1080"
-            elif "1080x1920" in filename:
-                return "1080x1920"
-            return None
-        
-        # Group by base name
-        video_groups: dict[str, dict[str, str]] = {}
-        for name in video_names:
-            base_name = _get_base_name(name)
-            size = _get_video_size(name)
-            if not size:
-                continue
-            if base_name not in video_groups:
-                video_groups[base_name] = {}
-            video_groups[base_name][size] = name
-        
-        # Validate: Each group must have all 3 sizes
-        required_sizes = {"1080x1080", "1920x1080", "1080x1920"}
-        errors = []
-        valid_groups = {}
-        for base_name, sizes in video_groups.items():
-            missing = required_sizes - set(sizes.keys())
-            if missing:
-                errors.append(f"{base_name}의 사이즈를 확인하세요. 누락된 사이즈: {', '.join(missing)}")
-            else:
-                valid_groups[base_name] = sizes
+        if dco_aspect_ratio and dco_aspect_ratio != "single video":
+            # Regular aspect ratio mode (1:1, 16:9, 9:16) - validate sizes
+            required_size_map = {
+                "1:1": "1080x1080",
+                "16:9": "1920x1080",
+                "9:16": "1080x1920",
+            }
+            required_size = required_size_map.get(dco_aspect_ratio)
+            suffix_map = {
+                "1:1": "_정방",
+                "16:9": "_가로",
+                "9:16": "_세로",
+            }
+            name_suffix = suffix_map.get(dco_aspect_ratio, "_정방")
+            
+            def _get_video_size_from_name(filename: str) -> str | None:
+                """Extract size from filename"""
+                if "1080x1080" in filename:
+                    return "1080x1080"
+                elif "1920x1080" in filename:
+                    return "1920x1080"
+                elif "1080x1920" in filename:
+                    return "1080x1920"
+                return None
+            
+            # Validate video sizes
+            invalid_videos = []
+            valid_video_names = []
+            for name in video_names:
+                size = _get_video_size_from_name(name)
+                if size != required_size:
+                    invalid_videos.append(f"{name} (expected {required_size}, found {size or 'unknown'})")
+                else:
+                    valid_video_names.append(name)
+            
+            if invalid_videos:
+                return {
+                    "campaign_id": target_campaign_id,
+                    "adset_id": target_adset_id,
+                    "error": f"다이나믹 모드 ({dco_aspect_ratio}): 다음 비디오의 사이즈를 확인하세요:\n" + "\n".join(invalid_videos),
+                    "preview_creatives": [],
+                    "current_ad_count": 0,
+                    "creative_type": creative_type,
+                    "n_videos": len(video_names),
+                    "capacity_info": {
+                        "current_count": 0,
+                        "limit": 50,
+                        "available_slots": 0,
+                        "new_creatives_count": 0,
+                        "will_exceed": False,
+                        "ads_to_delete": []
+                    },
+                    "template_source": {
+                        "headlines_found": len(headlines_found),
+                        "messages_found": len(messages_found),
+                        "headline_example": single_headline,
+                        "message_example": single_message[:50] + "..." if len(single_message) > 50 else single_message,
+                        "cta": cta_found,
+                    },
+                    "store_url": store_url,
+                }
+            
+            # Generate creative name using same logic as actual upload
+            def _extract_video_number(filename: str) -> int | None:
+                """Extract number from video name (e.g., 'video001' -> 1, 'video12' -> 12)"""
+                import re
+                match = re.search(r'video\s*(\d+)', filename, re.IGNORECASE)
+                if match:
+                    return int(match.group(1))
+                return None
+            
+            def _generate_creative_name(video_names: list[str], game_name: str | None, suffix: str) -> str:
+                """Generate creative name based on video number patterns"""
+                video_numbers = []
+                other_videos = []
+                
+                for name in video_names:
+                    num = _extract_video_number(name)
+                    if num is not None:
+                        video_numbers.append((num, name))
+                    else:
+                        other_videos.append(name)
+                
+                # Sort by number
+                video_numbers.sort(key=lambda x: x[0])
+                
+                parts = []
+                
+                # Add non-numbered videos first
+                for name in other_videos:
+                    base = name.rsplit('.', 1)[0] if '.' in name else name
+                    parts.append(base)
+                
+                # Group consecutive numbers
+                if video_numbers:
+                    ranges = []
+                    current_start = video_numbers[0][0]
+                    current_end = video_numbers[0][0]
+                    
+                    for i in range(1, len(video_numbers)):
+                        if video_numbers[i][0] == current_end + 1:
+                            current_end = video_numbers[i][0]
+                        else:
+                            if current_start == current_end:
+                                ranges.append(f"video{current_start:03d}")
+                            else:
+                                ranges.append(f"video{current_start:03d}-{current_end:03d}")
+                            current_start = video_numbers[i][0]
+                            current_end = video_numbers[i][0]
+                    
+                    if current_start == current_end:
+                        ranges.append(f"video{current_start:03d}")
+                    else:
+                        ranges.append(f"video{current_start:03d}-{current_end:03d}")
+                    
+                    parts.extend(ranges)
+                
+                # Build final name
+                name_parts = [p for p in parts if p]
+                if not name_parts:
+                    base_name = video_names[0].rsplit('.', 1)[0] if video_names else "video"
+                    creative_name = f"{base_name}_{len(video_names)}vids"
+                else:
+                    video_part = ",".join(name_parts)
+                    game_part = game_name or "game"
+                    creative_name = f"{video_part}_{game_part}_flexible{suffix}"
+                
+                return creative_name
+            
+            # Get game name from game_name parameter
+            creative_name = settings.get("dco_creative_name")
+            if not creative_name:
+                creative_name = _generate_creative_name(valid_video_names, game_name, name_suffix)
+        elif dco_aspect_ratio == "single video":
+            # single video mode - validate 3 sizes per video and create one creative per group
+            def _get_base_name_from_filename(filename: str) -> str:
+                """Extract base name from filename (e.g., 'video462_ageofdinosaurs_en_45s_1080x1080_brown_251205.mp4' -> 'video462')"""
+                # Extract only the part before the first underscore (e.g., "video462")
+                if "_" in filename:
+                    base = filename.split("_")[0]
+                else:
+                    # If no underscore, use filename without extension
+                    base = filename.rsplit('.', 1)[0] if '.' in filename else filename
+                return base
+            
+            def _get_video_size_from_name(filename: str) -> str | None:
+                """Extract size from filename"""
+                if "1080x1080" in filename:
+                    return "1080x1080"
+                elif "1920x1080" in filename:
+                    return "1920x1080"
+                elif "1080x1920" in filename:
+                    return "1080x1920"
+                return None
+            
+            # Group videos by base name
+            video_groups: dict[str, dict[str, str]] = {}
+            for name in video_names:
+                base_name = _get_base_name_from_filename(name)
+                size = _get_video_size_from_name(name)
+                if not size:
+                    continue
+                if base_name not in video_groups:
+                    video_groups[base_name] = {}
+                video_groups[base_name][size] = name
+            
+            # Validate: Each group must have all 3 sizes
+            required_sizes = {"1080x1080", "1920x1080", "1080x1920"}
+            errors = []
+            valid_groups = {}
+            for base_name, sizes in video_groups.items():
+                missing = required_sizes - set(sizes.keys())
+                if missing:
+                    errors.append(f"{base_name}의 사이즈를 확인하세요. 누락된 사이즈: {', '.join(missing)}")
+                else:
+                    valid_groups[base_name] = sizes
+            
+            if errors:
+                return {
+                    "campaign_id": target_campaign_id,
+                    "adset_id": target_adset_id,
+                    "error": "\n".join(errors),
+                    "preview_creatives": [],
+                    "current_ad_count": 0,
+                    "creative_type": creative_type,
+                    "n_videos": len(video_names),
+                    "capacity_info": {
+                        "current_count": 0,
+                        "limit": 50,
+                        "available_slots": 0,
+                        "new_creatives_count": 0,
+                        "will_exceed": False,
+                        "ads_to_delete": []
+                    },
+                    "template_source": {
+                        "headlines_found": len(headlines_found),
+                        "messages_found": len(messages_found),
+                        "headline_example": single_headline,
+                        "message_example": single_message[:50] + "..." if len(single_message) > 50 else single_message,
+                        "cta": cta_found,
+                    },
+                    "store_url": store_url,
+                }
+            
+            # Create one creative per group (with 3 videos)
+            for base_name, sizes in valid_groups.items():
+                # Use base_name as creative name (e.g., "video263")
+                creative_name = settings.get("dco_creative_name") or base_name
+                
+                preview_creatives.append({
+                    "name": creative_name,
+                    "type": "Single Video (Flexible Format, 3 sizes)",
+                    "videos": {
+                        "1080x1080": sizes["1080x1080"],
+                        "1920x1080": sizes["1920x1080"],
+                        "1080x1920": sizes["1080x1920"],
+                    },
+                    "placements": {
+                        "1080x1080": ["Feed", "In-stream ads for Reels"],
+                        "1080x1920": ["Stories", "Status", "Reels", "Search results", "Apps and sites"],
+                        "1920x1080": ["Facebook search results"],
+                    },
+                    "placements_kr": {
+                        "1080x1080": ["피드", "릴스 익스트림 광고"],
+                        "1080x1920": ["스토리", "상태", "릴스", "검색결과", "앱및사이트"],
+                        "1920x1080": ["Facebook 검색 결과"],
+                    },
+                    "headline": headlines_found,  # All headlines
+                    "message": messages_found,     # All messages
+                    "cta": cta_found,
+                })
+        else:
+            # 단일 영상 모드: 3가지 사이즈 검증 및 그룹화
+            def _get_base_name(filename: str) -> str:
+                return filename.split("_")[0] if "_" in filename else filename.split(".")[0]
+            
+            def _get_video_size(filename: str) -> str | None:
+                if "1080x1080" in filename:
+                    return "1080x1080"
+                elif "1920x1080" in filename:
+                    return "1920x1080"
+                elif "1080x1920" in filename:
+                    return "1080x1920"
+                return None
+            
+            # Group by base name
+            video_groups: dict[str, dict[str, str]] = {}
+            for name in video_names:
+                base_name = _get_base_name(name)
+                size = _get_video_size(name)
+                if not size:
+                    continue
+                if base_name not in video_groups:
+                    video_groups[base_name] = {}
+                video_groups[base_name][size] = name
+            
+            # Validate: Each group must have all 3 sizes
+            required_sizes = {"1080x1080", "1920x1080", "1080x1920"}
+            errors = []
+            valid_groups = {}
+            for base_name, sizes in video_groups.items():
+                missing = required_sizes - set(sizes.keys())
+                if missing:
+                    errors.append(f"{base_name}의 사이즈를 확인하세요. 누락된 사이즈: {', '.join(missing)}")
+                else:
+                    valid_groups[base_name] = sizes
         
         if errors:
             return {
+                "campaign_id": target_campaign_id,
+                "adset_id": target_adset_id,
                 "error": "\n".join(errors),
                 "preview_creatives": [],
                 "current_ad_count": 0,
+                "creative_type": creative_type,
+                "n_videos": len(video_names),
+                "capacity_info": {
+                    "current_count": 0,
+                    "limit": 50,
+                    "available_slots": 0,
+                    "new_creatives_count": 0,
+                    "will_exceed": False,
+                    "ads_to_delete": []
+                },
+                "template_source": {
+                    "headlines_found": len(headlines_found),
+                    "messages_found": len(messages_found),
+                    "headline_example": single_headline,
+                    "message_example": single_message[:50] + "..." if len(single_message) > 50 else single_message,
+                    "cta": cta_found,
+                },
+                "store_url": store_url,
             }
         
         # One creative per group (with 3 videos)
@@ -841,9 +1106,9 @@ def preview_facebook_upload(
         "store_url": store_url,
     }
 
-    # -------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # 5. Specialized Upload Function (Clones Settings + PAC Support)
-    # -------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 def upload_videos_create_ads_cloned(
     account: AdAccount,
     *,
@@ -857,6 +1122,7 @@ def upload_videos_create_ads_cloned(
     use_flexible_format: bool = False,
     target_aspect_ratio: str | None = None,
     creative_name_manual: str | None = None,
+    game_name: str | None = None,
 ):
     """Upload videos and create ads, cloning settings from existing ads."""
     from facebook_business.adobjects.advideo import AdVideo
@@ -892,6 +1158,90 @@ def upload_videos_create_ads_cloned(
     # BRANCH A: FLEXIBLE FORMAT (Dynamic Creative)
     # -------------------------------------------------------------------------
     if use_flexible_format:
+        # Helper function to extract video size from filename
+        def _get_video_size_from_name(filename: str) -> str | None:
+            """Extract size from filename"""
+            if "1080x1080" in filename:
+                return "1080x1080"
+            elif "1920x1080" in filename:
+                return "1920x1080"
+            elif "1080x1920" in filename:
+                return "1080x1920"
+            return None
+        
+        # Helper function to extract base name (without size suffix)
+        def _get_base_name_from_filename(filename: str) -> str:
+            """Extract base name from filename (e.g., 'video462_ageofdinosaurs_en_45s_1080x1080_brown_251205.mp4' -> 'video462')"""
+            # Extract only the part before the first underscore (e.g., "video462")
+            if "_" in filename:
+                base = filename.split("_")[0]
+            else:
+                # If no underscore, use filename without extension
+                base = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            return base
+        
+        # Handle single video mode (requires 3 sizes per video)
+        if target_aspect_ratio == "single video":
+            # Group videos by base name
+            video_groups: dict[str, dict[str, dict]] = {}
+            for u in videos:
+                name = fb_ops._fname_any(u) or ""
+                base_name = _get_base_name_from_filename(name)
+                size = _get_video_size_from_name(name)
+                if not size:
+                    continue
+                if base_name not in video_groups:
+                    video_groups[base_name] = {}
+                video_groups[base_name][size] = u
+            
+            # Validate: Each group must have all 3 sizes
+            required_sizes = {"1080x1080", "1920x1080", "1080x1920"}
+            errors = []
+            valid_groups = {}
+            for base_name, sizes in video_groups.items():
+                missing = required_sizes - set(sizes.keys())
+                if missing:
+                    errors.append(f"{base_name}의 사이즈를 확인하세요. 누락된 사이즈: {', '.join(missing)}")
+                else:
+                    valid_groups[base_name] = sizes
+            
+            if errors:
+                st.error("\n".join(errors))
+                return []
+        
+            # Process single video mode (will be handled after video upload)
+            # Store groups for later processing
+            single_video_groups = valid_groups
+            name_suffix = ""  # No suffix for single video mode
+        else:
+            # Regular aspect ratio mode (1:1, 16:9, 9:16)
+            required_size_map = {
+                "1:1": "1080x1080",
+                "16:9": "1920x1080",
+                "9:16": "1080x1920",
+            }
+            required_size = required_size_map.get(target_aspect_ratio, "1080x1080")
+            suffix_map = {
+                "1:1": "_정방",
+                "16:9": "_가로",
+                "9:16": "_세로",
+            }
+            name_suffix = suffix_map.get(target_aspect_ratio, "_정방")
+            
+            # Check all videos have correct size
+            invalid_videos = []
+            for u in videos:
+                name = fb_ops._fname_any(u) or ""
+                size = _get_video_size_from_name(name)
+                if size != required_size:
+                    invalid_videos.append(f"{name} (expected {required_size}, found {size or 'unknown'})")
+            
+            if invalid_videos:
+                st.error(f"다이나믹 모드 ({target_aspect_ratio}): 다음 비디오의 사이즈를 확인하세요:\n" + "\n".join(invalid_videos))
+                return []
+
+            single_video_groups = None
+        
         # 1. Persist to temp
         persisted = []
         with ThreadPoolExecutor(max_workers=4) as ex:
@@ -907,84 +1257,227 @@ def upload_videos_create_ads_cloned(
             except Exception as e:
                 st.error(f"File prep failed {nm}: {e}")
 
-    # 2. Upload Videos
-    uploads = []
-    total = len(persisted)
-    progress = st.progress(0, text="Uploading videos (Marketer Mode)...")
-    
-    for i, item in enumerate(persisted):
-        try:
+        # 2. Upload Videos with Thumbnails (OPTIMIZED: 다이나믹 모드에서는 첫 번째 비디오 썸네일만 추출)
+        uploads = []
+        total = len(persisted)
+        progress = st.progress(0, text="Uploading videos with thumbnails (Marketer Mode)...")
+        
+        # 다이나믹 모드 (1:1, 16:9, 9:16)인 경우: 첫 번째 비디오의 썸네일만 추출
+        shared_thumbnail_url = None
+        if use_flexible_format and target_aspect_ratio in ["1:1", "16:9", "9:16"]:
+            if persisted:
+                first_item = persisted[0]
+                try:
+                    thumbnail_path = extract_thumbnail_from_video(first_item["path"])
+                    shared_thumbnail_url = upload_thumbnail_image(account, thumbnail_path)
+                    logger.info(f"Extracted and uploaded shared thumbnail for 다이나믹 모드: {shared_thumbnail_url}")
+                    # Clean up
+                    import os
+                    if os.path.exists(thumbnail_path):
+                        os.unlink(thumbnail_path)
+                except Exception as e:
+                    logger.warning(f"Failed to extract thumbnail for first video: {e}. Continuing without thumbnail.")
+        
+        def _upload_one_with_thumbnail(item, thumbnail_url_to_use=None):
+            """Upload one video with its thumbnail (parallelized)"""
+            thumbnail_path = None
+            thumbnail_url = thumbnail_url_to_use  # Use provided thumbnail or extract new one
+            
+            # If no thumbnail provided, extract from this video (for 단일 영상 & single video modes)
+            if thumbnail_url is None:
+                try:
+                    # Extract and upload thumbnail before uploading video
+                    thumbnail_path = extract_thumbnail_from_video(item["path"])
+                    thumbnail_url = upload_thumbnail_image(account, thumbnail_path)
+                    logger.info(f"Extracted and uploaded thumbnail for {item['name']}: {thumbnail_url}")
+                except Exception as e:
+                    logger.warning(f"Failed to extract/upload thumbnail for {item['name']}: {e}. Continuing without thumbnail.")
+                    # Continue without thumbnail - will use Facebook's auto-generated one
+            
+            # Upload video
             v = account.create_ad_video(params={
                 "file": item["path"], 
                 "content_category": "VIDEO_GAMING"
             })
-            uploads.append({"name": item["name"], "video_id": v["id"]})
-        except Exception as e:
-            st.error(f"Upload failed for {item['name']}: {e}")
-            progress.progress((i + 1) / total)
+            
+            # Clean up temporary thumbnail file
+            if thumbnail_path:
+                import os
+                try:
+                    if os.path.exists(thumbnail_path):
+                        os.unlink(thumbnail_path)
+                except Exception:
+                    pass
+            
+            return {
+                "name": item["name"],
+                "video_id": v["id"],
+                "thumbnail_url": thumbnail_url
+            }
+        
+        # Upload in parallel (same as test mode)
+        done = 0
+        if total:
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                # 다이나믹 모드(1:1, 16:9, 9:16)인 경우: 모든 비디오에 같은 썸네일 URL 사용
+                if shared_thumbnail_url:
+                    future_to_item = {ex.submit(_upload_one_with_thumbnail, item, shared_thumbnail_url): item for item in persisted}
+                else:
+                    # 단일 영상 & 다이나믹-single video: 각 사이즈별로 썸네일 추출
+                    future_to_item = {ex.submit(_upload_one_with_thumbnail, item, None): item for item in persisted}
+                
+                for fut in as_completed(future_to_item):
+                    item = future_to_item[fut]
+                    name = item["name"]
+                    try:
+                        res = fut.result()
+                        uploads.append(res)
+                        done += 1
+                        if progress is not None:
+                            pct = int(done / total * 100)
+                            progress.progress(pct, text=f"Uploading {done}/{total} videos…")
+                    except Exception as e:
+                        st.error(f"Upload failed for {name}: {e}")
         
         progress.empty()
         
-        # Wait for all videos to have thumbnails (improved)
-        if uploads:
-            from facebook_business.adobjects.advideo import AdVideo
-            import time
-            logger.info(f"Waiting for thumbnails for {len(uploads)} videos...")
-            
-            video_ids = [u["video_id"] for u in uploads]
-            ready = {vid: False for vid in video_ids}
-            deadline = time.time() + 600  # 10 minutes timeout
-            start_time = time.time()
-            
-            while time.time() < deadline:
-                all_done = True
-                for vid in video_ids:
-                    if ready[vid]:
-                        continue
-                    try:
-                        info = AdVideo(vid).api_get(fields=["status", "thumbnails", "picture", "processing_progress"])
-                        status = info.get("status")
-                        has_pic = bool(info.get("picture"))
-                        has_thumbs = bool(info.get("thumbnails"))
-                        progress = info.get("processing_progress", 0)
-                        
-                        if (has_pic or has_thumbs) and status in ("READY", "PUBLISHED"):
-                            ready[vid] = True
-                        elif status == "PROCESSING" and progress < 100:
-                            all_done = False
-                        else:
-                            all_done = False
-                    except Exception as e:
-                        all_done = False
-                        logger.warning(f"Error checking video {vid}: {e}")
-                
-                if all_done:
-                    elapsed = time.time() - start_time
-                    logger.info(f"All {len(video_ids)} videos have thumbnails after {elapsed:.1f}s")
-                    break
-                
-                time.sleep(5)
-            
-            not_ready = [vid for vid, is_ready in ready.items() if not is_ready]
-            if not_ready:
-                elapsed = time.time() - start_time
-                logger.warning(f"Timeout after {elapsed:.1f}s: {len(not_ready)} videos still don't have thumbnails")
-                st.warning(f"⚠️ {len(not_ready)} video(s) still processing thumbnails. Some creatives may have gray thumbnails.")
-
-        # 3. Create ONE Flexible Format Creative
-        results = []
-        api_errors = []
+        # For single video mode, we need to map uploaded videos back to groups
+        if target_aspect_ratio == "single video" and single_video_groups:
+            # Re-map groups with uploaded video IDs
+            uploaded_by_name = {u["name"]: u for u in uploads}
+            updated_groups = {}
+            for base_name, size_dict in single_video_groups.items():
+                updated_group = {}
+                for size, video_file in size_dict.items():
+                    # Find matching uploaded video
+                    matching_name = next((n for n in uploaded_by_name.keys() if base_name in n and size in n), None)
+                    if matching_name:
+                        updated_group[size] = uploaded_by_name[matching_name]
+                if len(updated_group) == 3:  # All 3 sizes present
+                    updated_groups[base_name] = updated_group
+            single_video_groups = updated_groups
         
-        ig_actor_id = None
-        try:
-            from facebook_business.adobjects.page import Page
-            p = Page(page_id).api_get(fields=["instagram_business_account"])
-            ig_actor_id = p.get("instagram_business_account", {}).get("id")
-        except: pass
+        # No need to wait for video status - we're using our own extracted thumbnails
+        # Videos will be processed by Facebook in the background while we create creatives
+        logger.info(f"Proceeding to create creatives for {len(uploads)} videos (thumbnails already uploaded)")
 
+        # 3. Create Flexible Format Creatives
+    results = []
+    api_errors = []
+    
+    ig_actor_id = None
+    try:
+        from facebook_business.adobjects.page import Page
+        p = Page(page_id).api_get(fields=["instagram_business_account"])
+        ig_actor_id = p.get("instagram_business_account", {}).get("id")
+    except: pass
+
+    # Handle single video mode separately
+    if target_aspect_ratio == "single video" and single_video_groups:
+        # Create one flexible creative per video group (3 sizes per creative)
+        from facebook_business.adobjects.advideo import AdVideo
+        import time
+        
+        # Get thumbnail from uploaded data (we already extracted and uploaded them)
+        def _get_thumbnail_from_upload(video_id: str) -> str | None:
+            """Get thumbnail URL from uploads list"""
+            for u in uploads:
+                if u.get("video_id") == video_id:
+                    return u.get("thumbnail_url")
+            return None
+        
+        # Process each video group
+        for base_name, size_dict in single_video_groups.items():
+            try:
+                # Get uploaded videos for this group (already mapped)
+                video_1x1 = size_dict.get("1080x1080")
+                video_9x16 = size_dict.get("1080x1920")
+                video_16x9 = size_dict.get("1920x1080")
+                
+                if not all([video_1x1, video_9x16, video_16x9]):
+                    api_errors.append(f"{base_name}: Missing videos for one or more sizes")
+                    continue
+                
+                # Get thumbnails from uploaded data
+                thumb_1x1 = _get_thumbnail_from_upload(video_1x1["video_id"])
+                thumb_9x16 = _get_thumbnail_from_upload(video_9x16["video_id"])
+                thumb_16x9 = _get_thumbnail_from_upload(video_16x9["video_id"])
+                
+                # Prepare CTA
+                final_cta = None
+                if orig_cta:
+                    final_cta = orig_cta.copy()
+                    if target_link and "value" in final_cta:
+                        final_cta["value"]["link"] = target_link
+                elif target_link:
+                    final_cta = {"type": "INSTALL_MOBILE_APP", "value": {"link": target_link}}
+                
+                # Build asset_feed_spec with 3 videos for different placements (like 단일 영상)
+                # Hybrid mode: Only include image_url if thumbnail is available
+                video_assets = []
+                for video_info, thumb, placements in [
+                    (video_1x1, thumb_1x1, ["feed", "reels_extreme_ads"]),
+                    (video_9x16, thumb_9x16, ["story", "status", "reels", "search_results", "apps_and_sites"]),
+                    (video_16x9, thumb_16x9, ["facebook_search_results"])
+                ]:
+                    asset = {
+                        "video_id": video_info["video_id"],
+                        "placements": placements
+                    }
+                    if thumb:  # Only add image_url if thumbnail is available
+                        asset["image_url"] = thumb
+                    video_assets.append(asset)
+                
+                asset_feed_spec = {
+                    "video_assets": video_assets,
+                    "headlines": headlines_list,  # All headlines
+                    "messages": messages_list,     # All messages (primary text)
+                    "call_to_action": final_cta 
+                }
+                
+                # Create object_story_spec
+                object_story_spec = {"page_id": page_id}
+                if try_instagram and ig_actor_id:
+                    object_story_spec["instagram_actor_id"] = ig_actor_id
+                
+                # Generate creative name
+                if creative_name_manual:
+                    creative_name = creative_name_manual
+                else:
+                    # Default: extract base name (e.g., "video263")
+                    creative_name = base_name
+                
+                # Create creative
+                creative = account.create_ad_creative(params={
+                    "name": creative_name,
+                    "object_story_spec": object_story_spec,
+                    "asset_feed_spec": asset_feed_spec
+                })
+                
+                # Create ad
+                ad_name = make_ad_name(creative_name, ad_name_prefix)
+                account.create_ad(params={
+                    "name": ad_name,
+                    "adset_id": adset_id,
+                    "creative": {"creative_id": creative["id"]},
+                    "status": Ad.Status.active,
+                })
+
+                results.append({"name": creative_name, "creative_id": creative["id"]})
+            except Exception as e:
+                api_errors.append(f"{base_name}: {str(e)}")
+    elif use_flexible_format:
+        # Regular flexible format mode (1:1, 16:9, 9:16)
         try:
             # Build asset_feed_spec with ALL headlines and messages
-            video_assets = [{"video_id": u["video_id"]} for u in uploads]
+            # Use shared thumbnail URL for all videos (already extracted from first video)
+            shared_thumb = uploads[0].get("thumbnail_url") if uploads else None
+            video_assets = []
+            for u in uploads:
+                asset = {"video_id": u["video_id"]}
+                if shared_thumb:  # Add shared thumbnail to all videos
+                    asset["image_url"] = shared_thumb
+                video_assets.append(asset)
             
             asset_feed_spec = {
                 "video_assets": video_assets,
@@ -999,7 +1492,6 @@ def upload_videos_create_ads_cloned(
                 # Map ratio string to API value
                 ratio_map = {
                     "1:1": "1:1",
-                    "4:5": "4:5",
                     "9:16": "9:16",
                     "16:9": "16:9",
                 }
@@ -1013,13 +1505,85 @@ def upload_videos_create_ads_cloned(
                 object_story_spec["instagram_actor_id"] = ig_actor_id
 
             # Create ONE Creative
-            # Create ONE Creative
-            # Use manual name if provided, else auto-generate
+            # Use manual name if provided, else auto-generate based on video naming pattern
             if creative_name_manual:
                 creative_name = creative_name_manual
             else:
-                base_name = uploads[0]["name"]
-                creative_name = f"Flexible_{len(uploads)}vids_{base_name}"
+                # Generate creative name based on video naming pattern
+                def _extract_video_number(filename: str) -> int | None:
+                    """Extract number from video name (e.g., 'video001' -> 1, 'video12' -> 12)"""
+                    import re
+                    # Try to find pattern like video001, video1, video12, etc.
+                    match = re.search(r'video\s*(\d+)', filename, re.IGNORECASE)
+                    if match:
+                        return int(match.group(1))
+                    return None
+                
+                def _generate_creative_name(video_names: list[str], game_name: str | None, suffix: str) -> str:
+                    """Generate creative name based on video number patterns"""
+                    video_numbers = []
+                    other_videos = []
+                    
+                    for name in video_names:
+                        num = _extract_video_number(name)
+                        if num is not None:
+                            video_numbers.append((num, name))
+                        else:
+                            other_videos.append(name)
+                    
+                    # Sort by number
+                    video_numbers.sort(key=lambda x: x[0])
+                    
+                    parts = []
+                    
+                    # Add non-numbered videos first
+                    for name in other_videos:
+                        # Extract base name without extension
+                        base = name.rsplit('.', 1)[0] if '.' in name else name
+                        parts.append(base)
+                    
+                    # Group consecutive numbers
+                    if video_numbers:
+                        ranges = []
+                        current_start = video_numbers[0][0]
+                        current_end = video_numbers[0][0]
+                        
+                        for i in range(1, len(video_numbers)):
+                            if video_numbers[i][0] == current_end + 1:
+                                # Consecutive
+                                current_end = video_numbers[i][0]
+                            else:
+                                # Gap found, save current range
+                                if current_start == current_end:
+                                    ranges.append(f"video{current_start:03d}")
+                                else:
+                                    ranges.append(f"video{current_start:03d}-{current_end:03d}")
+                                current_start = video_numbers[i][0]
+                                current_end = video_numbers[i][0]
+                        
+                        # Add last range
+                        if current_start == current_end:
+                            ranges.append(f"video{current_start:03d}")
+                        else:
+                            ranges.append(f"video{current_start:03d}-{current_end:03d}")
+                        
+                        parts.extend(ranges)
+                    
+                    # Build final name
+                    name_parts = [p for p in parts if p]
+                    if not name_parts:
+                        # Fallback if no pattern found
+                        base_name = video_names[0].rsplit('.', 1)[0] if video_names else "video"
+                        creative_name = f"{base_name}_{len(video_names)}vids"
+                    else:
+                        video_part = ",".join(name_parts)
+                        game_part = game_name or "game"
+                        creative_name = f"{video_part}_{game_part}_flexible{suffix}"
+                    
+                    return creative_name
+                
+                video_names = [u["name"] for u in uploads]
+                creative_name = _generate_creative_name(video_names, game_name, name_suffix)
             
             # FIX: asset_feed_spec is a SIBLING of object_story_spec
             creative = account.create_ad_creative(params={
@@ -1036,16 +1600,14 @@ def upload_videos_create_ads_cloned(
                 "creative": {"creative_id": creative["id"]},
                 "status": Ad.Status.active,
             })
-            
+
             results.append({"name": creative_name, "creative_id": creative["id"]})
         except Exception as e:
             api_errors.append(str(e))
-
+        
         if api_errors:
             st.error("Some ads failed to create:\n" + "\n".join(api_errors))
-        
-        return results
-
+    
     # -------------------------------------------------------------------------
     # BRANCH B: SINGLE FORMAT (Standard) - 1 Creative per Video Group (3 sizes)
     # -------------------------------------------------------------------------
@@ -1064,7 +1626,7 @@ def upload_videos_create_ads_cloned(
                 return "1080x1920"
             return None
         
-        def _create_creative_with_3_videos(base_name: str, videos_by_size: dict[str, dict]) -> dict:
+        def _create_creative_with_3_videos(base_name: str, videos_by_size: dict[str, dict], creative_title_override: str | None = None) -> dict:
             """Create 1 creative with 3 videos for different placements"""
             try:
                 from facebook_business.adobjects.advideo import AdVideo
@@ -1074,78 +1636,45 @@ def upload_videos_create_ads_cloned(
                 video_9x16 = videos_by_size["1080x1920"]
                 video_16x9 = videos_by_size["1920x1080"]
                 
-                # Get thumbnails for all videos (with retries like test mode)
-                def _get_thumbnail(video_id: str, name: str) -> str:
-                    max_retries = 3
-                    thumbnail_url = None
-                    
-                    for attempt in range(max_retries):
-                        try:
-                            vinfo = AdVideo(video_id).api_get(fields=["status", "thumbnails", "picture", "processing_progress"])
-                            status = vinfo.get("status")
-                            thumbnail_url = vinfo.get("picture")
-                            
-                            # If no picture, try to get from thumbnails
-                            if not thumbnail_url:
-                                thumbnails = vinfo.get("thumbnails")
-                                if thumbnails and isinstance(thumbnails, list) and len(thumbnails) > 0:
-                                    thumbnail_url = thumbnails[0].get("uri") if isinstance(thumbnails[0], dict) else None
-                            
-                            # Check if video is ready (has thumbnail and status is READY or PUBLISHED)
-                            if thumbnail_url and status in ("READY", "PUBLISHED"):
-                                break
-                            
-                            # If still processing and not last attempt, wait and retry
-                            if attempt < max_retries - 1:
-                                wait_time = 30 * (attempt + 1)  # 30s, 60s, 90s
-                                logger.info(f"Video {video_id} ({name}) thumbnail not ready (status: {status}), waiting {wait_time}s (attempt {attempt + 1}/{max_retries})...")
-                                time.sleep(wait_time)
-                                
-                        except Exception as e:
-                            if attempt < max_retries - 1:
-                                wait_time = 30 * (attempt + 1)
-                                logger.warning(f"Error getting thumbnail for {video_id} ({name}): {e}, retrying in {wait_time}s...")
-                                time.sleep(wait_time)
-                            else:
-                                raise
-                    
-                    if not thumbnail_url:
-                        raise RuntimeError(f"Video {video_id} ({name}) has no thumbnail after {max_retries} attempts")
-                    
-                    return thumbnail_url
+                # Get thumbnails from uploaded data (we already extracted and uploaded them)
+                def _get_thumbnail_from_upload(video_id: str) -> str | None:
+                    """Get thumbnail URL from uploads list"""
+                    for u in uploads:
+                        if u.get("video_id") == video_id:
+                            return u.get("thumbnail_url")
+                    return None
                 
-                thumb_1x1 = _get_thumbnail(video_1x1["video_id"], video_1x1["name"])
-                thumb_9x16 = _get_thumbnail(video_9x16["video_id"], video_9x16["name"])
-                thumb_16x9 = _get_thumbnail(video_16x9["video_id"], video_16x9["name"])
+                thumb_1x1 = _get_thumbnail_from_upload(video_1x1["video_id"])
+                thumb_9x16 = _get_thumbnail_from_upload(video_9x16["video_id"])
+                thumb_16x9 = _get_thumbnail_from_upload(video_16x9["video_id"])
                 
                 # Prepare CTA
                 final_cta = None
                 if orig_cta:
-                     final_cta = orig_cta.copy()
-                     if target_link and "value" in final_cta:
-                         final_cta["value"]["link"] = target_link
+                    final_cta = orig_cta.copy()
+                    if target_link and "value" in final_cta:
+                        final_cta["value"]["link"] = target_link
                 elif target_link:
-                     final_cta = {"type": "INSTALL_MOBILE_APP", "value": {"link": target_link}}
+                    final_cta = {"type": "INSTALL_MOBILE_APP", "value": {"link": target_link}}
 
                 # Create asset_feed_spec with 3 videos for different placements
+                # Hybrid mode: Only include image_url if thumbnail is available
+                video_assets = []
+                for video_info, thumb, placements in [
+                    (video_1x1, thumb_1x1, ["feed", "reels_extreme_ads"]),
+                    (video_9x16, thumb_9x16, ["story", "status", "reels", "search_results", "apps_and_sites"]),
+                    (video_16x9, thumb_16x9, ["facebook_search_results"])
+                ]:
+                    asset = {
+                        "video_id": video_info["video_id"],
+                        "placements": placements
+                    }
+                    if thumb:  # Only add image_url if thumbnail is available
+                        asset["image_url"] = thumb
+                    video_assets.append(asset)
+                
                 asset_feed_spec = {
-                    "video_assets": [
-                        {
-                            "video_id": video_1x1["video_id"],
-                            "image_url": thumb_1x1,
-                            "placements": ["feed", "reels_extreme_ads"]
-                        },
-                        {
-                            "video_id": video_9x16["video_id"],
-                            "image_url": thumb_9x16,
-                            "placements": ["story", "status", "reels", "search_results", "apps_and_sites"]
-                        },
-                        {
-                            "video_id": video_16x9["video_id"],
-                            "image_url": thumb_16x9,
-                            "placements": ["facebook_search_results"]
-                        }
-                    ],
+                    "video_assets": video_assets,
                     "headlines": headlines_list,  # All headlines
                     "messages": messages_list,     # All messages (primary text)
                     "call_to_action": final_cta 
@@ -1156,22 +1685,25 @@ def upload_videos_create_ads_cloned(
                 if try_instagram and ig_actor_id:
                     object_story_spec["instagram_actor_id"] = ig_actor_id
                     
+                # Determine creative name: use override if provided, otherwise use base_name
+                final_creative_name = creative_title_override if creative_title_override else base_name
+                    
                 # Create creative
                 creative = account.create_ad_creative(params={
-                    "name": base_name,
+                    "name": final_creative_name,
                     "object_story_spec": object_story_spec,
                     "asset_feed_spec": asset_feed_spec
                 })
                 
                 # Create ad
                 ad = account.create_ad(params={
-                    "name": make_ad_name(base_name, ad_name_prefix),
+                    "name": make_ad_name(final_creative_name, ad_name_prefix),
                     "adset_id": adset_id,
                     "creative": {"creative_id": creative["id"]},
                     "status": Ad.Status.active,
                 })
                 
-                return {"name": base_name, "ad_id": ad["id"], "creative_id": creative["id"]}
+                return {"name": final_creative_name, "ad_id": ad["id"], "creative_id": creative["id"]}
             except Exception as e:
                 return {"name": base_name, "error": str(e)}
 
@@ -1250,39 +1782,104 @@ def upload_videos_create_ads_cloned(
             start_time = time.time()
             sleep_s = 5  # Same as test mode
             
+            consecutive_rate_limits = 0
             while time.time() < deadline:
                 all_done = True
+                rate_limit_in_this_loop = False
+                
                 for vid in video_ids:
                     if ready[vid]:
                         continue
                     try:
-                        # Check video status and thumbnails (same fields as test mode)
-                        info = AdVideo(vid).api_get(fields=["status", "thumbnails", "picture", "processing_progress"])
+                        # Suppress warnings about thumbnails field (not supported for all video types)
+                        import warnings
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            # Check video status and thumbnails (same fields as test mode)
+                            info = AdVideo(vid).api_get(fields=["status", "thumbnails", "picture"])
                         status = info.get("status")
                         has_pic = bool(info.get("picture"))
                         has_thumbs = bool(info.get("thumbnails"))
-                        progress = info.get("processing_progress", 0)
                         
                         # Video is ready if it has picture or thumbnails, and status is READY or PUBLISHED (same logic as test mode)
                         if (has_pic or has_thumbs) and status in ("READY", "PUBLISHED"):
                             ready[vid] = True
-                        elif status == "PROCESSING" and progress < 100:
+                        elif status == "PROCESSING":
                             # Still processing, wait more
                             all_done = False
                         else:
                             # No thumbnail yet, keep waiting
                             all_done = False
+                        
+                        # Success - reset consecutive rate limit counter
+                        consecutive_rate_limits = 0
+                        
                     except Exception as e:
-                        # If we can't get info, assume not ready yet
-                        all_done = False
-                        logger.warning(f"Error checking video {vid}: {e}")
+                        # Check if this is a rate limit error (code 4)
+                        is_rate_limit = False
+                        error_code = None
+                        
+                        # Try multiple ways to detect rate limit error
+                        if isinstance(e, FacebookRequestError):
+                            # Use FacebookRequestError methods if available
+                            try:
+                                error_code = e.api_error_code()
+                            except:
+                                pass
+                            if not error_code:
+                                try:
+                                    error_msg = (e.api_error_message() or "").lower()
+                                    if "request limit" in error_msg or "#4" in str(e):
+                                        is_rate_limit = True
+                                except:
+                                    pass
+                        
+                        # Check error code
+                        if error_code == 4:
+                            is_rate_limit = True
+                        
+                        # Check error message as fallback
+                        error_str = str(e).lower()
+                        if not is_rate_limit and ("request limit" in error_str or "#4" in error_str or "code 4" in error_str):
+                            is_rate_limit = True
+                        
+                        # Check error attributes
+                        if not is_rate_limit:
+                            if hasattr(e, 'api_error_code'):
+                                error_code = e.api_error_code
+                            elif hasattr(e, 'api_error') and isinstance(e.api_error, dict):
+                                error_code = e.api_error.get('code')
+                            elif hasattr(e, 'error') and isinstance(e.error, dict):
+                                error_code = e.error.get('code')
+                            
+                            if error_code == 4:
+                                is_rate_limit = True
+                        
+                        if is_rate_limit:
+                            rate_limit_in_this_loop = True
+                            consecutive_rate_limits += 1
+                            all_done = False
+                        else:
+                            # If we can't get info, assume not ready yet
+                            all_done = False
+                            logger.warning(f"Error checking video {vid}: {e}")
+                
+                # If rate limit detected in this loop, wait longer before continuing
+                if rate_limit_in_this_loop:
+                    # Exponential backoff: 60s, 120s, 180s...
+                    wait_time = min(60 * consecutive_rate_limits, 300)  # Max 5 minutes
+                    logger.warning(f"Rate limit detected. Waiting {wait_time}s before retrying (consecutive: {consecutive_rate_limits})...")
+                    time.sleep(wait_time)
+                    # Continue to next iteration without checking all_done
                 
                 if all_done:
                     elapsed = time.time() - start_time
                     logger.info(f"All {len(video_ids)} videos have thumbnails after {elapsed:.1f}s")
                     break
                 
-                time.sleep(sleep_s)
+                # Normal sleep between loops (only if no rate limit)
+                if not rate_limit_in_this_loop:
+                    time.sleep(sleep_s)
             
             # Log which videos are ready/not ready (same as test mode)
             not_ready = [vid for vid, is_ready in ready.items() if not is_ready]
@@ -1327,17 +1924,29 @@ def upload_videos_create_ads_cloned(
         target_link = store_url
 
         # Create creatives for each valid group
+        # For single video mode, if creative_title_override is provided, use it as a pattern
+        # If it contains {base_name} or similar, replace it; otherwise use as-is for all
+        creative_title_override = creative_name_manual
+        
         for base_name, videos_by_size in video_groups.items():
-            res = _create_creative_with_3_videos(base_name, videos_by_size)
+            # If creative_title_override is provided, use it; otherwise use base_name
+            # User can set a custom title that will be used for all creatives, or leave empty to use base_name
+            if creative_title_override:
+                # Use the provided title (same for all, or user can customize per video if needed)
+                final_title = creative_title_override
+            else:
+                # Default: use base_name extracted from video filename
+                final_title = base_name
+            res = _create_creative_with_3_videos(base_name, videos_by_size, creative_title_override=final_title)
             if "error" in res:
                 api_errors.append(f"{res['name']}: {res['error']}")
             else:
                 results.append(res)
 
-        if api_errors:
-            st.error("Some ads failed to create:\n" + "\n".join(api_errors))
-            
-        return results
+    if api_errors:
+        st.error("Some ads failed to create:\n" + "\n".join(api_errors))
+        
+    return results
 
 # -------------------------------------------------------------------------
 # 6. Main Entry Point
@@ -1424,7 +2033,10 @@ def upload_to_facebook(
     # Determine mode flag
     is_flexible = (creative_type == "다이나믹")
     target_ratio_val = settings.get("dco_aspect_ratio") if is_flexible else None
-    manual_creative_name = settings.get("dco_creative_name") if is_flexible else None
+    if is_flexible:
+        manual_creative_name = settings.get("dco_creative_name")
+    else:
+        manual_creative_name = settings.get("single_creative_name")
 
     upload_videos_create_ads_cloned(
         account=account,
@@ -1436,7 +2048,8 @@ def upload_to_facebook(
         template_data=template_data,
         use_flexible_format=is_flexible,
         target_aspect_ratio=target_ratio_val,
-        creative_name_manual=manual_creative_name # << Pass it here
+        creative_name_manual=manual_creative_name,
+        game_name=game_name
     )
 
     plan["adset_id"] = target_adset_id

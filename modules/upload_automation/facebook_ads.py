@@ -15,6 +15,132 @@ import streamlit as st
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------
+# Thumbnail extraction and upload helpers
+# --------------------------------------------------------------------
+def extract_thumbnail_from_video(video_path: str, output_path: str | None = None) -> str:
+    """
+    Extract thumbnail from video using opencv.
+    Returns path to the saved thumbnail image.
+    """
+    try:
+        import cv2
+    except ImportError:
+        raise RuntimeError(
+            "opencv-python-headless is required for thumbnail extraction. "
+            "Install it with: pip install opencv-python-headless"
+        )
+    
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
+    
+    try:
+        # Get middle frame (or first frame if video is too short)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames > 0:
+            frame_number = max(0, total_frames // 2)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+        
+        ret, frame = cap.read()
+        
+        if not ret:
+            # Fallback to first frame
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ret, frame = cap.read()
+        
+        if not ret:
+            raise RuntimeError(f"Cannot read frame from video: {video_path}")
+        
+        # Save thumbnail
+        if output_path is None:
+            import tempfile
+            output_path = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False).name
+        
+        cv2.imwrite(output_path, frame)
+        logger.info(f"Extracted thumbnail from {video_path} to {output_path}")
+        return output_path
+    finally:
+        cap.release()
+
+def upload_thumbnail_image(account: "AdAccount", image_path: str) -> str:
+    """
+    Upload thumbnail image to Facebook using Graph API directly (like video upload).
+    Returns the image URL (required for video_data.image_url).
+    """
+    # Get access token
+    if "facebook" in st.secrets:
+        token = st.secrets["facebook"].get("access_token", "").strip()
+    else:
+        token = st.secrets.get("access_token", "").strip()
+    
+    if not token:
+        raise RuntimeError("Missing access_token in st.secrets (check [facebook] section)")
+    
+    act_id = account.get_id()
+    url = f"https://graph.facebook.com/v24.0/{act_id}/adimages"
+    
+    try:
+        # Upload image using multipart/form-data (same approach as video upload)
+        with open(image_path, 'rb') as f:
+            files = {'file': (os.path.basename(image_path), f, 'image/jpeg')}
+            data = {'access_token': token}
+            
+            response = requests.post(url, files=files, data=data, timeout=60)
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            # Log full response for debugging
+            logger.debug(f"AdImage API response: {result}")
+            
+            # Extract image URL from response (required for video_data.image_url)
+            # Response format: {"images": {"<hash>": {"hash": "<hash>", "url": "..."}}}
+            images = result.get("images", {})
+            if isinstance(images, dict):
+                # Get the first (and only) image from the response
+                for hash_key, image_data in images.items():
+                    if isinstance(image_data, dict):
+                        image_url = image_data.get("url")
+                        image_hash = image_data.get("hash") or hash_key
+                        if image_url:
+                            logger.info(f"Uploaded thumbnail image {image_path} to Facebook, url: {image_url}")
+                            return image_url
+                        # Fallback: construct URL from hash if URL not provided
+                        logger.warning(f"URL not found in response, constructing from hash: {image_hash}")
+                        # Try common Facebook CDN URL pattern
+                        image_url = f"https://scontent.xx.fbcdn.net/v/t45.5328-4/{image_hash}.jpg"
+                        return image_url
+                    else:
+                        # If image_data is just a string (the hash itself)
+                        image_hash = hash_key
+                        # Construct URL from hash
+                        image_url = f"https://scontent.xx.fbcdn.net/v/t45.5328-4/{image_hash}.jpg"
+                        logger.info(f"Uploaded thumbnail image {image_path} to Facebook, constructed url from hash: {image_url}")
+                        return image_url
+            
+            # Fallback: try to get hash directly and construct URL
+            image_hash = result.get("hash")
+            if image_hash:
+                image_url = f"https://scontent.xx.fbcdn.net/v/t45.5328-4/{image_hash}.jpg"
+                logger.info(f"Uploaded thumbnail image {image_path} to Facebook, constructed url from hash: {image_url}")
+                return image_url
+            
+            raise RuntimeError(f"Failed to get image URL from AdImage response: {result}")
+    except requests.exceptions.RequestException as e:
+        error_msg = str(e)
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_data = e.response.json()
+                error_msg = error_data.get("error", {}).get("message", error_msg)
+            except:
+                error_msg = e.response.text[:200] if e.response.text else error_msg
+        logger.error(f"Failed to upload thumbnail image {image_path}: {error_msg}")
+        raise RuntimeError(f"Failed to upload thumbnail image: {error_msg}") from e
+    except Exception as e:
+        logger.error(f"Failed to upload thumbnail image {image_path}: {e}")
+        raise
+
+# --------------------------------------------------------------------
 # Meta SDK and account helpers
 # --------------------------------------------------------------------
 try:
@@ -609,57 +735,124 @@ def upload_videos_create_ads(
             v = account.create_ad_video(params={"file": path, "content_category": "VIDEO_GAMING"})
             return v["id"]
 
-    def wait_all_videos_ready(video_ids: list[str], *, timeout_s: int = 300, sleep_s: int = 5) -> dict[str, bool]:
+    def wait_all_videos_ready(video_ids: list[str], *, timeout_s: int = 120, sleep_s: int = 10) -> dict[str, bool]:
         """
-        Poll advideo thumbnails for all video_ids to avoid blank previews.
-        Waits until ALL videos have thumbnails or timeout is reached.
+        Hybrid approach: Wait for thumbnails with shorter timeout.
+        Fast videos: Wait until ready.
+        Slow videos: Timeout after 2 minutes, continue with warning (Facebook will generate thumbnails later).
+        Handles rate limit errors gracefully.
         """
         from facebook_business.adobjects.advideo import AdVideo
         import time
+        import warnings
 
         ready = {vid: False for vid in video_ids}
         deadline = time.time() + timeout_s
         start_time = time.time()
+        consecutive_rate_limits = 0
 
         while time.time() < deadline:
             all_done = True
+            rate_limit_in_this_loop = False
+            
             for vid in video_ids:
                 if ready[vid]:
                     continue
                 try:
-                    # Check video status and thumbnails
-                    info = AdVideo(vid).api_get(fields=["status", "thumbnails", "picture", "processing_progress"])
+                    # Suppress warnings about thumbnails field (not supported for all video types)
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        # Check video status and thumbnails
+                        info = AdVideo(vid).api_get(fields=["status", "thumbnails", "picture"])
                     status = info.get("status")
                     has_pic = bool(info.get("picture"))
                     has_thumbs = bool(info.get("thumbnails"))
-                    progress = info.get("processing_progress", 0)
                     
                     # Video is ready if it has picture or thumbnails, and status is READY or PUBLISHED
                     if (has_pic or has_thumbs) and status in ("READY", "PUBLISHED"):
                         ready[vid] = True
-                    elif status == "PROCESSING" and progress < 100:
+                    elif status == "PROCESSING":
                         # Still processing, wait more
                         all_done = False
                     else:
                         # No thumbnail yet, keep waiting
                         all_done = False
+                    
+                    # Success - reset consecutive rate limit counter
+                    consecutive_rate_limits = 0
+                    
                 except Exception as e:
-                    # If we can't get info, assume not ready yet
-                    all_done = False
-                    logger.warning(f"Error checking video {vid}: {e}")
+                    # Check if this is a rate limit error (code 4)
+                    is_rate_limit = False
+                    error_code = None
+                    
+                    # Try multiple ways to detect rate limit error
+                    if isinstance(e, FacebookRequestError):
+                        # Use FacebookRequestError methods if available
+                        try:
+                            error_code = e.api_error_code()
+                        except:
+                            pass
+                        if not error_code:
+                            try:
+                                error_msg = (e.api_error_message() or "").lower()
+                                if "request limit" in error_msg or "#4" in str(e):
+                                    is_rate_limit = True
+                            except:
+                                pass
+                    
+                    # Check error code
+                    if error_code == 4:
+                        is_rate_limit = True
+                    
+                    # Check error message as fallback
+                    error_str = str(e).lower()
+                    if not is_rate_limit and ("request limit" in error_str or "#4" in error_str or "code 4" in error_str):
+                        is_rate_limit = True
+                    
+                    # Check error attributes
+                    if not is_rate_limit:
+                        if hasattr(e, 'api_error_code'):
+                            error_code = e.api_error_code
+                        elif hasattr(e, 'api_error') and isinstance(e.api_error, dict):
+                            error_code = e.api_error.get('code')
+                        elif hasattr(e, 'error') and isinstance(e.error, dict):
+                            error_code = e.error.get('code')
+                        
+                        if error_code == 4:
+                            is_rate_limit = True
+                    
+                    if is_rate_limit:
+                        rate_limit_in_this_loop = True
+                        consecutive_rate_limits += 1
+                        all_done = False
+                    else:
+                        # Other errors - assume not ready yet
+                        all_done = False
+                        logger.warning(f"Error checking video {vid}: {e}")
+            
+            # If rate limit detected in this loop, wait longer before continuing
+            if rate_limit_in_this_loop:
+                # Exponential backoff: 60s, 120s, 180s...
+                wait_time = min(60 * consecutive_rate_limits, 300)  # Max 5 minutes
+                logger.warning(f"Rate limit detected. Waiting {wait_time}s before retrying (consecutive: {consecutive_rate_limits})...")
+                time.sleep(wait_time)
+                # Continue to next iteration without checking all_done
             
             if all_done:
                 elapsed = time.time() - start_time
                 logger.info(f"All {len(video_ids)} videos have thumbnails after {elapsed:.1f}s")
                 break
             
-            time.sleep(sleep_s)
+            # Normal sleep between loops (only if no rate limit)
+            if not rate_limit_in_this_loop:
+                time.sleep(sleep_s)
         
-        # Log which videos are ready/not ready
+        # Log which videos are ready/not ready (hybrid: continue even if not ready)
         not_ready = [vid for vid, is_ready in ready.items() if not is_ready]
         if not_ready:
             elapsed = time.time() - start_time
-            logger.warning(f"Timeout after {elapsed:.1f}s: {len(not_ready)} videos still don't have thumbnails: {not_ready}")
+            logger.warning(f"Hybrid mode: {len(not_ready)} videos still processing thumbnails after {elapsed:.1f}s. Continuing - Facebook will generate thumbnails automatically.")
         else:
             elapsed = time.time() - start_time
             logger.info(f"All videos ready after {elapsed:.1f}s")
@@ -703,8 +896,33 @@ def upload_videos_create_ads(
 
     def _upload_one(item):
         name, path = item["name"], item["path"]
+        # Extract thumbnail before uploading video
+        thumbnail_path = None
+        thumbnail_url = None
+        try:
+            thumbnail_path = extract_thumbnail_from_video(path)
+            thumbnail_url = upload_thumbnail_image(account, thumbnail_path)
+            logger.info(f"Extracted and uploaded thumbnail for {name}: {thumbnail_url}")
+        except Exception as e:
+            logger.warning(f"Failed to extract/upload thumbnail for {name}: {e}. Continuing without thumbnail.")
+            # Continue without thumbnail - will use Facebook's auto-generated one
+        
+        # Upload video
         vid = upload_video_resumable(path)
-        return {"name": name, "path": path, "video_id": vid}
+        
+        # Clean up temporary thumbnail file
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            try:
+                os.unlink(thumbnail_path)
+            except Exception:
+                pass
+        
+        return {
+            "name": name,
+            "path": path,
+            "video_id": vid,
+            "thumbnail_url": thumbnail_url  # This is the image hash from AdImage
+        }
 
     done = 0
     if total:
@@ -727,17 +945,9 @@ def upload_videos_create_ads(
     if progress:
         progress.empty()
 
-    # Wait for all videos to have thumbnails
-    video_ids = [u["video_id"] for u in uploads]
-    if video_ids:
-        ready_status = wait_all_videos_ready(video_ids, timeout_s=600, sleep_s=5)  # Increased timeout to 10 minutes
-        not_ready = [vid for vid, is_ready in ready_status.items() if not is_ready]
-        if not_ready:
-            st.warning(f"⚠️ {len(not_ready)} video(s) still processing thumbnails. Continuing anyway, but some creatives may have gray thumbnails.")
-            # Mark not-ready videos for retry in _process_one_video
-            for u in uploads:
-                if u["video_id"] in not_ready:
-                    u["needs_thumbnail_retry"] = True
+    # No need to wait for video status - we're using our own extracted thumbnails
+    # Videos will be processed by Facebook in the background while we create creatives
+    logger.info(f"Proceeding to create creatives for {len(uploads)} videos (thumbnails already uploaded)")
 
     # Create creatives + ads in parallel
     results = []
@@ -746,64 +956,25 @@ def upload_videos_create_ads(
     done_c = 0
 
     def _process_one_video(up):
-        from facebook_business.adobjects.advideo import AdVideo
         from facebook_business.adobjects.adcreative import AdCreative
         from facebook_business.adobjects.ad import Ad
         from facebook_business.exceptions import FacebookRequestError
         import time
 
         name, video_id = up["name"], up["video_id"]
-        needs_retry = up.get("needs_thumbnail_retry", False)
-        
-        # If thumbnail wasn't ready, wait a bit more and retry
-        if needs_retry:
-            logger.info(f"Video {video_id} ({name}) needs thumbnail retry, waiting additional 30s...")
-            time.sleep(30)
-        
-        try:
-            # Try to get thumbnail with retries
-            max_retries = 3 if needs_retry else 1
-            thumbnail_url = None
-            
-            for attempt in range(max_retries):
-                try:
-                    video_info = AdVideo(video_id).api_get(fields=["status", "thumbnails", "picture", "processing_progress"])
-                    thumbnail_url = video_info.get("picture")
-                    
-                    # If no picture, try to get from thumbnails
-                    if not thumbnail_url:
-                        thumbnails = video_info.get("thumbnails")
-                        if thumbnails and isinstance(thumbnails, list) and len(thumbnails) > 0:
-                            # Get the first thumbnail URL
-                            thumbnail_url = thumbnails[0].get("uri") if isinstance(thumbnails[0], dict) else None
-                    
-                    if thumbnail_url:
-                        break
-                    
-                    # If still no thumbnail and not last attempt, wait and retry
-                    if attempt < max_retries - 1:
-                        wait_time = 30 * (attempt + 1)  # 30s, 60s, 90s
-                        logger.info(f"Video {video_id} ({name}) thumbnail not ready, waiting {wait_time}s (attempt {attempt + 1}/{max_retries})...")
-                        time.sleep(wait_time)
-                        
-                except Exception as e:
-                    if attempt < max_retries - 1:
-                        wait_time = 30 * (attempt + 1)
-                        logger.warning(f"Error getting thumbnail for {video_id} ({name}): {e}, retrying in {wait_time}s...")
-                        time.sleep(wait_time)
-                    else:
-                        raise
-            
-            if not thumbnail_url:
-                raise RuntimeError(f"Video {video_id} ({name}) processed but no 'picture' or 'thumbnails' URL was returned after {max_retries} attempts.")
+        # Use pre-uploaded thumbnail from _upload_one
+        thumbnail_url = up.get("thumbnail_url")
 
+        try:
             def _create_once(allow_ig: bool) -> str:
                 vd = {
                     "video_id": video_id,
                     "title": name,
                     "message": "",
-                    "image_url": thumbnail_url,
                 }
+                # Use our extracted thumbnail (image hash from AdImage)
+                if thumbnail_url:
+                    vd["image_url"] = thumbnail_url
                 if store_url:
                     vd["call_to_action"] = {
                         "type": "INSTALL_MOBILE_APP",
@@ -888,7 +1059,19 @@ def _plan_upload(
     end_iso = settings.get("end_iso")
 
     n = int(settings.get("suffix_number") or 1)
-    suffix_str = f"{n}th"
+    
+    # Convert to ordinal suffix (1st, 2nd, 3rd, 4th, etc.)
+    if n % 10 == 1 and n % 100 != 11:
+        suffix_str = f"{n}st"
+    elif n % 10 == 2 and n % 100 != 12:
+        suffix_str = f"{n}nd"
+    elif n % 10 == 3 and n % 100 != 13:
+        suffix_str = f"{n}rd"
+    else:
+        suffix_str = f"{n}th"
+    
+    # Add "_ai" suffix if AI checkbox is checked
+    ai_suffix = "_ai" if settings.get("use_ai", False) else ""
 
     launch_date_suffix = ""
     if settings.get("add_launch_date"):
@@ -898,7 +1081,7 @@ def _plan_upload(
         except Exception:
             launch_date_suffix = ""
 
-    adset_name = f"{adset_prefix}_{suffix_str}{launch_date_suffix}"
+    adset_name = f"{adset_prefix}{ai_suffix}_{suffix_str}{launch_date_suffix}"
 
     allowed = {".mp4", ".mpeg4"}
     remote = st.session_state.remote_videos.get(settings.get("game_key", ""), []) or []
@@ -1274,6 +1457,13 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             key=f"suffix_{idx}",
         )
 
+        use_ai = st.checkbox(
+            "AI",
+            value=bool(cur.get("use_ai", False)),
+            key=f"use_ai_{idx}",
+            help="체크 시 광고 세트 이름에 '_ai'가 추가됩니다. 예: ..._creativetest_ai_nth",
+        )
+
         app_store = st.selectbox(
             "모바일 앱 스토어",
             ["Google Play 스토어", "Apple App Store"],
@@ -1495,6 +1685,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         # Save settings with validated countries
         st.session_state.settings[game] = {
             "suffix_number": int(suffix_number),
+            "use_ai": bool(use_ai),
             "add_launch_date": bool(add_launch_date),
             "app_store": app_store,
             "fb_app_id": fb_app_id.strip(),

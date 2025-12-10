@@ -286,12 +286,20 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             with st.status("Importing videos...", expanded=True) as status:
                                 imported = _run_drive_import(drv_input, int(workers), _on_progress)
                                 lst = st.session_state.remote_videos.get(game, [])
-                                lst.extend(imported)
-                                st.session_state.remote_videos[game] = lst
-                                status.update(label=f"Done: {len(imported)} files", state="complete")
+                                # Combine existing and newly imported files
+                                combined = lst + imported
+                                # Remove duplicates by filename (case-insensitive)
+                                deduplicated = fb_ops._dedupe_by_name(combined)
+                                st.session_state.remote_videos[game] = deduplicated
+                                new_count = len(imported)
+                                duplicate_count = len(combined) - len(deduplicated)
+                                status.update(label=f"Done: {new_count} files imported", state="complete")
                                 if isinstance(imported, dict) and imported.get("errors"):
                                     st.warning("\n".join(imported["errors"]))
-                            st.success(f"Imported {len(imported)} videos.")
+                            if duplicate_count > 0:
+                                st.success(f"Imported {new_count} videos. ({duplicate_count} duplicates removed)")
+                            else:
+                                st.success(f"Imported {new_count} videos.")
                         except Exception as e:
                             st.error(f"Import failed: {e}")
 
@@ -377,6 +385,11 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         preview = fb_module.preview_facebook_upload(game, remote_list, settings)
                         
                         with st.expander("📋 Facebook Upload Preview", expanded=True):
+                            # Show error if present
+                            if preview.get('error'):
+                                st.error(f"❌ **Validation Error:**\n{preview['error']}")
+                                st.markdown("---")
+                            
                             st.markdown("### Campaign & Ad Set")
                             st.write(f"**Campaign ID:** {preview['campaign_id']}")
                             st.write(f"**Ad Set ID:** {preview['adset_id']}")
