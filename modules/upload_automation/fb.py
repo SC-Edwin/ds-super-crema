@@ -99,17 +99,27 @@ def _check_and_free_adset_capacity(account: AdAccount, adset_id: str, game: str,
         # Calculate how many creatives will be uploaded
         remote_list = st.session_state.get("remote_videos", {}).get(game, [])
         creative_type = st.session_state.get("settings", {}).get(game, {}).get("creative_type", "단일 영상")
+        dco_aspect_ratio = st.session_state.get("settings", {}).get(game, {}).get("dco_aspect_ratio")
+        
+        # Helper function to count video groups (each group = 1 creative with 3 sizes)
+        def _get_base_name(filename: str) -> str:
+            return filename.split("_")[0] if "_" in filename else filename.split(".")[0]
+        
+        def _get_video_size(filename: str) -> str | None:
+            if "1080x1080" in filename or "1920x1080" in filename or "1080x1920" in filename:
+                return True
+            return None
         
         if creative_type == "단일 영상":
             # Count video groups (each group = 1 creative)
-            def _get_base_name(filename: str) -> str:
-                return filename.split("_")[0] if "_" in filename else filename.split(".")[0]
-            
-            def _get_video_size(filename: str) -> str | None:
-                if "1080x1080" in filename or "1920x1080" in filename or "1080x1920" in filename:
-                    return True
-                return None
-            
+            video_groups = set()
+            for item in remote_list:
+                name = getattr(item, "name", None) or (item.get("name") if isinstance(item, dict) else None)
+                if name and _get_video_size(name):
+                    video_groups.add(_get_base_name(name))
+            new_creatives_count = len(video_groups)
+        elif creative_type == "다이나믹" and dco_aspect_ratio == "single video":
+            # Dynamic single video: count video groups (each group = 1 creative with 3 sizes)
             video_groups = set()
             for item in remote_list:
                 name = getattr(item, "name", None) or (item.get("name") if isinstance(item, dict) else None)
@@ -117,7 +127,7 @@ def _check_and_free_adset_capacity(account: AdAccount, adset_id: str, game: str,
                     video_groups.add(_get_base_name(name))
             new_creatives_count = len(video_groups)
         else:
-            # Dynamic: 1 creative
+            # Dynamic regular mode (1:1, 16:9, 9:16): 1 creative for all videos
             new_creatives_count = 1
         
         total_after_upload = current_count + new_creatives_count
@@ -591,13 +601,6 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             index=0,
             key=f"fb_creative_type_{idx}",
         )
-        
-        store_url = st.text_input(
-            "Store URL (Optional)",
-            value=st.session_state.get(f"fb_store_url_{idx}", ""),
-            key=f"fb_store_url_input_{idx}",
-            placeholder="https://play.google.com/store/apps/details?id=...",
-        )
 
         if creative_type == "다이나믹":
             dco_aspect_ratio = st.selectbox(
@@ -638,7 +641,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "campaign_id": selected_campaign_id,
             "adset_id": selected_adset_id,
             "creative_type": creative_type,
-            "store_url": store_url,
+            "store_url": "",  # Store URL removed from UI - will use from template or empty
             "dco_aspect_ratio": dco_aspect_ratio,
             "dco_creative_name": dco_creative_name,
             "single_creative_name": single_creative_name if creative_type == "단일 영상" else None,
