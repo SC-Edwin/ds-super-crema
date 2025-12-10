@@ -396,6 +396,40 @@ def fetch_reference_creative_data(_account: AdAccount, adset_id: str) -> dict:
                 result["call_to_action"] = cta_serializable
             else:
                 result["call_to_action"] = str(cta)
+        
+        # Copy ALL other video_data fields (app_link, application_id, object_id, etc.)
+        # Exclude fields we already handle separately (title, message, call_to_action, video_id, image_url)
+        excluded_fields = {"title", "message", "call_to_action", "video_id", "image_url"}
+        video_data_other = {}
+        for key, value in video_data.items():
+            if key not in excluded_fields and value is not None:
+                # Deep copy to avoid reference issues
+                if isinstance(value, dict):
+                    video_data_other[key] = {str(k): str(v) if v is not None else None for k, v in value.items()}
+                elif isinstance(value, (list, tuple)):
+                    video_data_other[key] = [str(item) for item in value]
+                else:
+                    video_data_other[key] = str(value) if value is not None else None
+        
+        if video_data_other:
+            result["video_data_other"] = video_data_other
+            logger.info(f"Found additional video_data fields: {list(video_data_other.keys())}")
+        
+        # Also copy asset_feed_spec other fields if any
+        asset_feed_other = {}
+        excluded_asset_fields = {"titles", "headlines", "bodies", "messages", "call_to_action", "video_assets"}
+        for key, value in asset_feed.items():
+            if key not in excluded_asset_fields and value is not None:
+                if isinstance(value, dict):
+                    asset_feed_other[key] = {str(k): str(v) if v is not None else None for k, v in value.items()}
+                elif isinstance(value, (list, tuple)):
+                    asset_feed_other[key] = [str(item) for item in value]
+                else:
+                    asset_feed_other[key] = str(value) if value is not None else None
+        
+        if asset_feed_other:
+            result["asset_feed_other"] = asset_feed_other
+            logger.info(f"Found additional asset_feed_spec fields: {list(asset_feed_other.keys())}")
             
         return result
     except Exception as e:
@@ -671,6 +705,9 @@ def preview_facebook_upload(
     
     # Preview creatives that would be created
     preview_creatives = []
+    errors = []  # Initialize errors list for all modes
+    valid_groups = {}  # Initialize valid_groups for all modes
+    
     if creative_type == "다이나믹":
         # Validate video sizes based on aspect ratio
         dco_aspect_ratio = settings.get("dco_aspect_ratio")
@@ -906,41 +943,41 @@ def preview_facebook_upload(
                     "message": messages_found,     # All messages
                     "cta": cta_found,
                 })
-        else:
-            # 단일 영상 모드: 3가지 사이즈 검증 및 그룹화
-            def _get_base_name(filename: str) -> str:
-                return filename.split("_")[0] if "_" in filename else filename.split(".")[0]
-            
-            def _get_video_size(filename: str) -> str | None:
-                if "1080x1080" in filename:
-                    return "1080x1080"
-                elif "1920x1080" in filename:
-                    return "1920x1080"
-                elif "1080x1920" in filename:
-                    return "1080x1920"
-                return None
-            
-            # Group by base name
-            video_groups: dict[str, dict[str, str]] = {}
-            for name in video_names:
-                base_name = _get_base_name(name)
-                size = _get_video_size(name)
-                if not size:
-                    continue
-                if base_name not in video_groups:
-                    video_groups[base_name] = {}
-                video_groups[base_name][size] = name
-            
-            # Validate: Each group must have all 3 sizes
-            required_sizes = {"1080x1080", "1920x1080", "1080x1920"}
-            errors = []
-            valid_groups = {}
-            for base_name, sizes in video_groups.items():
-                missing = required_sizes - set(sizes.keys())
-                if missing:
-                    errors.append(f"{base_name}의 사이즈를 확인하세요. 누락된 사이즈: {', '.join(missing)}")
-                else:
-                    valid_groups[base_name] = sizes
+    elif creative_type == "단일 영상":
+        # 단일 영상 모드: 3가지 사이즈 검증 및 그룹화
+        def _get_base_name(filename: str) -> str:
+            return filename.split("_")[0] if "_" in filename else filename.split(".")[0]
+        
+        def _get_video_size(filename: str) -> str | None:
+            if "1080x1080" in filename:
+                return "1080x1080"
+            elif "1920x1080" in filename:
+                return "1920x1080"
+            elif "1080x1920" in filename:
+                return "1080x1920"
+            return None
+        
+        # Group by base name
+        video_groups: dict[str, dict[str, str]] = {}
+        for name in video_names:
+            base_name = _get_base_name(name)
+            size = _get_video_size(name)
+            if not size:
+                continue
+            if base_name not in video_groups:
+                video_groups[base_name] = {}
+            video_groups[base_name][size] = name
+        
+        # Validate: Each group must have all 3 sizes
+        required_sizes = {"1080x1080", "1920x1080", "1080x1920"}
+        errors = []
+        valid_groups = {}
+        for base_name, sizes in video_groups.items():
+            missing = required_sizes - set(sizes.keys())
+            if missing:
+                errors.append(f"{base_name}의 사이즈를 확인하세요. 누락된 사이즈: {', '.join(missing)}")
+            else:
+                valid_groups[base_name] = sizes
         
         if errors:
             return {
@@ -995,6 +1032,9 @@ def preview_facebook_upload(
                 "message": messages_found,     # All messages
                 "cta": cta_found,
             })
+    else:
+        # Unknown creative type
+        pass
     
     # Get current ad count in adset and capacity info
     ADSET_CREATIVE_LIMIT = 50
@@ -1145,6 +1185,8 @@ def upload_videos_create_ads_cloned(
     headlines_list = template.get("headline") or ["New Game"]
     messages_list = template.get("message") or []
     orig_cta = template.get("call_to_action")
+    video_data_other = template.get("video_data_other", {})  # All other video_data fields (app_link, etc.)
+    asset_feed_other = template.get("asset_feed_other", {})  # All other asset_feed_spec fields
     
     # Ensure lists (not just first one)
     if not isinstance(headlines_list, list):
@@ -1338,7 +1380,7 @@ def upload_videos_create_ads_cloned(
                             progress.progress(pct, text=f"Uploading {done}/{total} videos…")
                     except Exception as e:
                         st.error(f"Upload failed for {name}: {e}")
-        
+    
         progress.empty()
         
         # For single video mode, we need to map uploaded videos back to groups
@@ -1362,100 +1404,260 @@ def upload_videos_create_ads_cloned(
         logger.info(f"Proceeding to create creatives for {len(uploads)} videos (thumbnails already uploaded)")
 
         # 3. Create Flexible Format Creatives
-    results = []
-    api_errors = []
-    
-    ig_actor_id = None
-    try:
-        from facebook_business.adobjects.page import Page
-        p = Page(page_id).api_get(fields=["instagram_business_account"])
-        ig_actor_id = p.get("instagram_business_account", {}).get("id")
-    except: pass
+        results = []
+        api_errors = []
+        
+        ig_actor_id = None
+        try:
+            from facebook_business.adobjects.page import Page
+            p = Page(page_id).api_get(fields=["instagram_business_account"])
+            ig_actor_id = p.get("instagram_business_account", {}).get("id")
+        except: pass
 
-    # Handle single video mode separately
-    if target_aspect_ratio == "single video" and single_video_groups:
-        # Create one flexible creative per video group (3 sizes per creative)
-        from facebook_business.adobjects.advideo import AdVideo
-        import time
-        
-        # Get thumbnail from uploaded data (we already extracted and uploaded them)
-        def _get_thumbnail_from_upload(video_id: str) -> str | None:
-            """Get thumbnail URL from uploads list"""
-            for u in uploads:
-                if u.get("video_id") == video_id:
-                    return u.get("thumbnail_url")
-            return None
-        
-        # Process each video group
-        for base_name, size_dict in single_video_groups.items():
-            try:
-                # Get uploaded videos for this group (already mapped)
-                video_1x1 = size_dict.get("1080x1080")
-                video_9x16 = size_dict.get("1080x1920")
-                video_16x9 = size_dict.get("1920x1080")
-                
-                if not all([video_1x1, video_9x16, video_16x9]):
-                    api_errors.append(f"{base_name}: Missing videos for one or more sizes")
-                    continue
-                
-                # Get thumbnails from uploaded data
-                thumb_1x1 = _get_thumbnail_from_upload(video_1x1["video_id"])
-                thumb_9x16 = _get_thumbnail_from_upload(video_9x16["video_id"])
-                thumb_16x9 = _get_thumbnail_from_upload(video_16x9["video_id"])
-                
-                # Prepare CTA
-                final_cta = None
-                if orig_cta:
-                    final_cta = orig_cta.copy()
-                    if target_link and "value" in final_cta:
-                        final_cta["value"]["link"] = target_link
-                elif target_link:
-                    final_cta = {"type": "INSTALL_MOBILE_APP", "value": {"link": target_link}}
-                
-                # Build asset_feed_spec with 3 videos for different placements (like 단일 영상)
-                # Hybrid mode: Only include image_url if thumbnail is available
-                video_assets = []
-                for video_info, thumb, placements in [
-                    (video_1x1, thumb_1x1, ["feed", "reels_extreme_ads"]),
-                    (video_9x16, thumb_9x16, ["story", "status", "reels", "search_results", "apps_and_sites"]),
-                    (video_16x9, thumb_16x9, ["facebook_search_results"])
-                ]:
-                    asset = {
-                        "video_id": video_info["video_id"],
-                        "placements": placements
+        # Handle single video mode separately
+        if target_aspect_ratio == "single video" and single_video_groups:
+            # Create one flexible creative per video group (3 sizes per creative)
+            from facebook_business.adobjects.advideo import AdVideo
+            import time
+            
+            # Get thumbnail from uploaded data (we already extracted and uploaded them)
+            def _get_thumbnail_from_upload(video_id: str) -> str | None:
+                """Get thumbnail URL from uploads list"""
+                for u in uploads:
+                    if u.get("video_id") == video_id:
+                        return u.get("thumbnail_url")
+                return None
+            
+            # Process each video group
+            for base_name, size_dict in single_video_groups.items():
+                try:
+                    # Get uploaded videos for this group (already mapped)
+                    video_1x1 = size_dict.get("1080x1080")
+                    video_9x16 = size_dict.get("1080x1920")
+                    video_16x9 = size_dict.get("1920x1080")
+                    
+                    if not all([video_1x1, video_9x16, video_16x9]):
+                        api_errors.append(f"{base_name}: Missing videos for one or more sizes")
+                        continue
+                    
+                    # Get thumbnails from uploaded data
+                    thumb_1x1 = _get_thumbnail_from_upload(video_1x1["video_id"])
+                    thumb_9x16 = _get_thumbnail_from_upload(video_9x16["video_id"])
+                    thumb_16x9 = _get_thumbnail_from_upload(video_16x9["video_id"])
+                    
+                    # Prepare CTA
+                    final_cta = None
+                    if orig_cta:
+                        final_cta = orig_cta.copy()
+                        if target_link and "value" in final_cta:
+                            final_cta["value"]["link"] = target_link
+                    elif target_link:
+                        final_cta = {"type": "INSTALL_MOBILE_APP", "value": {"link": target_link}}
+                    
+                    # Build asset_feed_spec with 3 videos for different placements (like 단일 영상)
+                    # Hybrid mode: Only include image_url if thumbnail is available
+                    video_assets = []
+                    for video_info, thumb, placements in [
+                        (video_1x1, thumb_1x1, ["feed", "reels_extreme_ads"]),
+                        (video_9x16, thumb_9x16, ["story", "status", "reels", "search_results", "apps_and_sites"]),
+                        (video_16x9, thumb_16x9, ["facebook_search_results"])
+                    ]:
+                        asset = {
+                            "video_id": video_info["video_id"],
+                            "placements": placements
+                        }
+                        if thumb:  # Only add image_url if thumbnail is available
+                            asset["image_url"] = thumb
+                        
+                        # Copy all other video_data fields (app_link, application_id, etc.)
+                        for key, value in video_data_other.items():
+                            if key not in asset:  # Don't override existing fields
+                                asset[key] = value
+                        
+                        video_assets.append(asset)
+                    
+                    asset_feed_spec = {
+                        "video_assets": video_assets,
+                        "headlines": headlines_list,  # All headlines
+                        "messages": messages_list,     # All messages (primary text)
+                        "call_to_action": final_cta 
                     }
-                    if thumb:  # Only add image_url if thumbnail is available
-                        asset["image_url"] = thumb
+                    
+                    # Copy all other asset_feed_spec fields
+                    for key, value in asset_feed_other.items():
+                        if key not in asset_feed_spec:  # Don't override existing fields
+                            asset_feed_spec[key] = value
+                    
+                    # Create object_story_spec
+                    object_story_spec = {"page_id": page_id}
+                    if try_instagram and ig_actor_id:
+                        object_story_spec["instagram_actor_id"] = ig_actor_id
+                    
+                    # Generate creative name
+                    if creative_name_manual:
+                        creative_name = creative_name_manual
+                    else:
+                        # Default: extract base name (e.g., "video263")
+                        creative_name = base_name
+                    
+                    # Create creative
+                    creative = account.create_ad_creative(params={
+                        "name": creative_name,
+                        "object_story_spec": object_story_spec,
+                        "asset_feed_spec": asset_feed_spec
+                    })
+                        
+                    # Create ad
+                    ad_name = make_ad_name(creative_name, ad_name_prefix)
+                    account.create_ad(params={
+                        "name": ad_name,
+                        "adset_id": adset_id,
+                        "creative": {"creative_id": creative["id"]},
+                        "status": Ad.Status.active,
+                    })
+
+                    results.append({"name": creative_name, "creative_id": creative["id"]})
+                except Exception as e:
+                    api_errors.append(f"{base_name}: {str(e)}")
+        elif use_flexible_format:
+            # Regular flexible format mode (1:1, 16:9, 9:16)
+            try:
+                # Build asset_feed_spec with ALL headlines and messages
+                # Use shared thumbnail URL for all videos (already extracted from first video)
+                shared_thumb = uploads[0].get("thumbnail_url") if uploads else None
+                video_assets = []
+                for u in uploads:
+                    asset = {"video_id": u["video_id"]}
+                    if shared_thumb:  # Add shared thumbnail to all videos
+                        asset["image_url"] = shared_thumb
+                    
+                    # Copy all other video_data fields (app_link, application_id, etc.)
+                    for key, value in video_data_other.items():
+                        if key not in asset:  # Don't override existing fields
+                            asset[key] = value
+                    
                     video_assets.append(asset)
                 
                 asset_feed_spec = {
                     "video_assets": video_assets,
-                    "headlines": headlines_list,  # All headlines
-                    "messages": messages_list,     # All messages (primary text)
-                    "call_to_action": final_cta 
+                    "headlines": headlines_list,  # Use ALL headlines
+                    "messages": messages_list,     # Use ALL messages
                 }
                 
-                # Create object_story_spec
-                object_story_spec = {"page_id": page_id}
+                if orig_cta:
+                    asset_feed_spec["call_to_action"] = orig_cta
+                
+                if target_aspect_ratio:
+                    # Map ratio string to API value
+                    ratio_map = {
+                        "1:1": "1:1",
+                        "9:16": "9:16",
+                        "16:9": "16:9",
+                    }
+                    asset_feed_spec["aspect_ratio"] = ratio_map.get(target_aspect_ratio, "1:1")
+                
+                # Copy all other asset_feed_spec fields
+                for key, value in asset_feed_other.items():
+                    if key not in asset_feed_spec:  # Don't override existing fields
+                        asset_feed_spec[key] = value
+                
+                # Basic Page Spec
+                object_story_spec = {
+                    "page_id": page_id,
+                }
                 if try_instagram and ig_actor_id:
                     object_story_spec["instagram_actor_id"] = ig_actor_id
-                
-                # Generate creative name
+
+                # Create ONE Creative
+                # Use manual name if provided, else auto-generate based on video naming pattern
                 if creative_name_manual:
                     creative_name = creative_name_manual
                 else:
-                    # Default: extract base name (e.g., "video263")
-                    creative_name = base_name
+                    # Generate creative name based on video naming pattern
+                    def _extract_video_number(filename: str) -> int | None:
+                        """Extract number from video name (e.g., 'video001' -> 1, 'video12' -> 12)"""
+                        import re
+                        # Try to find pattern like video001, video1, video12, etc.
+                        match = re.search(r'video\s*(\d+)', filename, re.IGNORECASE)
+                        if match:
+                            return int(match.group(1))
+                        return None
+                    
+                    def _generate_creative_name(video_names: list[str], game_name: str | None, suffix: str) -> str:
+                        """Generate creative name based on video number patterns"""
+                        video_numbers = []
+                        other_videos = []
+                        
+                        for name in video_names:
+                            num = _extract_video_number(name)
+                            if num is not None:
+                                video_numbers.append((num, name))
+                            else:
+                                other_videos.append(name)
+                        
+                        # Sort by number
+                        video_numbers.sort(key=lambda x: x[0])
+                        
+                        parts = []
+                        
+                        # Add non-numbered videos first
+                        for name in other_videos:
+                            # Extract base name without extension
+                            base = name.rsplit('.', 1)[0] if '.' in name else name
+                            parts.append(base)
+                        
+                        # Group consecutive numbers
+                        if video_numbers:
+                            ranges = []
+                            current_start = video_numbers[0][0]
+                            current_end = video_numbers[0][0]
+                            
+                            for i in range(1, len(video_numbers)):
+                                if video_numbers[i][0] == current_end + 1:
+                                    # Consecutive
+                                    current_end = video_numbers[i][0]
+                                else:
+                                    # Gap found, save current range
+                                    if current_start == current_end:
+                                        ranges.append(f"video{current_start:03d}")
+                                    else:
+                                        ranges.append(f"video{current_start:03d}-{current_end:03d}")
+                                    current_start = video_numbers[i][0]
+                                    current_end = video_numbers[i][0]
+                            
+                            # Add last range
+                            if current_start == current_end:
+                                ranges.append(f"video{current_start:03d}")
+                            else:
+                                ranges.append(f"video{current_start:03d}-{current_end:03d}")
+                            
+                            parts.extend(ranges)
+                        
+                        # Build final name
+                        name_parts = [p for p in parts if p]
+                        if not name_parts:
+                            # Fallback if no pattern found
+                            base_name = video_names[0].rsplit('.', 1)[0] if video_names else "video"
+                            creative_name = f"{base_name}_{len(video_names)}vids"
+                        else:
+                            video_part = ",".join(name_parts)
+                            game_part = game_name or "game"
+                            creative_name = f"{video_part}_{game_part}_flexible{suffix}"
+                        
+                        return creative_name
+                    
+                    video_names = [u["name"] for u in uploads]
+                    creative_name = _generate_creative_name(video_names, game_name, name_suffix)
                 
-                # Create creative
+                # FIX: asset_feed_spec is a SIBLING of object_story_spec
                 creative = account.create_ad_creative(params={
                     "name": creative_name,
                     "object_story_spec": object_story_spec,
                     "asset_feed_spec": asset_feed_spec
                 })
                 
-                # Create ad
-                ad_name = make_ad_name(creative_name, ad_name_prefix)
+                # Create ONE Ad
+                ad_name = make_ad_name(f"Flexible_{len(uploads)}Items", ad_name_prefix)
                 account.create_ad(params={
                     "name": ad_name,
                     "adset_id": adset_id,
@@ -1465,149 +1667,11 @@ def upload_videos_create_ads_cloned(
 
                 results.append({"name": creative_name, "creative_id": creative["id"]})
             except Exception as e:
-                api_errors.append(f"{base_name}: {str(e)}")
-    elif use_flexible_format:
-        # Regular flexible format mode (1:1, 16:9, 9:16)
-        try:
-            # Build asset_feed_spec with ALL headlines and messages
-            # Use shared thumbnail URL for all videos (already extracted from first video)
-            shared_thumb = uploads[0].get("thumbnail_url") if uploads else None
-            video_assets = []
-            for u in uploads:
-                asset = {"video_id": u["video_id"]}
-                if shared_thumb:  # Add shared thumbnail to all videos
-                    asset["image_url"] = shared_thumb
-                video_assets.append(asset)
-            
-            asset_feed_spec = {
-                "video_assets": video_assets,
-                "headlines": headlines_list,  # Use ALL headlines
-                "messages": messages_list,     # Use ALL messages
-            }
-            
-            if orig_cta:
-                asset_feed_spec["call_to_action"] = orig_cta
-            
-            if target_aspect_ratio:
-                # Map ratio string to API value
-                ratio_map = {
-                    "1:1": "1:1",
-                    "9:16": "9:16",
-                    "16:9": "16:9",
-                }
-                asset_feed_spec["aspect_ratio"] = ratio_map.get(target_aspect_ratio, "1:1")
-            
-            # Basic Page Spec
-            object_story_spec = {
-                "page_id": page_id,
-            }
-            if try_instagram and ig_actor_id:
-                object_story_spec["instagram_actor_id"] = ig_actor_id
-
-            # Create ONE Creative
-            # Use manual name if provided, else auto-generate based on video naming pattern
-            if creative_name_manual:
-                creative_name = creative_name_manual
-            else:
-                # Generate creative name based on video naming pattern
-                def _extract_video_number(filename: str) -> int | None:
-                    """Extract number from video name (e.g., 'video001' -> 1, 'video12' -> 12)"""
-                    import re
-                    # Try to find pattern like video001, video1, video12, etc.
-                    match = re.search(r'video\s*(\d+)', filename, re.IGNORECASE)
-                    if match:
-                        return int(match.group(1))
-                    return None
-                
-                def _generate_creative_name(video_names: list[str], game_name: str | None, suffix: str) -> str:
-                    """Generate creative name based on video number patterns"""
-                    video_numbers = []
-                    other_videos = []
-                    
-                    for name in video_names:
-                        num = _extract_video_number(name)
-                        if num is not None:
-                            video_numbers.append((num, name))
-                        else:
-                            other_videos.append(name)
-                    
-                    # Sort by number
-                    video_numbers.sort(key=lambda x: x[0])
-                    
-                    parts = []
-                    
-                    # Add non-numbered videos first
-                    for name in other_videos:
-                        # Extract base name without extension
-                        base = name.rsplit('.', 1)[0] if '.' in name else name
-                        parts.append(base)
-                    
-                    # Group consecutive numbers
-                    if video_numbers:
-                        ranges = []
-                        current_start = video_numbers[0][0]
-                        current_end = video_numbers[0][0]
-                        
-                        for i in range(1, len(video_numbers)):
-                            if video_numbers[i][0] == current_end + 1:
-                                # Consecutive
-                                current_end = video_numbers[i][0]
-                            else:
-                                # Gap found, save current range
-                                if current_start == current_end:
-                                    ranges.append(f"video{current_start:03d}")
-                                else:
-                                    ranges.append(f"video{current_start:03d}-{current_end:03d}")
-                                current_start = video_numbers[i][0]
-                                current_end = video_numbers[i][0]
-                        
-                        # Add last range
-                        if current_start == current_end:
-                            ranges.append(f"video{current_start:03d}")
-                        else:
-                            ranges.append(f"video{current_start:03d}-{current_end:03d}")
-                        
-                        parts.extend(ranges)
-                    
-                    # Build final name
-                    name_parts = [p for p in parts if p]
-                    if not name_parts:
-                        # Fallback if no pattern found
-                        base_name = video_names[0].rsplit('.', 1)[0] if video_names else "video"
-                        creative_name = f"{base_name}_{len(video_names)}vids"
-                    else:
-                        video_part = ",".join(name_parts)
-                        game_part = game_name or "game"
-                        creative_name = f"{video_part}_{game_part}_flexible{suffix}"
-                    
-                    return creative_name
-                
-                video_names = [u["name"] for u in uploads]
-                creative_name = _generate_creative_name(video_names, game_name, name_suffix)
-            
-            # FIX: asset_feed_spec is a SIBLING of object_story_spec
-            creative = account.create_ad_creative(params={
-                "name": creative_name,
-                "object_story_spec": object_story_spec,
-                "asset_feed_spec": asset_feed_spec
-            })
-            
-            # Create ONE Ad
-            ad_name = make_ad_name(f"Flexible_{len(uploads)}Items", ad_name_prefix)
-            account.create_ad(params={
-                "name": ad_name,
-                "adset_id": adset_id,
-                "creative": {"creative_id": creative["id"]},
-                "status": Ad.Status.active,
-            })
-
-            results.append({"name": creative_name, "creative_id": creative["id"]})
-        except Exception as e:
-            api_errors.append(str(e))
+                api_errors.append(str(e))
         
         if api_errors:
             st.error("Some ads failed to create:\n" + "\n".join(api_errors))
-    
+
     # -------------------------------------------------------------------------
     # BRANCH B: SINGLE FORMAT (Standard) - 1 Creative per Video Group (3 sizes)
     # -------------------------------------------------------------------------
@@ -1671,6 +1735,12 @@ def upload_videos_create_ads_cloned(
                     }
                     if thumb:  # Only add image_url if thumbnail is available
                         asset["image_url"] = thumb
+                    
+                    # Copy all other video_data fields (app_link, application_id, etc.)
+                    for key, value in video_data_other.items():
+                        if key not in asset:  # Don't override existing fields
+                            asset[key] = value
+                    
                     video_assets.append(asset)
                 
                 asset_feed_spec = {
@@ -1679,6 +1749,11 @@ def upload_videos_create_ads_cloned(
                     "messages": messages_list,     # All messages (primary text)
                     "call_to_action": final_cta 
                 }
+                
+                # Copy all other asset_feed_spec fields
+                for key, value in asset_feed_other.items():
+                    if key not in asset_feed_spec:  # Don't override existing fields
+                        asset_feed_spec[key] = value
                 
                 # Create object_story_spec
                 object_story_spec = {"page_id": page_id}
@@ -1995,18 +2070,17 @@ def upload_to_facebook(
     }
     if simulate: return plan
 
-    # 4. Cleanup Logic
-    if creative_type == "단일 영상":
-        try:
-            cleanup_low_performing_ads(
-                account=account, 
-                adset_id=target_adset_id, 
-                new_files_count=len(uploaded_files)
-            )
-        except RuntimeError as re:
-            raise re
-        except Exception as e:
-            st.warning(f"Optimization check failed: {e}")
+    # 4. Cleanup Logic (모든 Creative Type에 적용)
+    try:
+        cleanup_low_performing_ads(
+            account=account, 
+            adset_id=target_adset_id, 
+            new_files_count=len(uploaded_files)
+        )
+    except RuntimeError as re:
+        raise re
+    except Exception as e:
+        st.warning(f"Optimization check failed: {e}")
 
     # 5. Fetch Template
     template_data = fetch_reference_creative_data(account, target_adset_id)
