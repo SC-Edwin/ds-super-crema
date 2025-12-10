@@ -845,6 +845,18 @@ def preview_facebook_upload(
             creative_name = settings.get("dco_creative_name")
             if not creative_name:
                 creative_name = _generate_creative_name(valid_video_names, game_name, name_suffix)
+            
+            # Create preview creative for dynamic mode (1:1, 16:9, 9:16)
+            # In dynamic mode, all videos are combined into one flexible format creative
+            preview_creatives.append({
+                "name": creative_name,
+                "type": f"Dynamic Creative ({dco_aspect_ratio})",
+                "videos": valid_video_names,  # List of all video names
+                "aspect_ratio": dco_aspect_ratio,
+                "headline": headlines_found,  # All headlines
+                "message": messages_found,     # All messages
+                "cta": cta_found,
+            })
         elif dco_aspect_ratio == "single video":
             # single video mode - validate 3 sizes per video and create one creative per group
             def _get_base_name_from_filename(filename: str) -> str:
