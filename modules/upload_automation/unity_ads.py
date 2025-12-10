@@ -708,7 +708,14 @@ def _unity_list_assigned_creative_packs(*, org_id: str, title_id: str, campaign_
 
 def _unity_assign_creative_pack(*, org_id: str, title_id: str, campaign_id: str, creative_pack_id: str) -> None:
     path = f"organizations/{org_id}/apps/{title_id}/campaigns/{campaign_id}/assigned-creative-packs"
-    _unity_post(path, {"id": creative_pack_id})
+    try:
+        _unity_post(path, {"id": creative_pack_id})
+    except Exception as e:
+        error_str = str(e).lower()
+        # Check if error is related to capacity/limit
+        if any(keyword in error_str for keyword in ["limit", "maximum", "exceeded", "full", "capacity", "quota"]):
+            raise RuntimeError("Creative pack 개수가 최대입니다. 사용하지 않는 creative을 제거해주세요.")
+        raise  # Re-raise original error if not capacity-related
 
 def _unity_unassign_creative_pack(*, org_id: str, title_id: str, campaign_id: str, assigned_creative_pack_id: str) -> None:
     path = f"organizations/{org_id}/apps/{title_id}/campaigns/{campaign_id}/assigned-creative-packs/{assigned_creative_pack_id}"
@@ -773,7 +780,12 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
                 continue
 
             if not resp.ok:
-                raise RuntimeError(f"Unity create creative failed ({resp.status_code}): {resp.text[:400]}")
+                error_text = resp.text[:400] if resp.text else ""
+                # Check if error is related to capacity/limit
+                error_lower = error_text.lower()
+                if any(keyword in error_lower for keyword in ["limit", "maximum", "exceeded", "full", "capacity", "quota"]):
+                    raise RuntimeError("Creative 개수가 최대입니다. 사용하지 않는 creative을 제거해주세요.")
+                raise RuntimeError(f"Unity create creative failed ({resp.status_code}): {error_text}")
 
             body = resp.json()
             return str(body.get("id") or body.get("creativeId"))
@@ -806,7 +818,12 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
                 continue
 
             if not resp.ok:
-                raise RuntimeError(f"Unity create playable failed ({resp.status_code}): {resp.text[:400]}")
+                error_text = resp.text[:400] if resp.text else ""
+                # Check if error is related to capacity/limit
+                error_lower = error_text.lower()
+                if any(keyword in error_lower for keyword in ["limit", "maximum", "exceeded", "full", "capacity", "quota"]):
+                    raise RuntimeError("Creative 개수가 최대입니다. 사용하지 않는 creative을 제거해주세요.")
+                raise RuntimeError(f"Unity create playable failed ({resp.status_code}): {error_text}")
 
             body = resp.json()
             return str(body.get("id") or body.get("creativeId"))
@@ -828,7 +845,14 @@ def _unity_create_creative_pack(*, org_id: str, title_id: str, pack_name: str, c
     }
 
     path = f"organizations/{org_id}/apps/{title_id}/creative-packs"
-    meta = _unity_post(path, payload)
+    try:
+        meta = _unity_post(path, payload)
+    except Exception as e:
+        error_str = str(e).lower()
+        # Check if error is related to capacity/limit
+        if any(keyword in error_str for keyword in ["limit", "maximum", "exceeded", "full", "capacity", "quota"]):
+            raise RuntimeError("Creative pack 개수가 최대입니다. 사용하지 않는 creative을 제거해주세요.")
+        raise  # Re-raise original error if not capacity-related
     
     creative_pack_id = meta.get("id") or meta.get("creativePackId")
     if not creative_pack_id:
@@ -1133,6 +1157,21 @@ def upload_unity_creatives_to_campaign(
         if not org_id:
             missing.append("org_id")
         raise RuntimeError(f"Unity Settings Missing for upload. Missing: {', '.join(missing)}")
+
+    # Unity Ads creative limit per app (typically very high, but check for safety)
+    # Unity Ads creative pack limit per campaign (typically 50)
+    UNITY_CREATIVE_LIMIT = 1000  # Creative limit is usually very high
+    UNITY_CREATIVE_PACK_LIMIT = 50  # Creative pack limit per campaign
+    
+    # Check creative capacity (optional, as limit is usually very high)
+    # This check is mainly for API error handling
+    try:
+        # Estimate how many creatives will be created
+        # Each video pair (portrait + landscape) = 2 creatives, plus 1 playable per pack
+        # For simplicity, we'll check during creation and handle API errors
+        pass  # Creative limit check skipped as Unity Ads creative limit is usually very high
+    except Exception as e:
+        logger.warning(f"Could not check creative capacity: {e}")
 
     start_iso = next_sat_0000_kst()
     errors: List[str] = []
@@ -1489,7 +1528,12 @@ def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List
             assigned_packs.append(str(pack_id))
             time.sleep(0.5) 
         except Exception as e:
-            errors.append(f"Assign error {pack_id}: {e}")
+            error_str = str(e).lower()
+            # Check if error is related to capacity/limit
+            if any(keyword in error_str for keyword in ["limit", "maximum", "exceeded", "full", "capacity", "quota"]):
+                errors.append(f"Creative pack 개수가 최대입니다. 사용하지 않는 creative을 제거해주세요.")
+            else:
+                errors.append(f"Assign error {pack_id}: {e}")
 
     progress_bar.empty()
 

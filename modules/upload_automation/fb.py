@@ -60,20 +60,80 @@ def fetch_active_campaigns_cached(account_id: str) -> list[dict]:
         print(f"Error fetching campaigns for {account_id}: {e}")
         return []
 
+def _is_rate_limit_error(e: Exception) -> bool:
+    """Check if exception is a Facebook API rate limit error (code 17)."""
+    if isinstance(e, FacebookRequestError):
+        try:
+            error_code = e.api_error_code()
+            if error_code == 17:  # User request limit reached
+                return True
+        except:
+            pass
+        # Also check error message
+        error_str = str(e).lower()
+        if "request limit" in error_str or "code 17" in error_str or "error_subcode 2446079" in error_str:
+            return True
+    return False
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_active_adsets_cached(account_id: str, campaign_id: str) -> list[dict]:
-    """Fetch ACTIVE adsets for the given campaign."""
-    try:
-        account = init_fb_from_secrets(account_id)
-        campaign = Campaign(campaign_id)
-        adsets = campaign.get_ad_sets(
-            fields=[AdSet.Field.name, AdSet.Field.id],
-            params={"effective_status": ["ACTIVE"], "limit": 100}
-        )
-        return [{"id": a["id"], "name": a["name"]} for a in adsets]
-    except Exception as e:
-        print(f"Error fetching adsets for campaign {campaign_id}: {e}")
-        return []
+    """Fetch adsets for the given campaign (including ACTIVE, PAUSED, etc. - excluding DELETED)."""
+    max_retries = 3
+    retry_delay = 5
+    
+    for attempt in range(max_retries):
+        try:
+            account = init_fb_from_secrets(account_id)
+            campaign = Campaign(campaign_id)
+            
+            # First, try to get all adsets without status filter to see what we have
+            logger.info(f"Fetching adsets for campaign {campaign_id} (account: {account_id})")
+            adsets_all = campaign.get_ad_sets(
+                fields=[AdSet.Field.name, AdSet.Field.id, AdSet.Field.effective_status],
+                params={"limit": 100}
+            )
+            
+            # Convert to list immediately to avoid iterator exhaustion
+            adsets_list = list(adsets_all)
+            logger.info(f"Campaign {campaign_id} fetched {len(adsets_list)} total adsets")
+            
+            # Log all statuses found and filter in one pass
+            status_counts = {}
+            filtered = []
+            for a in adsets_list:
+                status = a.get("effective_status", "UNKNOWN")
+                status_counts[status] = status_counts.get(status, 0) + 1
+                
+                # Filter out DELETED and ARCHIVED
+                status_upper = str(status).upper() if status else ""
+                if status_upper not in ["DELETED", "ARCHIVED"]:
+                    adset_id = a.get("id")
+                    adset_name = a.get("name", "Unknown")
+                    if adset_id:
+                        filtered.append({"id": adset_id, "name": adset_name})
+                    else:
+                        logger.warning(f"AdSet missing ID: {a}")
+                else:
+                    logger.debug(f"AdSet {a.get('id')} excluded (status: {status_upper})")
+            
+            logger.info(f"Campaign {campaign_id} adsets by status: {status_counts}")
+            logger.info(f"Campaign {campaign_id} returning {len(filtered)} adsets (excluding DELETED/ARCHIVED)")
+            
+            # If no adsets found but we have adsets_list, log details for debugging
+            if not filtered and adsets_list:
+                logger.warning(f"Campaign {campaign_id}: Found {len(adsets_list)} adsets but all were filtered out. Status breakdown: {status_counts}")
+                logger.warning(f"First few adset details: {[{'id': a.get('id'), 'name': a.get('name'), 'status': a.get('effective_status')} for a in adsets_list[:3]]}")
+            
+            return filtered
+        except Exception as e:
+            if _is_rate_limit_error(e) and attempt < max_retries - 1:
+                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff: 5s, 10s, 20s
+                logger.warning(f"Rate limit hit fetching adsets for campaign {campaign_id}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                time.sleep(wait_time)
+                continue
+            else:
+                logger.error(f"Error fetching adsets for campaign {campaign_id}: {e}", exc_info=True)
+                return []
 
 # -------------------------------------------------------------------------
 # 2. Adset Capacity Management
@@ -88,13 +148,43 @@ def _check_and_free_adset_capacity(account: AdAccount, adset_id: str, game: str,
     ADSET_CREATIVE_LIMIT = 50  # Facebook adset creative limit
     
     try:
-        # Get current active ads count
+        # Get current ads count (Facebook adset creative limit includes ALL ads except DELETED)
         adset = AdSet(adset_id)
-        current_ads = adset.get_ads(
-            fields=[Ad.Field.id, Ad.Field.created_time],
-            params={"effective_status": ["ACTIVE"], "limit": 100}
-        )
+        # Handle pagination to get ALL ads with retry logic
+        all_ads = []
+        max_retries = 3
+        retry_delay = 5
+        
+        for attempt in range(max_retries):
+            try:
+                ads_iterator = adset.get_ads(
+                    fields=[Ad.Field.id, Ad.Field.created_time, Ad.Field.status],
+                    params={"limit": 100}  # Remove effective_status filter to count all ads
+                )
+                # Iterate through all pages
+                for ad in ads_iterator:
+                    all_ads.append(ad)
+                break  # Success
+            except Exception as e:
+                if _is_rate_limit_error(e) and attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(f"Rate limit hit fetching ads for adset {adset_id}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.warning(f"Cleanup check failed: {e}")
+                    return  # Don't fail the whole upload if cleanup check fails
+        # Filter out DELETED ads (they don't count towards limit)
+        # Also log status distribution for debugging
+        status_counts = {}
+        for ad in all_ads:
+            status = ad.get("status", "UNKNOWN")
+            status_counts[status] = status_counts.get(status, 0) + 1
+        logger.info(f"AdSet {adset_id} ads by status: {status_counts}")
+        
+        current_ads = [ad for ad in all_ads if ad.get("status") != "DELETED"]
         current_count = len(current_ads)
+        logger.info(f"AdSet {adset_id} total ads (excluding DELETED): {current_count}")
         
         # Calculate how many creatives will be uploaded
         remote_list = st.session_state.get("remote_videos", {}).get(game, [])
@@ -139,11 +229,26 @@ def _check_and_free_adset_capacity(account: AdAccount, adset_id: str, game: str,
         # Need to free up space
         needed_space = total_after_upload - ADSET_CREATIVE_LIMIT
         
-        # Get all active ads with spending data
-        all_ads = adset.get_ads(
-            fields=[Ad.Field.id, Ad.Field.created_time, Ad.Field.name],
-            params={"effective_status": ["ACTIVE"], "limit": 100}
-        )
+        # Get all active ads with spending data (with retry logic)
+        active_ads = []
+        for attempt in range(max_retries):
+            try:
+                active_ads_iterator = adset.get_ads(
+                    fields=[Ad.Field.id, Ad.Field.created_time, Ad.Field.name],
+                    params={"effective_status": ["ACTIVE"], "limit": 100}
+                )
+                active_ads = list(active_ads_iterator)
+                break  # Success
+            except Exception as e:
+                if _is_rate_limit_error(e) and attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(f"Rate limit hit fetching active ads for adset {adset_id}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.warning(f"Could not fetch active ads for cleanup: {e}")
+                    return  # Don't fail the whole upload if cleanup check fails
+        all_ads = active_ads
         
         # Get spending data for each ad (last 14 days)
         now = datetime.now()
@@ -165,19 +270,32 @@ def _check_and_free_adset_capacity(account: AdAccount, adset_id: str, game: str,
                     pass
             
             try:
-                # Get 14-day spending (use string field name instead of Insights.Field)
-                insights = Ad(ad_id).get_insights(
-                    fields=["spend"],
-                    params={"time_range": {"since": date_14d_ago, "until": "today"}}
-                )
-                spend_14d = float(insights[0].get("spend", 0)) if insights else 0.0
-                
-                # Get 7-day spending
-                insights_7d = Ad(ad_id).get_insights(
-                    fields=["spend"],
-                    params={"time_range": {"since": date_7d_ago, "until": "today"}}
-                )
-                spend_7d = float(insights_7d[0].get("spend", 0)) if insights_7d else 0.0
+                # Get 14-day spending (use string field name instead of Insights.Field) with retry
+                spend_14d = 0.0
+                spend_7d = 0.0
+                for attempt in range(max_retries):
+                    try:
+                        insights = Ad(ad_id).get_insights(
+                            fields=["spend"],
+                            params={"time_range": {"since": date_14d_ago, "until": "today"}}
+                        )
+                        spend_14d = float(insights[0].get("spend", 0)) if insights else 0.0
+                        
+                        # Get 7-day spending
+                        insights_7d = Ad(ad_id).get_insights(
+                            fields=["spend"],
+                            params={"time_range": {"since": date_7d_ago, "until": "today"}}
+                        )
+                        spend_7d = float(insights_7d[0].get("spend", 0)) if insights_7d else 0.0
+                        break  # Success
+                    except Exception as e:
+                        if _is_rate_limit_error(e) and attempt < max_retries - 1:
+                            wait_time = retry_delay * (2 ** attempt)
+                            logger.warning(f"Rate limit hit fetching insights for ad {ad_id}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            raise  # Re-raise if not rate limit or last attempt
                 
                 ads_with_spending.append({
                     "id": ad_id,
@@ -240,211 +358,273 @@ def fetch_reference_creative_data(_account: AdAccount, adset_id: str) -> dict:
     Returns a dict with 'headline' (list), 'message' (list), 'call_to_action' keys.
     Note: _account has leading underscore to exclude from cache hashing.
     """
-    try:
-        adset = AdSet(adset_id)
-        # Get most recent active ad (sorted by creation time)
-        ads = adset.get_ads(
-            fields=[Ad.Field.id, Ad.Field.status, Ad.Field.effective_status, Ad.Field.created_time],
-            params={"effective_status": ["ACTIVE"], "limit": 10}
-        )
-        
-        if not ads:
-            return {}
-        
-        # Sort by created_time descending to get most recent
-        ads_sorted = sorted(ads, key=lambda x: x.get("created_time", ""), reverse=True)
-        ad_id = ads_sorted[0]["id"]
-        creative_id = Ad(ad_id).api_get(fields=[Ad.Field.creative])["creative"]["id"]
-        # Get creative with all fields including asset_feed_spec details
-        creative = AdCreative(creative_id).api_get(
-            fields=[
-                AdCreative.Field.object_story_spec,
-                AdCreative.Field.asset_feed_spec,  # For flexible format creatives
-                AdCreative.Field.body,
-                AdCreative.Field.title,
-                AdCreative.Field.link_url,
-            ]
-        )
-        
-        # Debug: Log what we got
-        logger.info(f"Creative {creative_id} structure: has object_story_spec={bool(creative.get('object_story_spec'))}, has asset_feed_spec={bool(creative.get('asset_feed_spec'))}")
-        
-        # Check both object_story_spec and asset_feed_spec
-        spec = creative.get("object_story_spec", {})
-        asset_feed = creative.get("asset_feed_spec", {})
-        video_data = spec.get("video_data", {})
-        link_data = spec.get("link_data", {})
-        
-        # Debug: Log structure
-        logger.info(f"Creative structure - asset_feed keys: {list(asset_feed.keys()) if asset_feed else 'None'}")
-        if asset_feed:
-            logger.info(f"asset_feed.get('titles'): {asset_feed.get('titles')}")
-            logger.info(f"asset_feed.get('bodies'): {asset_feed.get('bodies')}")
-            logger.info(f"asset_feed.get('headlines'): {asset_feed.get('headlines')}")
-            logger.info(f"asset_feed.get('messages'): {asset_feed.get('messages')}")
-        
-        # Get ALL headlines (not just first one)
-        # PRIORITY: asset_feed_spec first (this is where multiple headlines come from in Dynamic/Flexible creatives)
-        # Note: Facebook API uses 'titles' in asset_feed_spec, not 'headlines'
-        headlines = []
-        if asset_feed.get("titles"):  # Facebook uses 'titles' in asset_feed_spec
-            titles_raw = asset_feed["titles"]
-            if isinstance(titles_raw, list):
-                headlines.extend([str(h) for h in titles_raw if h])
-            else:
-                headlines.append(str(titles_raw))
-        elif asset_feed.get("headlines"):  # Fallback to 'headlines' if exists
-            headlines_raw = asset_feed["headlines"]
-            if isinstance(headlines_raw, list):
-                headlines.extend([str(h) for h in headlines_raw if h])
-            else:
-                headlines.append(str(headlines_raw))
-        
-        # Fallback: From object_story_spec (if asset_feed_spec doesn't have headlines)
-        if not headlines:
-            if video_data.get("title"):
-                if isinstance(video_data["title"], list):
-                    headlines.extend([str(h) for h in video_data["title"] if h])
-                else:
-                    headlines.append(str(video_data["title"]))
-            if link_data.get("name"):
-                if isinstance(link_data["name"], list):
-                    headlines.extend([str(h) for h in link_data["name"] if h])
-                else:
-                    headlines.append(str(link_data["name"]))
-            # From creative title (last fallback)
-            if creative.get("title") and not headlines:
-                if isinstance(creative["title"], list):
-                    headlines.extend([str(h) for h in creative["title"] if h])
-                else:
-                    headlines.append(str(creative["title"]))
-        
-        # Get ALL messages (primary text)
-        # PRIORITY: asset_feed_spec first (this is where multiple messages come from in Dynamic/Flexible creatives)
-        # Note: Facebook API uses 'bodies' in asset_feed_spec, not 'messages'
-        messages = []
-        if asset_feed.get("bodies"):  # Facebook uses 'bodies' in asset_feed_spec
-            bodies_raw = asset_feed["bodies"]
-            if isinstance(bodies_raw, list):
-                messages.extend([str(m) for m in bodies_raw if m])
-            else:
-                messages.append(str(bodies_raw))
-        elif asset_feed.get("messages"):  # Fallback to 'messages' if exists
-            messages_raw = asset_feed["messages"]
-            if isinstance(messages_raw, list):
-                messages.extend([str(m) for m in messages_raw if m])
-            else:
-                messages.append(str(messages_raw))
-        
-        # Fallback: From object_story_spec (if asset_feed_spec doesn't have messages)
-        if not messages:
-            if video_data.get("message"):
-                if isinstance(video_data["message"], list):
-                    messages.extend([str(m) for m in video_data["message"] if m])
-                else:
-                    messages.append(str(video_data["message"]))
-            if link_data.get("message"):
-                if isinstance(link_data["message"], list):
-                    messages.extend([str(m) for m in link_data["message"] if m])
-                else:
-                    messages.append(str(link_data["message"]))
-            # From creative body (last fallback)
-            if creative.get("body") and not messages:
-                if isinstance(creative["body"], list):
-                    messages.extend([str(m) for m in creative["body"] if m])
-                else:
-                    messages.append(str(creative["body"]))
-        
-        # Get CTA from both sources
-        cta = video_data.get("call_to_action") or link_data.get("call_to_action") or asset_feed.get("call_to_action")
-        
-        result = {}
-        # Store ALL headlines (remove duplicates while preserving order)
-        if headlines:
-            seen = set()
-            unique_headlines = []
-            for h in headlines:
-                h_str = str(h).strip()
-                if h_str and h_str not in seen:
-                    seen.add(h_str)
-                    unique_headlines.append(h_str)
-            result["headline"] = unique_headlines
-            logger.info(f"Found {len(unique_headlines)} unique headlines: {unique_headlines}")
-        else:
-            logger.warning(f"No headlines found in creative {creative_id}")
-        
-        # Store ALL messages (remove duplicates while preserving order)
-        if messages:
-            seen = set()
-            unique_messages = []
-            for m in messages:
-                m_str = str(m).strip()
-                if m_str and m_str not in seen:
-                    seen.add(m_str)
-                    unique_messages.append(m_str)
-            result["message"] = unique_messages
-            logger.info(f"Found {len(unique_messages)} unique messages: {unique_messages}")
-        else:
-            logger.warning(f"No messages found in creative {creative_id}")
-        
-        if cta:
-            # Convert CTA to a fully serializable dict
-            if isinstance(cta, dict):
-                # Deep copy and convert all values to basic types
-                cta_serializable = {}
-                for k, v in cta.items():
-                    k_str = str(k)
-                    if isinstance(v, dict):
-                        # Nested dict - convert all values to strings
-                        cta_serializable[k_str] = {str(k2): str(v2) if v2 is not None else None for k2, v2 in v.items()}
-                    elif isinstance(v, (list, tuple)):
-                        # List - convert to list of strings
-                        cta_serializable[k_str] = [str(item) for item in v]
-                    else:
-                        # Primitive type - convert to string
-                        cta_serializable[k_str] = str(v) if v is not None else None
-                result["call_to_action"] = cta_serializable
-            else:
-                result["call_to_action"] = str(cta)
-        
-        # Copy ALL other video_data fields (app_link, application_id, object_id, etc.)
-        # Exclude fields we already handle separately (title, message, call_to_action, video_id, image_url)
-        excluded_fields = {"title", "message", "call_to_action", "video_id", "image_url"}
-        video_data_other = {}
-        for key, value in video_data.items():
-            if key not in excluded_fields and value is not None:
-                # Deep copy to avoid reference issues
-                if isinstance(value, dict):
-                    video_data_other[key] = {str(k): str(v) if v is not None else None for k, v in value.items()}
-                elif isinstance(value, (list, tuple)):
-                    video_data_other[key] = [str(item) for item in value]
-                else:
-                    video_data_other[key] = str(value) if value is not None else None
-        
-        if video_data_other:
-            result["video_data_other"] = video_data_other
-            logger.info(f"Found additional video_data fields: {list(video_data_other.keys())}")
-        
-        # Also copy asset_feed_spec other fields if any
-        asset_feed_other = {}
-        excluded_asset_fields = {"titles", "headlines", "bodies", "messages", "call_to_action", "video_assets"}
-        for key, value in asset_feed.items():
-            if key not in excluded_asset_fields and value is not None:
-                if isinstance(value, dict):
-                    asset_feed_other[key] = {str(k): str(v) if v is not None else None for k, v in value.items()}
-                elif isinstance(value, (list, tuple)):
-                    asset_feed_other[key] = [str(item) for item in value]
-                else:
-                    asset_feed_other[key] = str(value) if value is not None else None
-        
-        if asset_feed_other:
-            result["asset_feed_other"] = asset_feed_other
-            logger.info(f"Found additional asset_feed_spec fields: {list(asset_feed_other.keys())}")
+    max_retries = 3
+    retry_delay = 5
+    
+    for attempt in range(max_retries):
+        try:
+            adset = AdSet(adset_id)
+            # Get most recent active ad (sorted by creation time)
+            ads = adset.get_ads(
+                fields=[Ad.Field.id, Ad.Field.status, Ad.Field.effective_status, Ad.Field.created_time],
+                params={"effective_status": ["ACTIVE"], "limit": 10}
+            )
             
-        return result
-    except Exception as e:
-        logger.warning(f"Could not fetch reference creative data: {e}")
-        return {}
+            if not ads:
+                return {}
+            
+            # Sort by created_time descending to get most recent
+            ads_sorted = sorted(ads, key=lambda x: x.get("created_time", ""), reverse=True)
+            ad_id = ads_sorted[0]["id"]
+            creative_id = Ad(ad_id).api_get(fields=[Ad.Field.creative])["creative"]["id"]
+            # Get creative with all fields including asset_feed_spec details
+            creative = AdCreative(creative_id).api_get(
+                fields=[
+                    AdCreative.Field.object_story_spec,
+                    AdCreative.Field.asset_feed_spec,  # For flexible format creatives
+                    AdCreative.Field.body,
+                    AdCreative.Field.title,
+                    AdCreative.Field.link_url,
+                ]
+            )
+            
+            # Debug: Log what we got
+            logger.info(f"Creative {creative_id} structure: has object_story_spec={bool(creative.get('object_story_spec'))}, has asset_feed_spec={bool(creative.get('asset_feed_spec'))}")
+            
+            # Check both object_story_spec and asset_feed_spec
+            spec = creative.get("object_story_spec", {})
+            asset_feed = creative.get("asset_feed_spec", {})
+            video_data = spec.get("video_data", {})
+            link_data = spec.get("link_data", {})
+            
+            # Debug: Log structure
+            logger.info(f"Creative structure - asset_feed keys: {list(asset_feed.keys()) if asset_feed else 'None'}")
+            if asset_feed:
+                logger.info(f"asset_feed.get('titles'): {asset_feed.get('titles')}")
+                logger.info(f"asset_feed.get('bodies'): {asset_feed.get('bodies')}")
+                logger.info(f"asset_feed.get('headlines'): {asset_feed.get('headlines')}")
+                logger.info(f"asset_feed.get('messages'): {asset_feed.get('messages')}")
+            
+            # Get ALL headlines (not just first one)
+            # PRIORITY: asset_feed_spec first (this is where multiple headlines come from in Dynamic/Flexible creatives)
+            # Note: Facebook API uses 'titles' in asset_feed_spec, not 'headlines'
+            headlines = []
+            # Get ALL headlines (not just first one)
+            # PRIORITY: asset_feed_spec first (this is where multiple headlines come from in Dynamic/Flexible creatives)
+            # Note: Facebook API uses 'titles' in asset_feed_spec, not 'headlines'
+            headlines = []
+            if asset_feed.get("titles"):  # Facebook uses 'titles' in asset_feed_spec
+                titles_raw = asset_feed["titles"]
+                if isinstance(titles_raw, list):
+                    for h in titles_raw:
+                        if isinstance(h, dict) and "text" in h:
+                            # Handle dict format: {'adlabels': [...], 'text': '...'}
+                            text = h.get("text", "").strip()
+                            if text:
+                                headlines.append(text)
+                        elif h:
+                            headlines.append(str(h))
+                else:
+                    if isinstance(titles_raw, dict) and "text" in titles_raw:
+                        text = titles_raw.get("text", "").strip()
+                        if text:
+                            headlines.append(text)
+                    else:
+                        headlines.append(str(titles_raw))
+            elif asset_feed.get("headlines"):  # Fallback to 'headlines' if exists
+                headlines_raw = asset_feed["headlines"]
+                if isinstance(headlines_raw, list):
+                    for h in headlines_raw:
+                        if isinstance(h, dict) and "text" in h:
+                            text = h.get("text", "").strip()
+                            if text:
+                                headlines.append(text)
+                        elif h:
+                            headlines.append(str(h))
+                else:
+                    if isinstance(headlines_raw, dict) and "text" in headlines_raw:
+                        text = headlines_raw.get("text", "").strip()
+                        if text:
+                            headlines.append(text)
+                    else:
+                        headlines.append(str(headlines_raw))
+            
+            # Fallback: From object_story_spec (if asset_feed_spec doesn't have headlines)
+            if not headlines:
+                if video_data.get("title"):
+                    if isinstance(video_data["title"], list):
+                        headlines.extend([str(h) for h in video_data["title"] if h])
+                    else:
+                        headlines.append(str(video_data["title"]))
+                if link_data.get("name"):
+                    if isinstance(link_data["name"], list):
+                        headlines.extend([str(h) for h in link_data["name"] if h])
+                    else:
+                        headlines.append(str(link_data["name"]))
+                # From creative title (last fallback)
+                if creative.get("title") and not headlines:
+                    if isinstance(creative["title"], list):
+                        headlines.extend([str(h) for h in creative["title"] if h])
+                    else:
+                        headlines.append(str(creative["title"]))
+            
+            # Get ALL messages (primary text)
+            # PRIORITY: asset_feed_spec first (this is where multiple messages come from in Dynamic/Flexible creatives)
+            # Note: Facebook API uses 'bodies' in asset_feed_spec, not 'messages'
+            messages = []
+            if asset_feed.get("bodies"):  # Facebook uses 'bodies' in asset_feed_spec
+                bodies_raw = asset_feed["bodies"]
+                if isinstance(bodies_raw, list):
+                    for m in bodies_raw:
+                        if isinstance(m, dict) and "text" in m:
+                            # Handle dict format: {'adlabels': [...], 'text': '...'}
+                            text = m.get("text", "").strip()
+                            if text:
+                                messages.append(text)
+                        elif m:
+                            messages.append(str(m))
+                else:
+                    if isinstance(bodies_raw, dict) and "text" in bodies_raw:
+                        text = bodies_raw.get("text", "").strip()
+                        if text:
+                            messages.append(text)
+                    else:
+                        messages.append(str(bodies_raw))
+            elif asset_feed.get("messages"):  # Fallback to 'messages' if exists
+                messages_raw = asset_feed["messages"]
+                if isinstance(messages_raw, list):
+                    for m in messages_raw:
+                        if isinstance(m, dict) and "text" in m:
+                            text = m.get("text", "").strip()
+                            if text:
+                                messages.append(text)
+                        elif m:
+                            messages.append(str(m))
+                else:
+                    if isinstance(messages_raw, dict) and "text" in messages_raw:
+                        text = messages_raw.get("text", "").strip()
+                        if text:
+                            messages.append(text)
+                    else:
+                        messages.append(str(messages_raw))
+            
+            # Fallback: From object_story_spec (if asset_feed_spec doesn't have messages)
+            if not messages:
+                if video_data.get("message"):
+                    if isinstance(video_data["message"], list):
+                        messages.extend([str(m) for m in video_data["message"] if m])
+                    else:
+                        messages.append(str(video_data["message"]))
+                if link_data.get("message"):
+                    if isinstance(link_data["message"], list):
+                        messages.extend([str(m) for m in link_data["message"] if m])
+                    else:
+                        messages.append(str(link_data["message"]))
+                # From creative body (last fallback)
+                if creative.get("body") and not messages:
+                    if isinstance(creative["body"], list):
+                        messages.extend([str(m) for m in creative["body"] if m])
+                    else:
+                        messages.append(str(creative["body"]))
+            
+            # Get CTA from both sources
+            cta = video_data.get("call_to_action") or link_data.get("call_to_action") or asset_feed.get("call_to_action")
+            
+            result = {}
+            # Store ALL headlines (remove duplicates while preserving order)
+            if headlines:
+                seen = set()
+                unique_headlines = []
+                for h in headlines:
+                    h_str = str(h).strip()
+                    if h_str and h_str not in seen:
+                        seen.add(h_str)
+                        unique_headlines.append(h_str)
+                result["headline"] = unique_headlines
+                logger.info(f"Found {len(unique_headlines)} unique headlines: {unique_headlines}")
+            else:
+                logger.warning(f"No headlines found in creative {creative_id}")
+            
+            # Store ALL messages (remove duplicates while preserving order)
+            if messages:
+                seen = set()
+                unique_messages = []
+                for m in messages:
+                    m_str = str(m).strip()
+                    if m_str and m_str not in seen:
+                        seen.add(m_str)
+                        unique_messages.append(m_str)
+                result["message"] = unique_messages
+                logger.info(f"Found {len(unique_messages)} unique messages: {unique_messages}")
+            else:
+                logger.warning(f"No messages found in creative {creative_id}")
+            
+            if cta:
+                # Convert CTA to a fully serializable dict
+                if isinstance(cta, dict):
+                    # Deep copy and convert all values to basic types
+                    cta_serializable = {}
+                    for k, v in cta.items():
+                        k_str = str(k)
+                        if isinstance(v, dict):
+                            # Nested dict - convert all values to strings
+                            cta_serializable[k_str] = {str(k2): str(v2) if v2 is not None else None for k2, v2 in v.items()}
+                        elif isinstance(v, (list, tuple)):
+                            # List - convert to list of strings
+                            cta_serializable[k_str] = [str(item) for item in v]
+                        else:
+                            # Primitive type - convert to string
+                            cta_serializable[k_str] = str(v) if v is not None else None
+                    result["call_to_action"] = cta_serializable
+                else:
+                    result["call_to_action"] = str(cta)
+            
+            # Copy ALL other video_data fields (app_link, application_id, object_id, etc.)
+            # Exclude fields we already handle separately (title, message, call_to_action, video_id, image_url)
+            excluded_fields = {"title", "message", "call_to_action", "video_id", "image_url"}
+            video_data_other = {}
+            for key, value in video_data.items():
+                if key not in excluded_fields and value is not None:
+                    # Deep copy to avoid reference issues
+                    if isinstance(value, dict):
+                        video_data_other[key] = {str(k): str(v) if v is not None else None for k, v in value.items()}
+                    elif isinstance(value, (list, tuple)):
+                        video_data_other[key] = [str(item) for item in value]
+                    else:
+                        video_data_other[key] = str(value) if value is not None else None
+            
+            if video_data_other:
+                result["video_data_other"] = video_data_other
+                logger.info(f"Found additional video_data fields: {list(video_data_other.keys())}")
+            
+            # Also copy asset_feed_spec other fields if any
+            # Exclude asset_customization_rules as they reference specific asset labels that may not exist
+            # Exclude ad_formats as it must be set explicitly, not copied from existing creative
+            asset_feed_other = {}
+            excluded_asset_fields = {"titles", "headlines", "bodies", "messages", "call_to_action", "video_assets", "videos", "asset_customization_rules", "ad_formats"}
+            for key, value in asset_feed.items():
+                if key not in excluded_asset_fields and value is not None:
+                    if isinstance(value, dict):
+                        asset_feed_other[key] = {str(k): str(v) if v is not None else None for k, v in value.items()}
+                    elif isinstance(value, (list, tuple)):
+                        asset_feed_other[key] = [str(item) for item in value]
+                    else:
+                        asset_feed_other[key] = str(value) if value is not None else None
+            
+            if asset_feed_other:
+                result["asset_feed_other"] = asset_feed_other
+                logger.info(f"Found additional asset_feed_spec fields: {list(asset_feed_other.keys())}")
+                
+            return result
+        except Exception as e:
+            if _is_rate_limit_error(e) and attempt < max_retries - 1:
+                wait_time = retry_delay * (2 ** attempt)
+                logger.warning(f"Rate limit hit fetching reference creative data for adset {adset_id}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                time.sleep(wait_time)
+                continue
+            else:
+                logger.warning(f"Could not fetch reference creative data: {e}")
+                return {}
 
 # -------------------------------------------------------------------------
 # 3. Cleanup Logic (Optimization)
@@ -478,6 +658,12 @@ def cleanup_low_performing_ads(
         
         # Get insights for performance check
         from facebook_business.adobjects.adsinsights import AdsInsights
+        from datetime import datetime, timedelta
+        
+        # Convert timestamps to YYYY-MM-DD format
+        now = datetime.now()
+        date_7d_ago = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+        today = now.strftime("%Y-%m-%d")
         
         insights = account.get_insights(
             fields=[
@@ -488,7 +674,7 @@ def cleanup_low_performing_ads(
             ],
             params={
                 "level": "ad",
-                "time_range": {"since": (time.time() - 7 * 24 * 3600), "until": time.time()},
+                "time_range": {"since": date_7d_ago, "until": today},
                 "filtering": [{"field": "ad.id", "operator": "IN", "value": [a["id"] for a in ads]}],
             }
         )
@@ -563,6 +749,10 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         adsets = fetch_active_adsets_cached(account_id, selected_campaign_id)
         if not adsets:
             st.warning("No active ad sets found in this campaign.")
+            # Add button to clear cache and retry
+            if st.button("🔄 Clear Cache & Retry", key=f"clear_adset_cache_{idx}"):
+                st.cache_data.clear()
+                st.rerun()
             return
         
         adset_options = [f"{a['name']} ({a['id']})" for a in adsets]
@@ -1067,11 +1257,28 @@ def preview_facebook_upload(
         from datetime import datetime, timedelta
         
         adset = AdSet(target_adset_id)
-        current_ads = adset.get_ads(
-            fields=[Ad.Field.id, Ad.Field.created_time, Ad.Field.name],
-            params={"effective_status": ["ACTIVE"], "limit": 100}
+        # Facebook adset creative limit includes ALL ads (ACTIVE, PAUSED, etc.) except DELETED
+        # So we need to count all ads, not just ACTIVE ones
+        # Handle pagination to get ALL ads
+        current_ads = []
+        ads_iterator = adset.get_ads(
+            fields=[Ad.Field.id, Ad.Field.created_time, Ad.Field.name, Ad.Field.status],
+            params={"limit": 100}  # Remove effective_status filter to count all ads
         )
+        # Iterate through all pages
+        for ad in ads_iterator:
+            current_ads.append(ad)
+        # Filter out DELETED ads (they don't count towards limit)
+        # Also log status distribution for debugging
+        status_counts = {}
+        for ad in current_ads:
+            status = ad.get("status", "UNKNOWN")
+            status_counts[status] = status_counts.get(status, 0) + 1
+        logger.info(f"AdSet {target_adset_id} ads by status: {status_counts}")
+        
+        current_ads = [ad for ad in current_ads if ad.get("status") != "DELETED"]
         current_ad_count = len(current_ads)
+        logger.info(f"AdSet {target_adset_id} total ads (excluding DELETED): {current_ad_count}")
         capacity_info["current_count"] = current_ad_count
         capacity_info["available_slots"] = ADSET_CREATIVE_LIMIT - current_ad_count
         
@@ -1162,6 +1369,219 @@ def preview_facebook_upload(
     }
 
 # -------------------------------------------------------------------------
+# 4.5. Wait for Videos to be Ready
+# -------------------------------------------------------------------------
+def _wait_for_videos_ready(account: AdAccount, video_ids: list[str], *, timeout_s: int = 300, sleep_s: int = 5) -> list[str]:
+    """
+    Wait for all videos to be ready (status READY or PUBLISHED) before creating creatives.
+    Handles rate limit errors gracefully.
+    Returns list of video IDs that are ready.
+    """
+    from facebook_business.adobjects.advideo import AdVideo
+    from facebook_business.exceptions import FacebookRequestError
+    import time
+    import warnings
+    
+    if not video_ids:
+        return []
+    
+    ready = {vid: False for vid in video_ids}
+    deadline = time.time() + timeout_s
+    consecutive_rate_limits = 0
+    max_rate_limits = 5
+    
+    logger.info(f"Waiting for {len(video_ids)} videos to be ready (timeout: {timeout_s}s)...")
+    
+    while time.time() < deadline:
+        all_done = True
+        rate_limit_in_this_loop = False
+        
+        for vid in video_ids:
+            if ready[vid]:
+                continue
+            try:
+                # Suppress warnings about thumbnails field
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    info = AdVideo(vid).api_get(fields=["status", "picture"])
+                status = info.get("status")
+                has_pic = bool(info.get("picture"))
+                
+                # Video is ready if status is READY or PUBLISHED
+                # Also accept other statuses that might indicate readiness
+                if status in ("READY", "PUBLISHED"):
+                    ready[vid] = True
+                    logger.info(f"Video {vid} is ready (status: {status})")
+                elif status == "PROCESSING":
+                    all_done = False
+                    logger.debug(f"Video {vid} is still processing...")
+                elif status in ("FAILED", "ERROR"):
+                    # Video failed, mark as ready to avoid infinite wait (will fail during creative creation)
+                    logger.warning(f"Video {vid} has status {status}, marking as ready to proceed (will fail during creative creation)")
+                    ready[vid] = True
+                else:
+                    # Unknown status, log and wait more
+                    all_done = False
+                    logger.debug(f"Video {vid} status: {status} (not ready yet, waiting...)")
+                
+                consecutive_rate_limits = 0
+                
+            except FacebookRequestError as e:
+                error_code = None
+                try:
+                    error_code = e.api_error_code()
+                except:
+                    pass
+                
+                if error_code == 4 or "rate limit" in str(e).lower():
+                    rate_limit_in_this_loop = True
+                    consecutive_rate_limits += 1
+                    if consecutive_rate_limits >= max_rate_limits:
+                        ready_list = [vid for vid, is_ready in ready.items() if is_ready]
+                        logger.warning(f"Too many rate limits, returning {len(ready_list)}/{len(video_ids)} ready videos")
+                        return ready_list
+                else:
+                    logger.warning(f"Error checking video {vid}: {e}")
+                    all_done = False
+                    
+            except Exception as e:
+                logger.warning(f"Error checking video {vid}: {e}")
+                all_done = False
+        
+        if all_done:
+            logger.info(f"All {len(video_ids)} videos are ready!")
+            return [vid for vid, is_ready in ready.items() if is_ready]
+        
+        # Rate limit handling
+        if rate_limit_in_this_loop:
+            sleep_time = min(sleep_s * 2, 30)  # Longer sleep for rate limits
+        else:
+            sleep_time = sleep_s
+        
+        time.sleep(sleep_time)
+    
+    # Timeout reached
+    ready_list = [vid for vid, is_ready in ready.items() if is_ready]
+    logger.warning(f"Timeout reached: {len(ready_list)}/{len(video_ids)} videos are ready.")
+    return ready_list
+
+# -------------------------------------------------------------------------
+# 4.6. Resumable Video Upload Helper
+# -------------------------------------------------------------------------
+def _upload_video_resumable(account: AdAccount, path: str) -> str:
+    """
+    Chunked upload to /{act_id}/advideos using the official 3-phase protocol.
+    Retries transient errors and verifies total bytes sent before finishing.
+    """
+    import requests
+    import os
+    
+    # Try to get token from [facebook] section first, then root
+    if "facebook" in st.secrets:
+        token = st.secrets["facebook"].get("access_token", "").strip()
+    else:
+        token = st.secrets.get("access_token", "").strip()
+    
+    if not token:
+        raise RuntimeError("Missing access_token in st.secrets (check [facebook] section)")
+    
+    act = account.get_id()
+    base = f"https://graph.facebook.com/v24.0/{act}/advideos"
+    file_size = os.path.getsize(path)
+    
+    def _post(data, files=None, max_retries=5):
+        delays = [0, 2, 4, 8, 12]
+        last = None
+        for i, d in enumerate(delays[:max_retries], 1):
+            if d:
+                time.sleep(d)
+            try:
+                r = requests.post(
+                    base,
+                    data={**data, "access_token": token},
+                    files=files,
+                    timeout=300,  # Increased timeout for large files
+                )
+                if r.status_code >= 500:
+                    last = RuntimeError(f"HTTP {r.status_code}: {r.text[:400]}")
+                    continue
+                j = r.json()
+                if "error" in j:
+                    code = j["error"].get("code")
+                    if code in (390,) and i < max_retries:
+                        last = RuntimeError(j["error"].get("message"))
+                        continue
+                    raise RuntimeError(j["error"].get("message", str(j["error"])))
+                return j
+            except Exception as e:
+                last = e
+        raise last or RuntimeError("advideos POST failed")
+    
+    start_resp = _post(
+        {"upload_phase": "start", "file_size": str(file_size), "content_category": "VIDEO_GAMING"}
+    )
+    upload_session_id = start_resp["upload_session_id"]
+    video_id = start_resp["video_id"]
+    start_offset = int(start_resp.get("start_offset", 0))
+    end_offset = int(start_resp.get("end_offset", 0))
+    
+    sent_bytes = 0
+    
+    with open(path, "rb") as f:
+        while True:
+            if start_offset == end_offset == file_size:
+                break
+            
+            if end_offset <= start_offset:
+                tr = _post(
+                    {
+                        "upload_phase": "transfer",
+                        "upload_session_id": upload_session_id,
+                        "start_offset": str(start_offset),
+                    }
+                )
+                start_offset = int(tr.get("start_offset", start_offset))
+                end_offset = int(tr.get("end_offset", end_offset or file_size))
+                continue
+            
+            to_read = end_offset - start_offset
+            f.seek(start_offset)
+            chunk = f.read(to_read)
+            if not chunk or len(chunk) != to_read:
+                raise RuntimeError(f"Read {len(chunk) if chunk else 0} bytes; expected {to_read}.")
+            
+            files = {"video_file_chunk": ("chunk.bin", chunk, "application/octet-stream")}
+            tr = _post(
+                {
+                    "upload_phase": "transfer",
+                    "upload_session_id": upload_session_id,
+                    "start_offset": str(start_offset),
+                },
+                files=files,
+            )
+            
+            sent_bytes += to_read
+            new_start = int(tr.get("start_offset", start_offset + to_read))
+            new_end = int(tr.get("end_offset", end_offset))
+            
+            start_offset, end_offset = new_start, new_end
+            if start_offset > file_size:
+                start_offset = file_size
+            if end_offset > file_size:
+                end_offset = file_size
+    
+    if sent_bytes != file_size:
+        raise RuntimeError(f"Uploaded bytes ({sent_bytes}) != file size ({file_size}).")
+    
+    try:
+        _post({"upload_phase": "finish", "upload_session_id": upload_session_id})
+        return video_id
+    except Exception:
+        logger.warning(f"Resumable finish failed for {os.path.basename(path)} — trying fallback upload once.")
+        v = account.create_ad_video(params={"file": path, "content_category": "VIDEO_GAMING"})
+        return v["id"]
+
+# -------------------------------------------------------------------------
 # 5. Specialized Upload Function (Clones Settings + PAC Support)
 # -------------------------------------------------------------------------
 def upload_videos_create_ads_cloned(
@@ -1208,6 +1628,31 @@ def upload_videos_create_ads_cloned(
         headlines_list = [headlines_list] if headlines_list else ["New Game"]
     if not isinstance(messages_list, list):
         messages_list = [messages_list] if messages_list else []
+    
+    # Convert headlines and messages to Facebook API format (objects with 'text' field)
+    def _format_text_list(text_list):
+        """Convert list of strings to list of objects with 'text' field for Facebook API"""
+        if not text_list:
+            return []
+        result = []
+        for item in text_list:
+            if isinstance(item, dict):
+                # Already in object format, use as-is
+                result.append(item)
+            elif isinstance(item, str):
+                # Convert string to object with 'text' field
+                result.append({"text": item})
+            else:
+                # Convert to string first
+                result.append({"text": str(item)})
+        return result
+    
+    titles_formatted = _format_text_list(headlines_list)
+    bodies_formatted = _format_text_list(messages_list)
+    
+    # Facebook API requires at least one body, so add empty one if none provided
+    if not bodies_formatted:
+        bodies_formatted = [{"text": ""}]
     
     target_link = store_url
     
@@ -1336,7 +1781,7 @@ def upload_videos_create_ads_cloned(
                     logger.warning(f"Failed to extract thumbnail for first video: {e}. Continuing without thumbnail.")
         
         def _upload_one_with_thumbnail(item, thumbnail_url_to_use=None):
-            """Upload one video with its thumbnail (parallelized)"""
+            """Upload one video with its thumbnail (parallelized) using resumable upload"""
             thumbnail_path = None
             thumbnail_url = thumbnail_url_to_use  # Use provided thumbnail or extract new one
             
@@ -1351,11 +1796,8 @@ def upload_videos_create_ads_cloned(
                     logger.warning(f"Failed to extract/upload thumbnail for {item['name']}: {e}. Continuing without thumbnail.")
                     # Continue without thumbnail - will use Facebook's auto-generated one
             
-            # Upload video
-            v = account.create_ad_video(params={
-                "file": item["path"], 
-                "content_category": "VIDEO_GAMING"
-            })
+            # Upload video using resumable upload (handles large files and timeouts)
+            video_id = _upload_video_resumable(account, item["path"])
             
             # Clean up temporary thumbnail file
             if thumbnail_path:
@@ -1368,7 +1810,7 @@ def upload_videos_create_ads_cloned(
             
             return {
                 "name": item["name"],
-                "video_id": v["id"],
+                "video_id": video_id,
                 "thumbnail_url": thumbnail_url
             }
         
@@ -1414,9 +1856,20 @@ def upload_videos_create_ads_cloned(
                     updated_groups[base_name] = updated_group
             single_video_groups = updated_groups
         
-        # No need to wait for video status - we're using our own extracted thumbnails
-        # Videos will be processed by Facebook in the background while we create creatives
-        logger.info(f"Proceeding to create creatives for {len(uploads)} videos (thumbnails already uploaded)")
+        # Wait for videos to be ready before creating creatives
+        # Facebook requires videos to be in READY or PUBLISHED status before use
+        logger.info(f"Waiting for {len(uploads)} videos to be ready...")
+        video_ids = [u["video_id"] for u in uploads]
+        ready_videos = _wait_for_videos_ready(account, video_ids, timeout_s=300)  # Increased timeout to 5 minutes
+        
+        # If no videos are ready, log warning but continue (retry logic will handle it)
+        if not ready_videos:
+            logger.warning(f"None of the {len(video_ids)} videos became ready within timeout. Will rely on retry logic during creative creation.")
+        else:
+            not_ready = [vid for vid in video_ids if vid not in ready_videos]
+            if not_ready:
+                logger.warning(f"{len(not_ready)} videos are not ready yet: {not_ready}. Will retry creative creation with retries.")
+            logger.info(f"Proceeding to create creatives for {len(uploads)} videos ({len(ready_videos)}/{len(video_ids)} ready)")
 
         # 3. Create Flexible Format Creatives
         results = []
@@ -1470,38 +1923,65 @@ def upload_videos_create_ads_cloned(
                         final_cta = {"type": "INSTALL_MOBILE_APP", "value": {"link": target_link}}
                     
                     # Build asset_feed_spec with 3 videos for different placements (like 단일 영상)
-                    # Hybrid mode: Only include image_url if thumbnail is available
-                    video_assets = []
+                    # Facebook API uses 'videos' (array of video objects) not 'video_assets'
+                    # Each video object can have video_id, image_url, and adlabels for placement targeting
+                    videos_list = []
                     for video_info, thumb, placements in [
                         (video_1x1, thumb_1x1, ["feed", "reels_extreme_ads"]),
                         (video_9x16, thumb_9x16, ["story", "status", "reels", "search_results", "apps_and_sites"]),
                         (video_16x9, thumb_16x9, ["facebook_search_results"])
                     ]:
-                        asset = {
-                            "video_id": video_info["video_id"],
-                            "placements": placements
+                        video_obj = {
+                            "video_id": video_info["video_id"]
                         }
                         if thumb:  # Only add image_url if thumbnail is available
-                            asset["image_url"] = thumb
+                            video_obj["thumbnail_url"] = thumb
                         
+                        # Note: placements are handled via asset_customization_rules, not in video object
                         # Copy all other video_data fields (app_link, application_id, etc.)
                         for key, value in video_data_other.items():
-                            if key not in asset:  # Don't override existing fields
-                                asset[key] = value
+                            if key not in video_obj:  # Don't override existing fields
+                                video_obj[key] = value
                         
-                        video_assets.append(asset)
+                        videos_list.append(video_obj)
                     
                     asset_feed_spec = {
-                        "video_assets": video_assets,
-                        "headlines": headlines_list,  # All headlines
-                        "messages": messages_list,     # All messages (primary text)
-                        "call_to_action": final_cta 
+                        "videos": videos_list,  # Facebook API uses 'videos' not 'video_assets'
+                        "titles": titles_formatted,  # Facebook API requires objects with 'text' field
+                        "bodies": bodies_formatted,     # Facebook API requires objects with 'text' field
+                        # Note: call_to_action is NOT allowed in asset_feed_spec for flexible format
+                        # Use call_to_action_types instead (should be in asset_feed_other)
                     }
                     
                     # Copy all other asset_feed_spec fields
+                    import json
                     for key, value in asset_feed_other.items():
-                        if key not in asset_feed_spec:  # Don't override existing fields
-                            asset_feed_spec[key] = value
+                        # Explicitly exclude ad_formats - it must be set explicitly, not copied
+                        if key not in asset_feed_spec and key != "ad_formats":  # Don't override existing fields
+                            # Special handling for additional_data: must be JSON object, not string
+                            if key == "additional_data":
+                                if isinstance(value, str):
+                                    # Try to parse string representation of AdAssetFeedAdditionalData
+                                    # Format: "<AdAssetFeedAdditionalData> {...}"
+                                    try:
+                                        # Extract JSON part from string like "<AdAssetFeedAdditionalData> {...}"
+                                        if "{" in value:
+                                            json_str = value[value.index("{"):]
+                                            asset_feed_spec[key] = json.loads(json_str)
+                                        else:
+                                            # Skip if can't parse
+                                            logger.warning(f"Could not parse additional_data: {value}")
+                                            continue
+                                    except (json.JSONDecodeError, ValueError) as e:
+                                        logger.warning(f"Could not parse additional_data as JSON: {e}")
+                                        continue
+                                elif isinstance(value, dict):
+                                    asset_feed_spec[key] = value
+                                else:
+                                    # Skip if not dict or parseable string
+                                    continue
+                            else:
+                                asset_feed_spec[key] = value
                     
                     # Create object_story_spec
                     object_story_spec = {"page_id": page_id}
@@ -1515,12 +1995,34 @@ def upload_videos_create_ads_cloned(
                         # Default: extract base name (e.g., "video263")
                         creative_name = base_name
                     
-                    # Create creative
-                    creative = account.create_ad_creative(params={
-                        "name": creative_name,
-                        "object_story_spec": object_story_spec,
-                        "asset_feed_spec": asset_feed_spec
-                    })
+                    # Create creative with retry for video processing errors
+                    import time  # Import time for sleep in retry logic
+                    max_retries = 3
+                    retry_delay = 10
+                    creative = None
+                    for attempt in range(max_retries):
+                        try:
+                            creative = account.create_ad_creative(params={
+                                "name": creative_name,
+                                "object_story_spec": object_story_spec,
+                                "asset_feed_spec": asset_feed_spec
+                            })
+                            break  # Success
+                        except FacebookRequestError as e:
+                            error_subcode = None
+                            try:
+                                error_subcode = e.api_error_subcode()
+                            except:
+                                pass
+                            
+                            # Check if it's a video processing error (1885252)
+                            if error_subcode == 1885252 and attempt < max_retries - 1:
+                                logger.warning(f"Video not ready yet for {base_name}, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})...")
+                                time.sleep(retry_delay)
+                                retry_delay *= 2  # Exponential backoff
+                                continue
+                            else:
+                                raise  # Re-raise if not retryable or last attempt
                         
                     # Create ad
                     ad_name = make_ad_name(creative_name, ad_name_prefix)
@@ -1540,27 +2042,26 @@ def upload_videos_create_ads_cloned(
                 # Build asset_feed_spec with ALL headlines and messages
                 # Use shared thumbnail URL for all videos (already extracted from first video)
                 shared_thumb = uploads[0].get("thumbnail_url") if uploads else None
-                video_assets = []
+                videos_list = []
                 for u in uploads:
-                    asset = {"video_id": u["video_id"]}
+                    video_obj = {"video_id": u["video_id"]}
                     if shared_thumb:  # Add shared thumbnail to all videos
-                        asset["image_url"] = shared_thumb
+                        video_obj["thumbnail_url"] = shared_thumb
                     
                     # Copy all other video_data fields (app_link, application_id, etc.)
                     for key, value in video_data_other.items():
-                        if key not in asset:  # Don't override existing fields
-                            asset[key] = value
+                        if key not in video_obj:  # Don't override existing fields
+                            video_obj[key] = value
                     
-                    video_assets.append(asset)
+                    videos_list.append(video_obj)
                 
                 asset_feed_spec = {
-                    "video_assets": video_assets,
-                    "headlines": headlines_list,  # Use ALL headlines
-                    "messages": messages_list,     # Use ALL messages
+                    "videos": videos_list,  # Facebook API uses 'videos' not 'video_assets'
+                    "titles": titles_formatted,  # Facebook API requires objects with 'text' field
+                    "bodies": bodies_formatted,     # Facebook API requires objects with 'text' field
+                    # Note: call_to_action is NOT allowed in asset_feed_spec for flexible format
+                    # Use call_to_action_types instead (should be in asset_feed_other)
                 }
-                
-                if orig_cta:
-                    asset_feed_spec["call_to_action"] = orig_cta
                 
                 if target_aspect_ratio:
                     # Map ratio string to API value
@@ -1572,9 +2073,34 @@ def upload_videos_create_ads_cloned(
                     asset_feed_spec["aspect_ratio"] = ratio_map.get(target_aspect_ratio, "1:1")
                 
                 # Copy all other asset_feed_spec fields
+                import json
                 for key, value in asset_feed_other.items():
-                    if key not in asset_feed_spec:  # Don't override existing fields
-                        asset_feed_spec[key] = value
+                    # Explicitly exclude ad_formats - it must be set explicitly, not copied
+                    if key not in asset_feed_spec and key != "ad_formats":  # Don't override existing fields
+                        # Special handling for additional_data: must be JSON object, not string
+                        if key == "additional_data":
+                            if isinstance(value, str):
+                                # Try to parse string representation of AdAssetFeedAdditionalData
+                                # Format: "<AdAssetFeedAdditionalData> {...}"
+                                try:
+                                    # Extract JSON part from string like "<AdAssetFeedAdditionalData> {...}"
+                                    if "{" in value:
+                                        json_str = value[value.index("{"):]
+                                        asset_feed_spec[key] = json.loads(json_str)
+                                    else:
+                                        # Skip if can't parse
+                                        logger.warning(f"Could not parse additional_data: {value}")
+                                        continue
+                                except (json.JSONDecodeError, ValueError) as e:
+                                    logger.warning(f"Could not parse additional_data as JSON: {e}")
+                                    continue
+                            elif isinstance(value, dict):
+                                asset_feed_spec[key] = value
+                            else:
+                                # Skip if not dict or parseable string
+                                continue
+                        else:
+                            asset_feed_spec[key] = value
                 
                 # Basic Page Spec
                 object_story_spec = {
@@ -1665,11 +2191,34 @@ def upload_videos_create_ads_cloned(
                     creative_name = _generate_creative_name(video_names, game_name, name_suffix)
                 
                 # FIX: asset_feed_spec is a SIBLING of object_story_spec
-                creative = account.create_ad_creative(params={
-                    "name": creative_name,
-                    "object_story_spec": object_story_spec,
-                    "asset_feed_spec": asset_feed_spec
-                })
+                # Create creative with retry for video processing errors
+                import time  # Import time for sleep in retry logic
+                max_retries = 3
+                retry_delay = 10
+                creative = None
+                for attempt in range(max_retries):
+                    try:
+                        creative = account.create_ad_creative(params={
+                            "name": creative_name,
+                            "object_story_spec": object_story_spec,
+                            "asset_feed_spec": asset_feed_spec
+                        })
+                        break  # Success
+                    except FacebookRequestError as e:
+                        error_subcode = None
+                        try:
+                            error_subcode = e.api_error_subcode()
+                        except:
+                            pass
+                        
+                        # Check if it's a video processing error (1885252)
+                        if error_subcode == 1885252 and attempt < max_retries - 1:
+                            logger.warning(f"Video not ready yet for {creative_name}, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})...")
+                            time.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                            continue
+                        else:
+                            raise  # Re-raise if not retryable or last attempt
                 
                 # Create ONE Ad
                 ad_name = make_ad_name(f"Flexible_{len(uploads)}Items", ad_name_prefix)
@@ -1737,38 +2286,64 @@ def upload_videos_create_ads_cloned(
                     final_cta = {"type": "INSTALL_MOBILE_APP", "value": {"link": target_link}}
 
                 # Create asset_feed_spec with 3 videos for different placements
-                # Hybrid mode: Only include image_url if thumbnail is available
-                video_assets = []
+                # Facebook API uses 'videos' (array of video objects) not 'video_assets'
+                videos_list = []
                 for video_info, thumb, placements in [
                     (video_1x1, thumb_1x1, ["feed", "reels_extreme_ads"]),
                     (video_9x16, thumb_9x16, ["story", "status", "reels", "search_results", "apps_and_sites"]),
                     (video_16x9, thumb_16x9, ["facebook_search_results"])
                 ]:
-                    asset = {
-                        "video_id": video_info["video_id"],
-                        "placements": placements
+                    video_obj = {
+                        "video_id": video_info["video_id"]
                     }
-                    if thumb:  # Only add image_url if thumbnail is available
-                        asset["image_url"] = thumb
+                    if thumb:  # Only add thumbnail_url if thumbnail is available
+                        video_obj["thumbnail_url"] = thumb
                     
+                    # Note: placements are handled via asset_customization_rules, not in video object
                     # Copy all other video_data fields (app_link, application_id, etc.)
                     for key, value in video_data_other.items():
-                        if key not in asset:  # Don't override existing fields
-                            asset[key] = value
+                        if key not in video_obj:  # Don't override existing fields
+                            video_obj[key] = value
                     
-                    video_assets.append(asset)
+                    videos_list.append(video_obj)
                 
                 asset_feed_spec = {
-                    "video_assets": video_assets,
-                    "headlines": headlines_list,  # All headlines
-                    "messages": messages_list,     # All messages (primary text)
-                    "call_to_action": final_cta 
+                    "videos": videos_list,  # Facebook API uses 'videos' not 'video_assets'
+                    "titles": titles_formatted,  # Facebook API requires objects with 'text' field
+                    "bodies": bodies_formatted,     # Facebook API requires objects with 'text' field
+                    # Note: call_to_action is NOT allowed in asset_feed_spec for flexible format
+                    # Use call_to_action_types instead (should be in asset_feed_other)
                 }
                 
                 # Copy all other asset_feed_spec fields
+                import json
                 for key, value in asset_feed_other.items():
-                    if key not in asset_feed_spec:  # Don't override existing fields
-                        asset_feed_spec[key] = value
+                    # Explicitly exclude ad_formats - it must be set explicitly, not copied
+                    if key not in asset_feed_spec and key != "ad_formats":  # Don't override existing fields
+                        # Special handling for additional_data: must be JSON object, not string
+                        if key == "additional_data":
+                            if isinstance(value, str):
+                                # Try to parse string representation of AdAssetFeedAdditionalData
+                                # Format: "<AdAssetFeedAdditionalData> {...}"
+                                try:
+                                    # Extract JSON part from string like "<AdAssetFeedAdditionalData> {...}"
+                                    if "{" in value:
+                                        json_str = value[value.index("{"):]
+                                        asset_feed_spec[key] = json.loads(json_str)
+                                    else:
+                                        # Skip if can't parse
+                                        logger.warning(f"Could not parse additional_data: {value}")
+                                        continue
+                                except (json.JSONDecodeError, ValueError) as e:
+                                    logger.warning(f"Could not parse additional_data as JSON: {e}")
+                                    continue
+                            elif isinstance(value, dict):
+                                asset_feed_spec[key] = value
+                            else:
+                                # Skip if not dict or parseable string
+                                continue
+                        else:
+                            asset_feed_spec[key] = value
                 
                 # Create object_story_spec
                 object_story_spec = {"page_id": page_id}
@@ -1778,12 +2353,34 @@ def upload_videos_create_ads_cloned(
                 # Determine creative name: use override if provided, otherwise use base_name
                 final_creative_name = creative_title_override if creative_title_override else base_name
                     
-                # Create creative
-                creative = account.create_ad_creative(params={
-                    "name": final_creative_name,
-                    "object_story_spec": object_story_spec,
-                    "asset_feed_spec": asset_feed_spec
-                })
+                # Create creative with retry for video processing errors
+                import time  # Import time for sleep in retry logic
+                max_retries = 3
+                retry_delay = 10
+                creative = None
+                for attempt in range(max_retries):
+                    try:
+                        creative = account.create_ad_creative(params={
+                            "name": final_creative_name,
+                            "object_story_spec": object_story_spec,
+                            "asset_feed_spec": asset_feed_spec
+                        })
+                        break  # Success
+                    except FacebookRequestError as e:
+                        error_subcode = None
+                        try:
+                            error_subcode = e.api_error_subcode()
+                        except:
+                            pass
+                        
+                        # Check if it's a video processing error (1885252)
+                        if error_subcode == 1885252 and attempt < max_retries - 1:
+                            logger.warning(f"Video not ready yet for {final_creative_name}, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})...")
+                            time.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                            continue
+                        else:
+                            raise  # Re-raise if not retryable or last attempt
                 
                 # Create ad
                 ad = account.create_ad(params={
@@ -1839,147 +2436,84 @@ def upload_videos_create_ads_cloned(
             st.error("\n".join(errors))
             return []
         
-        # Upload all videos
+        # Upload all videos with thumbnails (extract and upload thumbnails first)
         uploads = []
         total = sum(len(group) for group in valid_groups_pre.values())
-        progress = st.progress(0, text="Uploading videos (Marketer Mode)...")
+        progress = st.progress(0, text="Uploading videos with thumbnails (Marketer Mode)...")
         uploaded_count = 0
         
-        for base_name, group in valid_groups_pre.items():
-            for size, item in group.items():
+        def _upload_one_with_thumbnail(item, base_name, size):
+            """Upload one video with its thumbnail (parallelized)"""
+            thumbnail_path = None
+            thumbnail_url = None
+            
+            try:
+                # Extract and upload thumbnail before uploading video
+                thumbnail_path = extract_thumbnail_from_video(item["path"])
+                thumbnail_url = upload_thumbnail_image(account, thumbnail_path)
+                logger.info(f"Extracted and uploaded thumbnail for {item['name']}: {thumbnail_url}")
+            except Exception as e:
+                logger.warning(f"Failed to extract/upload thumbnail for {item['name']}: {e}. Continuing without thumbnail.")
+                # Continue without thumbnail - will use Facebook's auto-generated one
+            
+            # Upload video using resumable upload
+            video_id = _upload_video_resumable(account, item["path"])
+            
+            # Clean up temporary thumbnail file
+            if thumbnail_path:
+                import os
                 try:
-                    v = account.create_ad_video(params={
-                        "file": item["path"], 
-                        "content_category": "VIDEO_GAMING"
-                    })
-                    uploads.append({"name": item["name"], "video_id": v["id"], "base_name": base_name, "size": size})
-                    uploaded_count += 1
-                    progress.progress(uploaded_count / total)
-                except Exception as e:
-                    st.error(f"Upload failed for {item['name']}: {e}")
+                    if os.path.exists(thumbnail_path):
+                        os.unlink(thumbnail_path)
+                except Exception:
+                    pass
+            
+            return {
+                "name": item["name"],
+                "video_id": video_id,
+                "base_name": base_name,
+                "size": size,
+                "thumbnail_url": thumbnail_url
+            }
+        
+        # Upload in parallel
+        done = 0
+        if total:
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                future_to_item = {}
+                for base_name, group in valid_groups_pre.items():
+                    for size, item in group.items():
+                        fut = ex.submit(_upload_one_with_thumbnail, item, base_name, size)
+                        future_to_item[fut] = (base_name, size, item["name"])
+                
+                for fut in as_completed(future_to_item):
+                    base_name, size, name = future_to_item[fut]
+                    try:
+                        res = fut.result()
+                        uploads.append(res)
+                        done += 1
+                        if progress is not None:
+                            pct = int(done / total * 100)
+                            progress.progress(pct, text=f"Uploading {done}/{total} videos…")
+                    except Exception as e:
+                        st.error(f"Upload failed for {name}: {e}")
         
         progress.empty()
         
-        # Wait for all videos to have thumbnails (same as test mode)
-        if uploads:
-            from facebook_business.adobjects.advideo import AdVideo
-            import time
-            logger.info(f"Waiting for thumbnails for {len(uploads)} videos...")
-            
-            video_ids = [u["video_id"] for u in uploads]
-            ready = {vid: False for vid in video_ids}
-            deadline = time.time() + 600  # 10 minutes timeout (same as test mode)
-            start_time = time.time()
-            sleep_s = 5  # Same as test mode
-            
-            consecutive_rate_limits = 0
-            while time.time() < deadline:
-                all_done = True
-                rate_limit_in_this_loop = False
-                
-                for vid in video_ids:
-                    if ready[vid]:
-                        continue
-                    try:
-                        # Suppress warnings about thumbnails field (not supported for all video types)
-                        import warnings
-                        with warnings.catch_warnings():
-                            warnings.simplefilter("ignore")
-                            # Check video status and thumbnails (same fields as test mode)
-                            info = AdVideo(vid).api_get(fields=["status", "thumbnails", "picture"])
-                        status = info.get("status")
-                        has_pic = bool(info.get("picture"))
-                        has_thumbs = bool(info.get("thumbnails"))
-                        
-                        # Video is ready if it has picture or thumbnails, and status is READY or PUBLISHED (same logic as test mode)
-                        if (has_pic or has_thumbs) and status in ("READY", "PUBLISHED"):
-                            ready[vid] = True
-                        elif status == "PROCESSING":
-                            # Still processing, wait more
-                            all_done = False
-                        else:
-                            # No thumbnail yet, keep waiting
-                            all_done = False
-                        
-                        # Success - reset consecutive rate limit counter
-                        consecutive_rate_limits = 0
-                        
-                    except Exception as e:
-                        # Check if this is a rate limit error (code 4)
-                        is_rate_limit = False
-                        error_code = None
-                        
-                        # Try multiple ways to detect rate limit error
-                        if isinstance(e, FacebookRequestError):
-                            # Use FacebookRequestError methods if available
-                            try:
-                                error_code = e.api_error_code()
-                            except:
-                                pass
-                            if not error_code:
-                                try:
-                                    error_msg = (e.api_error_message() or "").lower()
-                                    if "request limit" in error_msg or "#4" in str(e):
-                                        is_rate_limit = True
-                                except:
-                                    pass
-                        
-                        # Check error code
-                        if error_code == 4:
-                            is_rate_limit = True
-                        
-                        # Check error message as fallback
-                        error_str = str(e).lower()
-                        if not is_rate_limit and ("request limit" in error_str or "#4" in error_str or "code 4" in error_str):
-                            is_rate_limit = True
-                        
-                        # Check error attributes
-                        if not is_rate_limit:
-                            if hasattr(e, 'api_error_code'):
-                                error_code = e.api_error_code
-                            elif hasattr(e, 'api_error') and isinstance(e.api_error, dict):
-                                error_code = e.api_error.get('code')
-                            elif hasattr(e, 'error') and isinstance(e.error, dict):
-                                error_code = e.error.get('code')
-                            
-                            if error_code == 4:
-                                is_rate_limit = True
-                        
-                        if is_rate_limit:
-                            rate_limit_in_this_loop = True
-                            consecutive_rate_limits += 1
-                            all_done = False
-                        else:
-                            # If we can't get info, assume not ready yet
-                            all_done = False
-                            logger.warning(f"Error checking video {vid}: {e}")
-                
-                # If rate limit detected in this loop, wait longer before continuing
-                if rate_limit_in_this_loop:
-                    # Exponential backoff: 60s, 120s, 180s...
-                    wait_time = min(60 * consecutive_rate_limits, 300)  # Max 5 minutes
-                    logger.warning(f"Rate limit detected. Waiting {wait_time}s before retrying (consecutive: {consecutive_rate_limits})...")
-                    time.sleep(wait_time)
-                    # Continue to next iteration without checking all_done
-                
-                if all_done:
-                    elapsed = time.time() - start_time
-                    logger.info(f"All {len(video_ids)} videos have thumbnails after {elapsed:.1f}s")
-                    break
-                
-                # Normal sleep between loops (only if no rate limit)
-                if not rate_limit_in_this_loop:
-                    time.sleep(sleep_s)
-            
-            # Log which videos are ready/not ready (same as test mode)
-            not_ready = [vid for vid, is_ready in ready.items() if not is_ready]
+        # Wait for videos to be ready before creating creatives
+        # Facebook requires videos to be in READY or PUBLISHED status before use
+        logger.info(f"Waiting for {len(uploads)} videos to be ready...")
+        video_ids = [u["video_id"] for u in uploads]
+        ready_videos = _wait_for_videos_ready(account, video_ids, timeout_s=300)  # Increased timeout to 5 minutes
+        
+        # If no videos are ready, log warning but continue (retry logic will handle it)
+        if not ready_videos:
+            logger.warning(f"None of the {len(video_ids)} videos became ready within timeout. Will rely on retry logic during creative creation.")
+        else:
+            not_ready = [vid for vid in video_ids if vid not in ready_videos]
             if not_ready:
-                elapsed = time.time() - start_time
-                logger.warning(f"Timeout after {elapsed:.1f}s: {len(not_ready)} videos still don't have thumbnails: {not_ready}")
-                st.warning(f"⚠️ {len(not_ready)} video(s) still processing thumbnails. Some creatives may have gray thumbnails.")
-            else:
-                elapsed = time.time() - start_time
-                logger.info(f"All videos ready after {elapsed:.1f}s")
+                logger.warning(f"{len(not_ready)} videos are not ready yet: {not_ready}. Will retry creative creation with retries.")
+            logger.info(f"Proceeding to create creatives for {len(uploads)} videos ({len(ready_videos)}/{len(video_ids)} ready)")
 
         # 3. Group uploaded videos by base name and create 1 creative per group
         video_groups: dict[str, dict[str, dict]] = {}

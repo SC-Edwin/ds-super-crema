@@ -222,7 +222,16 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
         st.error("No games found. Please check BigQuery connection or Add a New Game.")
         return
 
+    # Use query params to preserve tab selection after rerun
+    query_params = st.query_params
+    selected_tab = query_params.get("tab", [None])[0] if query_params.get("tab") else None
+    
     _tabs = st.tabs(GAMES)
+    
+    # If a tab was selected via query params, try to find its index
+    if selected_tab and selected_tab in GAMES:
+        tab_index = GAMES.index(selected_tab)
+        # Note: Streamlit tabs don't support programmatic selection, but this helps with state tracking
 
     for i, game in enumerate(GAMES):
         with _tabs[i]:
@@ -241,7 +250,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         ["Facebook", "Unity Ads"],
                         index=0,
                         horizontal=True,
-                        key=f"platform_{i}",
+                        key=f"platform_{game}",
                     )
 
                     if platform == "Facebook":
@@ -253,17 +262,17 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     st.markdown("**구글 드라이브에서 Creative Videos를 가져옵니다**")
                     drv_input = st.text_input(
                         "Drive folder URL or ID",
-                        key=f"drive_folder_{i}",
+                        key=f"drive_folder_{game}",
                         placeholder="https://drive.google.com/drive/folders/..."
                     )
 
                     with st.expander("Advanced import options", expanded=False):
                         workers = st.number_input(
-                            "Parallel workers", min_value=1, max_value=16, value=8, key=f"drive_workers_{i}"
+                            "Parallel workers", min_value=1, max_value=16, value=8, key=f"drive_workers_{game}"
                         )
 
                     # [수정 1] 드라이브 가져오기 버튼: 너비 꽉 채우기
-                    if st.button("드라이브에서 Creative 가져오기", key=f"drive_import_{i}", use_container_width=True):
+                    if st.button("드라이브에서 Creative 가져오기", key=f"drive_import_{game}", use_container_width=True):
                         try:
                             overall = st.progress(0, text="Waiting...")
                             log_box = st.empty()
@@ -313,8 +322,9 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         st.write("- (None)")
 
                     # [수정 2] 초기화 버튼: 너비 꽉 채우기
-                    if st.button("초기화 (Clear Videos)", key=f"clearurl_{i}", use_container_width=True):
+                    if st.button("초기화 (Clear Videos)", key=f"clearurl_{game}", use_container_width=True):
                         st.session_state.remote_videos[game] = []
+                        st.session_state.current_tab_index = i  # Preserve current tab
                         st.rerun()
 
                     # --- Action Buttons ---
@@ -327,21 +337,27 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         st.write("") 
                         if is_marketer:
                             # Marketer mode: Add dry run button
-                            dry_run_fb = st.button("🔍 Dry Run (Preview)", key=f"dry_run_fb_{i}", use_container_width=True)
+                            dry_run_fb = st.button("🔍 Dry Run (Preview)", key=f"dry_run_fb_{game}", use_container_width=True)
                             st.write("")
-                        cont = st.button(btn_label, key=f"continue_{i}", use_container_width=True)
-                        clr = st.button("전체 초기화", key=f"clear_{i}", use_container_width=True)
+                        cont = st.button(btn_label, key=f"continue_{game}", use_container_width=True)
+                        # Store current tab in query params when button is clicked
+                        if cont:
+                            st.query_params["tab"] = game
+                        clr = st.button("전체 초기화", key=f"clear_{game}", use_container_width=True)
                     else:
                         unity_ok_placeholder = st.empty()
                         # Unity 버튼들도 동일하게 적용
                         st.write("")
                         if is_marketer and game == "XP HERO":
                             # Marketer mode: Add dry run button for Unity
-                            dry_run_unity = st.button("🔍 Dry Run (Preview)", key=f"dry_run_unity_{i}", use_container_width=True)
+                            dry_run_unity = st.button("🔍 Dry Run (Preview)", key=f"dry_run_unity_{game}", use_container_width=True)
                             st.write("")
-                        cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{i}", use_container_width=True)
-                        cont_unity_apply = st.button("캠페인에 적용", key=f"unity_apply_{i}", use_container_width=True)
-                        clr_unity = st.button("전체 초기화 (Unity)", key=f"unity_clear_{i}", use_container_width=True)
+                        cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{game}", use_container_width=True)
+                        cont_unity_apply = st.button("캠페인에 적용", key=f"unity_apply_{game}", use_container_width=True)
+                        # Store current tab in query params when Unity buttons are clicked
+                        if cont_unity_create or cont_unity_apply:
+                            st.query_params["tab"] = game
+                        clr_unity = st.button("전체 초기화 (Unity)", key=f"unity_clear_{game}", use_container_width=True)
 
             # =========================
             # RIGHT COLUMN: Settings
@@ -531,6 +547,9 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
             
             # --- FACEBOOK ACTIONS ---
             if platform == "Facebook" and cont:
+                # Preserve current tab
+                st.query_params["tab"] = game
+                
                 remote_list = st.session_state.remote_videos.get(game, [])
                 ok, msg = validate_count(remote_list)
                 if not ok:
@@ -550,11 +569,15 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         import traceback
                         st.error("Upload Error")
                         st.code(traceback.format_exc())
+                    finally:
+                        # Ensure tab is preserved even after upload
+                        st.query_params["tab"] = game
 
             if platform == "Facebook" and clr:
                 st.session_state.uploads.pop(game, None)
                 st.session_state.remote_videos.pop(game, None)
                 st.session_state.settings.pop(game, None)
+                st.query_params["tab"] = game  # Preserve current tab
                 st.rerun()
 
             # --- UNITY DRY RUN ---
@@ -635,6 +658,9 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
 
                 # 1. Create Logic
                 if "cont_unity_create" in locals() and cont_unity_create:
+                    # Preserve current tab
+                    st.query_params["tab"] = game
+                    
                     remote_list = st.session_state.remote_videos.get(game, [])
                     ok, msg = validate_count(remote_list)
                     if not ok:
@@ -657,9 +683,15 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         except Exception as e:
                             import traceback
                             st.code(traceback.format_exc())
+                        finally:
+                            # Ensure tab is preserved even after upload
+                            st.query_params["tab"] = game
 
                 # 2. Apply Logic
                 if "cont_unity_apply" in locals() and cont_unity_apply:
+                    # Preserve current tab
+                    st.query_params["tab"] = game
+                    
                     pack_ids = st.session_state.unity_created_packs.get(game, [])
                     if not pack_ids:
                         unity_ok_placeholder.error("No packs found. Create them first.")
@@ -678,10 +710,14 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         except Exception as e:
                             import traceback
                             st.code(traceback.format_exc())
+                        finally:
+                            # Ensure tab is preserved even after apply
+                            st.query_params["tab"] = game
                 
                 if "clr_unity" in locals() and clr_unity:
                     st.session_state.unity_settings.pop(game, None)
                     st.session_state.remote_videos.pop(game, None)
+                    st.query_params["tab"] = game  # Preserve current tab
                     st.rerun()
 
     # Summary
