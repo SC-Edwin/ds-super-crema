@@ -377,6 +377,7 @@ def fetch_reference_creative_data(_account: AdAccount, adset_id: str) -> dict:
             ads_sorted = sorted(ads, key=lambda x: x.get("created_time", ""), reverse=True)
             ad_id = ads_sorted[0]["id"]
             creative_id = Ad(ad_id).api_get(fields=[Ad.Field.creative])["creative"]["id"]
+            
             # Get creative with all fields including asset_feed_spec details
             creative = AdCreative(creative_id).api_get(
                 fields=[
@@ -418,11 +419,9 @@ def fetch_reference_creative_data(_account: AdAccount, adset_id: str) -> dict:
                 if isinstance(titles_raw, list):
                     for h in titles_raw:
                         if isinstance(h, dict) and "text" in h:
-                            # Handle dict format: {'adlabels': [...], 'text': '...'}
-                            text = h.get("text", "").strip()
-                            if text:
-                                headlines.append(text)
-                        elif h:
+                            text = h.get("text", "")  # strip() 제거 - 공백도 의미있을 수 있음
+                            headlines.append(text)  # 빈 문자열도 포함
+                        elif h is not None:  # None만 제외
                             headlines.append(str(h))
                 else:
                     if isinstance(titles_raw, dict) and "text" in titles_raw:
@@ -477,11 +476,9 @@ def fetch_reference_creative_data(_account: AdAccount, adset_id: str) -> dict:
                 if isinstance(bodies_raw, list):
                     for m in bodies_raw:
                         if isinstance(m, dict) and "text" in m:
-                            # Handle dict format: {'adlabels': [...], 'text': '...'}
-                            text = m.get("text", "").strip()
-                            if text:
-                                messages.append(text)
-                        elif m:
+                            text = m.get("text", "")  # strip() 제거
+                            messages.append(text)  # 빈 문자열도 포함
+                        elif m is not None:  # None만 제외
                             messages.append(str(m))
                 else:
                     if isinstance(bodies_raw, dict) and "text" in bodies_raw:
@@ -531,13 +528,17 @@ def fetch_reference_creative_data(_account: AdAccount, adset_id: str) -> dict:
             cta = video_data.get("call_to_action") or link_data.get("call_to_action") or asset_feed.get("call_to_action")
             
             result = {}
+            # Store creative_id for display
+            result["creative_id"] = creative_id
             # Store ALL headlines (remove duplicates while preserving order)
+            # Include empty strings as they may be valid placeholders
             if headlines:
                 seen = set()
                 unique_headlines = []
                 for h in headlines:
-                    h_str = str(h).strip()
-                    if h_str and h_str not in seen:
+                    h_str = str(h).strip() if isinstance(h, str) else str(h)
+                    # Include empty strings - they may be valid placeholders
+                    if h_str not in seen:
                         seen.add(h_str)
                         unique_headlines.append(h_str)
                 result["headline"] = unique_headlines
@@ -546,12 +547,14 @@ def fetch_reference_creative_data(_account: AdAccount, adset_id: str) -> dict:
                 logger.warning(f"No headlines found in creative {creative_id}")
             
             # Store ALL messages (remove duplicates while preserving order)
+            # Include empty strings as they may be valid placeholders
             if messages:
                 seen = set()
                 unique_messages = []
                 for m in messages:
-                    m_str = str(m).strip()
-                    if m_str and m_str not in seen:
+                    m_str = str(m).strip() if isinstance(m, str) else str(m)
+                    # Include empty strings - they may be valid placeholders
+                    if m_str not in seen:
                         seen.add(m_str)
                         unique_messages.append(m_str)
                 result["message"] = unique_messages
@@ -1581,6 +1584,126 @@ def _upload_video_resumable(account: AdAccount, path: str) -> str:
         v = account.create_ad_video(params={"file": path, "content_category": "VIDEO_GAMING"})
         return v["id"]
 
+def _clone_creative_with_new_video(
+    account: AdAccount,
+    reference_creative_id: str,
+    video_ids_by_size: dict[str, str],
+    thumbnails_by_size: dict[str, str],
+    new_creative_name: str,
+    store_url: str | None = None 
+) -> str:
+    """기존 Creative를 완벽히 복제하고 비디오만 교체 (Advantage+ 포함)"""
+    from facebook_business.adobjects.adcreative import AdCreative
+    import copy
+    
+    # 1. 모든 필드 가져오기 (Advantage+ 포함!)
+    ref_creative = AdCreative(reference_creative_id).api_get(fields=[
+        AdCreative.Field.object_story_spec,
+        AdCreative.Field.asset_feed_spec,
+        AdCreative.Field.degrees_of_freedom_spec,
+    ])
+    
+    new_params = {"name": new_creative_name}
+    
+    # 2. asset_feed_spec 복제 (Single Image or Video)
+    if ref_creative.get("asset_feed_spec"):
+        feed_spec = copy.deepcopy(ref_creative["asset_feed_spec"])
+        
+        if "videos" in feed_spec and isinstance(feed_spec["videos"], list):
+            for i, video_obj in enumerate(feed_spec["videos"]):
+                labels = video_obj.get("adlabels", [])
+                
+                # Label 추출
+                label_names = []
+                for label in labels:
+                    if isinstance(label, dict):
+                        label_names.append(str(label.get("name", "")).lower())
+                    else:
+                        label_names.append(str(label).lower())
+                
+                label_str = " ".join(label_names)
+                
+                new_video_id = None
+                new_thumb = None
+                
+                # 개선된 Placement 매칭
+                if any(kw in label_str for kw in ["feed", "reels_extreme", "1080x1080"]):
+                    new_video_id = video_ids_by_size.get("1080x1080")
+                    new_thumb = thumbnails_by_size.get("1080x1080")
+                elif any(kw in label_str for kw in ["story", "status", "reels", "search", "apps_and_sites", "1080x1920"]):
+                    new_video_id = video_ids_by_size.get("1080x1920")
+                    new_thumb = thumbnails_by_size.get("1080x1920")
+                elif any(kw in label_str for kw in ["instream", "facebook_search", "1920x1080"]):
+                    new_video_id = video_ids_by_size.get("1920x1080")
+                    new_thumb = thumbnails_by_size.get("1920x1080")
+                else:
+                    # Fallback: Index 기반
+                    sizes = ["1080x1080", "1080x1920", "1920x1080"]
+                    if i < len(sizes):
+                        new_video_id = video_ids_by_size.get(sizes[i])
+                        new_thumb = thumbnails_by_size.get(sizes[i])
+                
+                if new_video_id:
+                    video_obj["video_id"] = new_video_id
+                    if new_thumb:
+                        video_obj["thumbnail_url"] = new_thumb
+        
+        new_params["asset_feed_spec"] = feed_spec
+    
+    # 3. object_story_spec 복제 (Standard Video)
+    elif ref_creative.get("object_story_spec"):
+        spec = copy.deepcopy(ref_creative["object_story_spec"])
+        
+        if "video_data" in spec:
+            spec["video_data"]["video_id"] = video_ids_by_size.get("1080x1080")
+            if thumbnails_by_size.get("1080x1080"):
+                spec["video_data"]["image_url"] = thumbnails_by_size.get("1080x1080")
+        
+        new_params["object_story_spec"] = spec
+    
+    # 4. Advantage+ 설정 복제
+    if ref_creative.get("degrees_of_freedom_spec"):
+        new_params["degrees_of_freedom_spec"] = copy.deepcopy(
+            ref_creative["degrees_of_freedom_spec"]
+        )
+        logger.info("✅ Copied Advantage+ Creative settings")
+    
+    if store_url:
+        # asset_feed_spec에서 URL 덮어쓰기
+        if "asset_feed_spec" in new_params:
+            feed_spec = new_params["asset_feed_spec"]
+            
+            # call_to_action 필드 업데이트
+            if "call_to_action" in feed_spec:
+                if isinstance(feed_spec["call_to_action"], dict):
+                    if "value" not in feed_spec["call_to_action"]:
+                        feed_spec["call_to_action"]["value"] = {}
+                    feed_spec["call_to_action"]["value"]["link"] = store_url
+            
+            # videos 내부 URL 업데이트 (혹시 있다면)
+            if "videos" in feed_spec:
+                for video_obj in feed_spec["videos"]:
+                    if "call_to_action" in video_obj:
+                        if isinstance(video_obj["call_to_action"], dict):
+                            if "value" not in video_obj["call_to_action"]:
+                                video_obj["call_to_action"]["value"] = {}
+                            video_obj["call_to_action"]["value"]["link"] = store_url
+        
+        # object_story_spec에서 URL 덮어쓰기
+        if "object_story_spec" in new_params:
+            spec = new_params["object_story_spec"]
+            if "video_data" in spec:
+                if "call_to_action" in spec["video_data"]:
+                    if isinstance(spec["video_data"]["call_to_action"], dict):
+                        if "value" not in spec["video_data"]["call_to_action"]:
+                            spec["video_data"]["call_to_action"]["value"] = {}
+                        spec["video_data"]["call_to_action"]["value"]["link"] = store_url
+        
+        logger.info(f"✅ Updated Store URL to: {store_url}")
+
+    # 5. Creative 생성
+    new_creative = account.create_ad_creative(params=new_params)
+    return new_creative["id"]
 # -------------------------------------------------------------------------
 # 5. Specialized Upload Function (Clones Settings + PAC Support)
 # -------------------------------------------------------------------------
@@ -1617,7 +1740,7 @@ def upload_videos_create_ads_cloned(
         
     # Extract template data - use ALL headlines and messages
     template = template_data or {}
-    headlines_list = template.get("headline") or ["New Game"]
+    headlines_list = template.get("headline") or []
     messages_list = template.get("message") or []
     orig_cta = template.get("call_to_action")
     video_data_other = template.get("video_data_other", {})  # All other video_data fields (app_link, etc.)
@@ -1625,9 +1748,21 @@ def upload_videos_create_ads_cloned(
     
     # Ensure lists (not just first one)
     if not isinstance(headlines_list, list):
-        headlines_list = [headlines_list] if headlines_list else ["New Game"]
+        headlines_list = [headlines_list] if headlines_list else []
     if not isinstance(messages_list, list):
         messages_list = [messages_list] if messages_list else []
+    
+    # Keep empty strings as-is - user may have intentionally set them to empty
+    # Don't filter or replace with defaults - respect user's choice
+    logger.info(f"Using headlines from template: {headlines_list} (including empty strings if any)")
+    logger.info(f"Using messages from template: {messages_list} (including empty strings if any)")
+    
+    # If headlines_list is completely empty (not just empty strings), we still need at least one for API
+    # But if it contains empty strings, use them as-is
+    if not headlines_list:
+        # Only use default if list is completely empty (not provided at all)
+        headlines_list = [""]  # Use empty string, not "New Game"
+        logger.info("No headlines provided in template, using empty string")
     
     # Convert headlines and messages to Facebook API format (objects with 'text' field)
     def _format_text_list(text_list):
@@ -1700,6 +1835,12 @@ def upload_videos_create_ads_cloned(
             required_sizes = {"1080x1080", "1920x1080", "1080x1920"}
             errors = []
             valid_groups = {}
+
+            st.write("### 🔍 디버깅 정보")
+            st.write(f"- **Ad Set ID**: `{adset_id}`")
+            st.write(f"- **업로드된 비디오**: {len(uploads)}개")
+            st.write(f"- **비디오 그룹**: {len(video_groups)}개")
+
             for base_name, sizes in video_groups.items():
                 missing = required_sizes - set(sizes.keys())
                 if missing:
@@ -1858,18 +1999,7 @@ def upload_videos_create_ads_cloned(
         
         # Wait for videos to be ready before creating creatives
         # Facebook requires videos to be in READY or PUBLISHED status before use
-        logger.info(f"Waiting for {len(uploads)} videos to be ready...")
-        video_ids = [u["video_id"] for u in uploads]
-        ready_videos = _wait_for_videos_ready(account, video_ids, timeout_s=300)  # Increased timeout to 5 minutes
-        
-        # If no videos are ready, log warning but continue (retry logic will handle it)
-        if not ready_videos:
-            logger.warning(f"None of the {len(video_ids)} videos became ready within timeout. Will rely on retry logic during creative creation.")
-        else:
-            not_ready = [vid for vid in video_ids if vid not in ready_videos]
-            if not_ready:
-                logger.warning(f"{len(not_ready)} videos are not ready yet: {not_ready}. Will retry creative creation with retries.")
-            logger.info(f"Proceeding to create creatives for {len(uploads)} videos ({len(ready_videos)}/{len(video_ids)} ready)")
+        st.info("🚀 광고 생성 중... (비디오 처리는 자동으로 완료됩니다)")
 
         # 3. Create Flexible Format Creatives
         results = []
@@ -1948,7 +2078,8 @@ def upload_videos_create_ads_cloned(
                     asset_feed_spec = {
                         "videos": videos_list,  # Facebook API uses 'videos' not 'video_assets'
                         "titles": titles_formatted,  # Facebook API requires objects with 'text' field
-                        "bodies": bodies_formatted,     # Facebook API requires objects with 'text' field
+                        "bodies": bodies_formatted,
+                        "ad_formats": ["SINGLE_VIDEO"]     # Facebook API requires objects with 'text' field
                         # Note: call_to_action is NOT allowed in asset_feed_spec for flexible format
                         # Use call_to_action_types instead (should be in asset_feed_other)
                     }
@@ -1985,8 +2116,7 @@ def upload_videos_create_ads_cloned(
                     
                     # Create object_story_spec
                     object_story_spec = {"page_id": page_id}
-                    if try_instagram and ig_actor_id:
-                        object_story_spec["instagram_actor_id"] = ig_actor_id
+                    
                     
                     # Generate creative name
                     if creative_name_manual:
@@ -2056,11 +2186,10 @@ def upload_videos_create_ads_cloned(
                     videos_list.append(video_obj)
                 
                 asset_feed_spec = {
-                    "videos": videos_list,  # Facebook API uses 'videos' not 'video_assets'
-                    "titles": titles_formatted,  # Facebook API requires objects with 'text' field
-                    "bodies": bodies_formatted,     # Facebook API requires objects with 'text' field
-                    # Note: call_to_action is NOT allowed in asset_feed_spec for flexible format
-                    # Use call_to_action_types instead (should be in asset_feed_other)
+                    "videos": videos_list,
+                    "titles": titles_formatted,
+                    "bodies": bodies_formatted,
+                    "ad_formats": ["SINGLE_VIDEO"],  # ← 추가
                 }
                 
                 if target_aspect_ratio:
@@ -2106,8 +2235,7 @@ def upload_videos_create_ads_cloned(
                 object_story_spec = {
                     "page_id": page_id,
                 }
-                if try_instagram and ig_actor_id:
-                    object_story_spec["instagram_actor_id"] = ig_actor_id
+                
 
                 # Create ONE Creative
                 # Use manual name if provided, else auto-generate based on video naming pattern
@@ -2230,347 +2358,473 @@ def upload_videos_create_ads_cloned(
                 })
 
                 results.append({"name": creative_name, "creative_id": creative["id"]})
+            # ✅ 추가: 상세 에러 정보
+            except FacebookRequestError as e:
+                error_msg = f"**{base_name}** 광고 생성 실패:\n"
+                error_msg += f"  - Error Code: {e.api_error_code()}\n"
+                error_msg += f"  - Error Subcode: {e.api_error_subcode()}\n"
+                error_msg += f"  - Error Type: {e.api_error_type()}\n"
+                error_msg += f"  - Message: {e.api_error_message()}\n"
+                
+                # Get full response body if available
+                if e.body():
+                    try:
+                        import json
+                        body = json.loads(e.body()) if isinstance(e.body(), str) else e.body()
+                        if "error" in body:
+                            error_info = body["error"]
+                            if "error_user_title" in error_info:
+                                error_msg += f"  - User Title: {error_info['error_user_title']}\n"
+                            if "error_user_msg" in error_info:
+                                error_msg += f"  - User Message: {error_info['error_user_msg']}\n"
+                    except:
+                        pass
+                
+                api_errors.append(error_msg)
+                logger.error(f"Facebook API error for {base_name}: {error_msg}")
+                
             except Exception as e:
-                api_errors.append(str(e))
-        
-        if api_errors:
-            st.error("Some ads failed to create:\n" + "\n".join(api_errors))
+                error_msg = f"**{base_name}** 예상치 못한 에러:\n  - {str(e)}\n  - Type: {type(e).__name__}"
+                api_errors.append(error_msg)
+                logger.error(f"Unexpected error for {base_name}: {e}", exc_info=True)
+
+            # Display errors
+            if api_errors:
+                st.error("⚠️ **광고 생성 중 에러 발생**\n\n" + "\n\n".join(api_errors))
+                logger.error(f"Total {len(api_errors)} ads failed")
+
+            # Debug info
+            st.write(f"**생성 결과**: {len(results)}개 성공, {len(api_errors)}개 실패")
+            logger.info(f"Ad creation complete: {len(results)} succeeded, {len(api_errors)} failed")
+
+            return results
 
     # -------------------------------------------------------------------------
     # BRANCH B: SINGLE FORMAT (Standard) - 1 Creative per Video Group (3 sizes)
     # -------------------------------------------------------------------------
-    else:
-        def _get_base_name(filename: str) -> str:
-            """Extract base name from filename (e.g., 'video462_1080x1080.mp4' -> 'video462')"""
-            return filename.split("_")[0] if "_" in filename else filename.split(".")[0]
-        
-        def _get_video_size(filename: str) -> str | None:
-            """Extract size from filename. Returns '1080x1080', '1920x1080', '1080x1920', or None"""
-            if "1080x1080" in filename:
-                return "1080x1080"
-            elif "1920x1080" in filename:
-                return "1920x1080"
-            elif "1080x1920" in filename:
-                return "1080x1920"
-            return None
-        
-        def _create_creative_with_3_videos(base_name: str, videos_by_size: dict[str, dict], creative_title_override: str | None = None) -> dict:
-            """Create 1 creative with 3 videos for different placements"""
-            try:
-                from facebook_business.adobjects.advideo import AdVideo
-                
-                # Get video IDs and thumbnails
-                video_1x1 = videos_by_size["1080x1080"]
-                video_9x16 = videos_by_size["1080x1920"]
-                video_16x9 = videos_by_size["1920x1080"]
-                
-                # Get thumbnails from uploaded data (we already extracted and uploaded them)
-                def _get_thumbnail_from_upload(video_id: str) -> str | None:
-                    """Get thumbnail URL from uploads list"""
-                    for u in uploads:
-                        if u.get("video_id") == video_id:
-                            return u.get("thumbnail_url")
-                    return None
-                
-                thumb_1x1 = _get_thumbnail_from_upload(video_1x1["video_id"])
-                thumb_9x16 = _get_thumbnail_from_upload(video_9x16["video_id"])
-                thumb_16x9 = _get_thumbnail_from_upload(video_16x9["video_id"])
-                
-                # Prepare CTA
-                final_cta = None
-                if orig_cta:
-                    final_cta = orig_cta.copy()
-                    if target_link and "value" in final_cta:
-                        final_cta["value"]["link"] = target_link
-                elif target_link:
-                    final_cta = {"type": "INSTALL_MOBILE_APP", "value": {"link": target_link}}
+    # -------------------------------------------------------------------------
+# BRANCH B: SINGLE FORMAT - 기존 Creative 완벽 복제
+# -------------------------------------------------------------------------
+        else:
+            def _get_base_name(filename: str) -> str:
+                return filename.split("_")[0] if "_" in filename else filename.split(".")[0]
+            
+            def _get_video_size(filename: str) -> str | None:
+                if "1080x1080" in filename:
+                    return "1080x1080"
+                elif "1920x1080" in filename:
+                    return "1920x1080"
+                elif "1080x1920" in filename:
+                    return "1080x1920"
+                return None
 
-                # Create asset_feed_spec with 3 videos for different placements
-                # Facebook API uses 'videos' (array of video objects) not 'video_assets'
-                videos_list = []
-                for video_info, thumb, placements in [
-                    (video_1x1, thumb_1x1, ["feed", "reels_extreme_ads"]),
-                    (video_9x16, thumb_9x16, ["story", "status", "reels", "search_results", "apps_and_sites"]),
-                    (video_16x9, thumb_16x9, ["facebook_search_results"])
-                ]:
-                    video_obj = {
-                        "video_id": video_info["video_id"]
-                    }
-                    if thumb:  # Only add thumbnail_url if thumbnail is available
-                        video_obj["thumbnail_url"] = thumb
-                    
-                    # Note: placements are handled via asset_customization_rules, not in video object
-                    # Copy all other video_data fields (app_link, application_id, etc.)
-                    for key, value in video_data_other.items():
-                        if key not in video_obj:  # Don't override existing fields
-                            video_obj[key] = value
-                    
-                    videos_list.append(video_obj)
+            # 1. Persist to temp
+            persisted = []
+            with ThreadPoolExecutor(max_workers=4) as ex:
+                futs = {}
+                for u in videos:
+                    f = ex.submit(fb_ops._save_uploadedfile_tmp, u)
+                    futs[f] = fb_ops._fname_any(u)
                 
-                asset_feed_spec = {
-                    "videos": videos_list,  # Facebook API uses 'videos' not 'video_assets'
-                    "titles": titles_formatted,  # Facebook API requires objects with 'text' field
-                    "bodies": bodies_formatted,     # Facebook API requires objects with 'text' field
-                    # Note: call_to_action is NOT allowed in asset_feed_spec for flexible format
-                    # Use call_to_action_types instead (should be in asset_feed_other)
+                for fut, nm in futs.items():
+                    try:
+                        p = fut.result()
+                        persisted.append({"name": nm, "path": p})
+                    except Exception as e:
+                        st.error(f"File prep failed {nm}: {e}")
+
+            # 1.5. Validate video sizes BEFORE uploading
+            video_groups_pre: dict[str, dict[str, dict]] = {}
+            for item in persisted:
+                base_name = _get_base_name(item["name"])
+                size = _get_video_size(item["name"])
+                if not size:
+                    continue
+                if base_name not in video_groups_pre:
+                    video_groups_pre[base_name] = {}
+                video_groups_pre[base_name][size] = item
+            
+            # Validate: Each group must have all 3 sizes
+            required_sizes = {"1080x1080", "1920x1080", "1080x1920"}
+            errors = []
+            valid_groups_pre = {}
+            for base_name, sizes in video_groups_pre.items():
+                missing = required_sizes - set(sizes.keys())
+                if missing:
+                    errors.append(f"{base_name}의 사이즈를 확인하세요. 누락된 사이즈: {', '.join(missing)}")
+                else:
+                    valid_groups_pre[base_name] = sizes
+            
+            if errors:
+                st.error("\n".join(errors))
+                return []
+            
+            # 2. Upload all videos with thumbnails
+            uploads = []
+            total = sum(len(group) for group in valid_groups_pre.values())
+            progress = st.progress(0, text="Uploading videos with thumbnails (Marketer Mode)...")
+            
+            def _upload_one_with_thumbnail(item, base_name, size):
+                thumbnail_path = None
+                thumbnail_url = None
+                
+                try:
+                    thumbnail_path = extract_thumbnail_from_video(item["path"])
+                    thumbnail_url = upload_thumbnail_image(account, thumbnail_path)
+                    logger.info(f"Extracted and uploaded thumbnail for {item['name']}: {thumbnail_url}")
+                except Exception as e:
+                    logger.warning(f"Failed to extract/upload thumbnail for {item['name']}: {e}. Continuing without thumbnail.")
+                
+                video_id = _upload_video_resumable(account, item["path"])
+                
+                if thumbnail_path:
+                    import os
+                    try:
+                        if os.path.exists(thumbnail_path):
+                            os.unlink(thumbnail_path)
+                    except Exception:
+                        pass
+                
+                return {
+                    "name": item["name"],
+                    "video_id": video_id,
+                    "base_name": base_name,
+                    "size": size,
+                    "thumbnail_url": thumbnail_url
+                }
+            
+            # Upload in parallel
+            done = 0
+            if total:
+                with ThreadPoolExecutor(max_workers=6) as ex:
+                    future_to_item = {}
+                    for base_name, group in valid_groups_pre.items():
+                        for size, item in group.items():
+                            fut = ex.submit(_upload_one_with_thumbnail, item, base_name, size)
+                            future_to_item[fut] = (base_name, size, item["name"])
+                    
+                    for fut in as_completed(future_to_item):
+                        base_name, size, name = future_to_item[fut]
+                        try:
+                            res = fut.result()
+                            uploads.append(res)
+                            done += 1
+                            if progress is not None:
+                                pct = int(done / total * 100)
+                                progress.progress(pct, text=f"Uploading {done}/{total} videos…")
+                        except Exception as e:
+                            st.error(f"Upload failed for {name}: {e}")
+            
+            progress.empty()
+            
+            # 디버깅: 업로드 결과 확인
+            logger.info(f"Video upload complete: {len(uploads)} videos uploaded")
+            st.write(f"### 📤 비디오 업로드 완료")
+            st.write(f"**업로드된 비디오 수**: {len(uploads)}개")
+            if uploads:
+                st.write("**업로드된 비디오 목록 (최대 5개)**:")
+                for i, up in enumerate(uploads[:5], 1):
+                    st.write(f"  {i}. {up.get('name')} → base_name: {up.get('base_name')}, size: {up.get('size')}, video_id: {up.get('video_id')}")
+                if len(uploads) > 5:
+                    st.write(f"  ... 외 {len(uploads) - 5}개")
+            else:
+                st.error("⚠️ **비디오가 업로드되지 않았습니다!**")
+                logger.error("No videos were uploaded successfully")
+                return []  # Early return if no uploads
+            
+            # Wait for videos to be ready
+            logger.info(f"Waiting for {len(uploads)} videos to be ready...")
+            video_ids = [u["video_id"] for u in uploads]
+            ready_videos = _wait_for_videos_ready(account, video_ids, timeout_s=300)
+            
+            if not ready_videos:
+                logger.warning(f"None of the {len(video_ids)} videos became ready within timeout.")
+            else:
+                not_ready = [vid for vid in video_ids if vid not in ready_videos]
+                if not_ready:
+                    logger.warning(f"{len(not_ready)} videos are not ready yet: {not_ready}.")
+                logger.info(f"Proceeding to create creatives for {len(uploads)} videos ({len(ready_videos)}/{len(video_ids)} ready)")
+
+            # 3. Group uploaded videos by base name
+            video_groups: dict[str, dict[str, dict]] = {}
+            for up in uploads:
+                base_name = up.get("base_name") or _get_base_name(up["name"])
+                size = up.get("size") or _get_video_size(up["name"])
+                if not size:
+                    logger.warning(f"Video {up.get('name')} has no recognized size, skipping")
+                    continue
+                if base_name not in video_groups:
+                    video_groups[base_name] = {}
+                video_groups[base_name][size] = up
+            
+            # 디버깅: 그룹화 결과 확인
+            logger.info(f"Video groups after processing: {len(video_groups)} groups")
+            for base_name, sizes_dict in video_groups.items():
+                logger.info(f"  - {base_name}: {len(sizes_dict)} sizes - {list(sizes_dict.keys())}")
+            
+            # Display video groups (after grouping is complete)
+            st.write("### 🎬 업로드된 비디오 그룹")
+            st.write(f"**총 그룹 수**: {len(video_groups)}개")
+            st.write(f"**업로드된 비디오 수**: {len(uploads)}개")
+
+            if not video_groups:
+                error_msg = "⚠️ **비디오 그룹이 생성되지 않았습니다!**\n\n"
+                error_msg += "**가능한 원인**:\n"
+                error_msg += "1. 업로드된 비디오 파일명에 사이즈 정보(1080x1080, 1920x1080, 1080x1920)가 없습니다\n"
+                error_msg += "2. 모든 비디오가 사이즈 추출에 실패했습니다\n\n"
+                error_msg += "**업로드 정보**:\n"
+                for i, up in enumerate(uploads, 1):
+                    error_msg += f"  {i}. {up.get('name')} → base_name: {up.get('base_name')}, size: {up.get('size')}\n"
+                st.error(error_msg)
+                logger.error(f"No video groups created from {len(uploads)} uploads")
+                return []
+
+            for base_name, sizes_dict in video_groups.items():
+                st.write(f"**{base_name}**:")
+                for size, up_info in sizes_dict.items():
+                    st.write(f"  - {size}: video_id=`{up_info['video_id']}`")
+                
+                # Check if group has all 3 sizes
+                if len(sizes_dict) != 3:
+                    st.warning(f"⚠️ {base_name}은(는) 3개 사이즈가 필요한데 {len(sizes_dict)}개만 있습니다!")
+
+            # 4. Get reference Creative ID
+            st.write("### 🔍 Reference Creative 검색 중...")
+            st.write(f"**Target Ad Set ID**: `{adset_id}`")
+
+            reference_creative_id = None
+            max_retries = 3
+            retry_delay = 5
+
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"[Attempt {attempt + 1}/{max_retries}] Fetching ads from Ad Set: {adset_id}")
+                    
+                    adset = AdSet(adset_id)
+                    
+                    # Step 1: Get ALL ads first (no status filter) to see what's there
+                    all_ads = adset.get_ads(
+                        fields=[Ad.Field.id, Ad.Field.name, Ad.Field.status, Ad.Field.effective_status, Ad.Field.created_time],
+                        params={"limit": 50}
+                    )
+                    
+                    all_ads_list = list(all_ads)
+                    logger.info(f"Found {len(all_ads_list)} total ads in Ad Set {adset_id}")
+                    
+                    # Show what we found
+                    if all_ads_list:
+                        st.write(f"**발견된 광고**: {len(all_ads_list)}개")
+                        
+                        # Count by status
+                        status_counts = {}
+                        for ad in all_ads_list:
+                            status = ad.get("effective_status", "UNKNOWN")
+                            status_counts[status] = status_counts.get(status, 0) + 1
+                        
+                        st.write("**상태별 광고 수**:")
+                        for status, count in status_counts.items():
+                            st.write(f"  - {status}: {count}개")
+                        
+                        # Show first 5 ads
+                        st.write("**광고 샘플 (최대 5개)**:")
+                        for i, ad in enumerate(all_ads_list[:5]):
+                            st.write(f"  {i+1}. ID: `{ad['id']}` | Status: `{ad.get('effective_status')}` | Name: `{ad.get('name', 'N/A')}`")
+                    else:
+                        st.warning(f"⚠️ Ad Set `{adset_id}`에 광고가 하나도 없습니다!")
+                        logger.warning(f"No ads found in Ad Set {adset_id}")
+                    
+                    # Step 2: Filter for ACTIVE ads and get creative
+                    active_ads = [a for a in all_ads_list if a.get("effective_status") == "ACTIVE"]
+                    
+                    if not active_ads:
+                        logger.warning(f"No ACTIVE ads found in ad set {adset_id} (attempt {attempt + 1}/{max_retries})")
+                        # status_counts is only defined if all_ads_list is not empty
+                        if all_ads_list:
+                            logger.info(f"Available statuses: {list(status_counts.keys())}")
+                        
+                        if attempt < max_retries - 1:
+                            st.info(f"재시도 중... ({attempt + 1}/{max_retries})")
+                            time.sleep(retry_delay)
+                            continue
+                        break
+                    
+                    # Step 3: Get creative for the most recent active ad
+                    st.write(f"**Active 광고**: {len(active_ads)}개 발견!")
+                    
+                    # Sort by created_time (newest first)
+                    active_ads_sorted = sorted(active_ads, key=lambda x: x.get("created_time", ""), reverse=True)
+                    reference_ad = active_ads_sorted[0]
+                    
+                    # Fetch the creative
+                    reference_ad_obj = Ad(reference_ad["id"])
+                    reference_ad_data = reference_ad_obj.api_get(fields=[Ad.Field.creative])
+                    reference_creative_id = reference_ad_data["creative"]["id"]
+                    
+                    logger.info(f"✅ Reference Creative ID: {reference_creative_id} (from ad {reference_ad['id']})")
+                    st.success(f"✅ **템플릿 광고 찾음!**")
+                    st.write(f"  - Ad ID: `{reference_ad['id']}`")
+                    st.write(f"  - Ad Name: `{reference_ad.get('name', 'N/A')}`")
+                    st.write(f"  - Creative ID: `{reference_creative_id}`")
+                    
+                    break  # Success!
+                    
+                except FacebookRequestError as e:
+                    error_code = e.api_error_code()
+                    error_subcode = e.api_error_subcode()
+                    
+                    logger.error(f"Facebook API Error: Code={error_code}, Subcode={error_subcode}, Message={e.api_error_message()}")
+                    st.error(f"❌ Facebook API 에러: {e.api_error_message()}")
+                    
+                    if _is_rate_limit_error(e) and attempt < max_retries - 1:
+                        wait_time = retry_delay * (2 ** attempt)
+                        logger.warning(f"Rate limit hit, retrying in {wait_time}s...")
+                        st.warning(f"⏳ Rate limit 에러. {wait_time}초 후 재시도...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        break
+                        
+                except Exception as e:
+                    logger.error(f"Unexpected error fetching reference creative: {e}", exc_info=True)
+                    st.error(f"❌ 예상치 못한 에러: {str(e)}")
+                    break
+
+            # Final check
+            if not reference_creative_id:
+                st.error(
+                    f"⚠️ **Ad Set에서 Active 광고를 찾을 수 없습니다**\n\n"
+                    f"**Ad Set ID**: `{adset_id}`\n\n"
+                    f"**확인사항**:\n"
+                    f"1. Facebook Ads Manager에서 이 Ad Set ID가 맞는지 확인\n"
+                    f"2. 이 Ad Set에 정말 ACTIVE 상태의 광고가 있는지 확인\n"
+                    f"3. Access Token 권한 확인\n\n"
+                    f"**다음 단계**:\n"
+                    f"- 위의 디버깅 정보를 확인하여 실제 광고 상태를 파악하세요\n"
+                    f"- Ad Set에 Active 광고가 없다면, 수동으로 1개 생성 후 재시도하세요"
+                )
+                logger.error(f"Failed to find reference creative after {max_retries} attempts")
+                return []
+
+            # 5. Create creatives by cloning reference
+            results = []
+            api_errors = []
+            
+            creative_title_override = creative_name_manual
+            
+            # Debug: Log video groups info
+            logger.info(f"Starting creative creation for {len(video_groups)} video groups")
+            st.write(f"### 🎯 Creative 생성 시작")
+            st.write(f"**비디오 그룹 수**: {len(video_groups)}개")
+            
+            if not video_groups:
+                error_msg = "⚠️ **비디오 그룹이 없습니다!**\n\n"
+                error_msg += "Creative를 생성할 수 없습니다."
+                st.error(error_msg)
+                logger.error("No video groups to create creatives for")
+                return []
+            
+            for base_name, videos_by_size in video_groups.items():
+                logger.info(f"Processing video group: {base_name} with {len(videos_by_size)} sizes")
+                st.write(f"**처리 중**: {base_name} ({len(videos_by_size)}개 사이즈)")
+                
+                if len(videos_by_size) != 3:
+                    error_msg = f"{base_name}: 3개 사이즈가 필요합니다 (현재 {len(videos_by_size)}개)"
+                    api_errors.append(error_msg)
+                    logger.warning(error_msg)
+                    st.warning(f"⚠️ {error_msg}")
+                    continue
+                
+                video_ids = {
+                    "1080x1080": videos_by_size["1080x1080"]["video_id"],
+                    "1920x1080": videos_by_size["1920x1080"]["video_id"],
+                    "1080x1920": videos_by_size["1080x1920"]["video_id"],
                 }
                 
-                # Copy all other asset_feed_spec fields
-                import json
-                for key, value in asset_feed_other.items():
-                    # Explicitly exclude ad_formats - it must be set explicitly, not copied
-                    if key not in asset_feed_spec and key != "ad_formats":  # Don't override existing fields
-                        # Special handling for additional_data: must be JSON object, not string
-                        if key == "additional_data":
-                            if isinstance(value, str):
-                                # Try to parse string representation of AdAssetFeedAdditionalData
-                                # Format: "<AdAssetFeedAdditionalData> {...}"
-                                try:
-                                    # Extract JSON part from string like "<AdAssetFeedAdditionalData> {...}"
-                                    if "{" in value:
-                                        json_str = value[value.index("{"):]
-                                        asset_feed_spec[key] = json.loads(json_str)
-                                    else:
-                                        # Skip if can't parse
-                                        logger.warning(f"Could not parse additional_data: {value}")
-                                        continue
-                                except (json.JSONDecodeError, ValueError) as e:
-                                    logger.warning(f"Could not parse additional_data as JSON: {e}")
-                                    continue
-                            elif isinstance(value, dict):
-                                asset_feed_spec[key] = value
-                            else:
-                                # Skip if not dict or parseable string
-                                continue
-                        else:
-                            asset_feed_spec[key] = value
+                thumbnails = {
+                    "1080x1080": videos_by_size["1080x1080"].get("thumbnail_url"),
+                    "1920x1080": videos_by_size["1920x1080"].get("thumbnail_url"),
+                    "1080x1920": videos_by_size["1080x1920"].get("thumbnail_url"),
+                }
                 
-                # Create object_story_spec
-                object_story_spec = {"page_id": page_id}
-                if try_instagram and ig_actor_id:
-                    object_story_spec["instagram_actor_id"] = ig_actor_id
-                    
-                # Determine creative name: use override if provided, otherwise use base_name
-                final_creative_name = creative_title_override if creative_title_override else base_name
-                    
-                # Create creative with retry for video processing errors
-                import time  # Import time for sleep in retry logic
-                max_retries = 3
-                retry_delay = 10
-                creative = None
-                for attempt in range(max_retries):
-                    try:
-                        creative = account.create_ad_creative(params={
-                            "name": final_creative_name,
-                            "object_story_spec": object_story_spec,
-                            "asset_feed_spec": asset_feed_spec
-                        })
-                        break  # Success
-                    except FacebookRequestError as e:
-                        error_subcode = None
-                        try:
-                            error_subcode = e.api_error_subcode()
-                        except:
-                            pass
-                        
-                        # Check if it's a video processing error (1885252)
-                        if error_subcode == 1885252 and attempt < max_retries - 1:
-                            logger.warning(f"Video not ready yet for {final_creative_name}, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})...")
-                            time.sleep(retry_delay)
-                            retry_delay *= 2  # Exponential backoff
-                            continue
-                        else:
-                            raise  # Re-raise if not retryable or last attempt
+                final_title = creative_title_override if creative_title_override else base_name
                 
-                # Create ad
-                ad = account.create_ad(params={
-                    "name": make_ad_name(final_creative_name, ad_name_prefix),
-                    "adset_id": adset_id,
-                    "creative": {"creative_id": creative["id"]},
-                    "status": Ad.Status.active,
-                })
-                
-                return {"name": final_creative_name, "ad_id": ad["id"], "creative_id": creative["id"]}
-            except Exception as e:
-                return {"name": base_name, "error": str(e)}
-
-    # 1. Persist to temp
-    persisted = []
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        futs = {}
-        for u in videos:
-            f = ex.submit(fb_ops._save_uploadedfile_tmp, u)
-            futs[f] = fb_ops._fname_any(u)
-        
-        for fut, nm in futs.items():
-            try:
-                p = fut.result()
-                persisted.append({"name": nm, "path": p})
-            except Exception as e:
-                st.error(f"File prep failed {nm}: {e}")
-
-        # 2. Upload Videos (with size validation before upload)
-        # 1.5. Validate video sizes BEFORE uploading
-        video_groups_pre: dict[str, dict[str, dict]] = {}
-        for item in persisted:
-            base_name = _get_base_name(item["name"])
-            size = _get_video_size(item["name"])
-            if not size:
-                continue
-            if base_name not in video_groups_pre:
-                video_groups_pre[base_name] = {}
-            video_groups_pre[base_name][size] = item
-        
-        # Validate: Each group must have all 3 sizes
-        required_sizes = {"1080x1080", "1920x1080", "1080x1920"}
-        errors = []
-        valid_groups_pre = {}
-        for base_name, sizes in video_groups_pre.items():
-            missing = required_sizes - set(sizes.keys())
-            if missing:
-                errors.append(f"{base_name}의 사이즈를 확인하세요. 누락된 사이즈: {', '.join(missing)}")
-            else:
-                valid_groups_pre[base_name] = sizes
-        
-        if errors:
-            st.error("\n".join(errors))
-            return []
-        
-        # Upload all videos with thumbnails (extract and upload thumbnails first)
-        uploads = []
-        total = sum(len(group) for group in valid_groups_pre.values())
-        progress = st.progress(0, text="Uploading videos with thumbnails (Marketer Mode)...")
-        uploaded_count = 0
-        
-        def _upload_one_with_thumbnail(item, base_name, size):
-            """Upload one video with its thumbnail (parallelized)"""
-            thumbnail_path = None
-            thumbnail_url = None
-            
-            try:
-                # Extract and upload thumbnail before uploading video
-                thumbnail_path = extract_thumbnail_from_video(item["path"])
-                thumbnail_url = upload_thumbnail_image(account, thumbnail_path)
-                logger.info(f"Extracted and uploaded thumbnail for {item['name']}: {thumbnail_url}")
-            except Exception as e:
-                logger.warning(f"Failed to extract/upload thumbnail for {item['name']}: {e}. Continuing without thumbnail.")
-                # Continue without thumbnail - will use Facebook's auto-generated one
-            
-            # Upload video using resumable upload
-            video_id = _upload_video_resumable(account, item["path"])
-            
-            # Clean up temporary thumbnail file
-            if thumbnail_path:
-                import os
                 try:
-                    if os.path.exists(thumbnail_path):
-                        os.unlink(thumbnail_path)
-                except Exception:
-                    pass
+                    new_creative_id = _clone_creative_with_new_video(
+                        account=account,
+                        reference_creative_id=reference_creative_id,
+                        video_ids_by_size=video_ids,
+                        thumbnails_by_size=thumbnails,
+                        new_creative_name=final_title,
+                        store_url=store_url
+                    )
+                    
+                    ad = account.create_ad(params={
+                        "name": make_ad_name(final_title, ad_name_prefix),
+                        "adset_id": adset_id,
+                        "creative": {"creative_id": new_creative_id},
+                        "status": Ad.Status.active,
+                    })
+                    
+                    results.append({
+                        "name": final_title,
+                        "ad_id": ad["id"],
+                        "creative_id": new_creative_id
+                    })
+                    
+                # ✅ 수정 후
+                except FacebookRequestError as e:
+                    error_msg = f"{base_name}:\n"
+                    error_msg += f"  Message: {e.api_error_message()}\n"
+                    error_msg += f"  Code: {e.api_error_code()}\n"
+                    error_msg += f"  Subcode: {e.api_error_subcode()}\n"
+                    error_msg += f"  Type: {e.api_error_type()}\n"
+                    if e.body():
+                        error_msg += f"  Response: {e.body()}"
+                    api_errors.append(error_msg)
+                    logger.error(f"Failed to create ad for {base_name}: {error_msg}")
+                except Exception as e:
+                    error_msg = f"{base_name}: {str(e)}"
+                    api_errors.append(error_msg)
+                    logger.error(f"Unexpected error for {base_name}: {e}")
+
+            # Display errors and results after processing all groups
+            if api_errors:
+                error_display = "⚠️ **광고 생성 실패**\n\n" + "\n\n".join(api_errors)
+                st.error(error_display)
+                logger.error(f"Total {len(api_errors)} ads failed to create")
+
+            # 디버깅 정보 추가
+            logger.info(f"Created {len(results)} ads successfully, {len(api_errors)} failed")
+            st.write(f"**결과**: {len(results)}개 성공, {len(api_errors)}개 실패")
             
-            return {
-                "name": item["name"],
-                "video_id": video_id,
-                "base_name": base_name,
-                "size": size,
-                "thumbnail_url": thumbnail_url
-            }
-        
-        # Upload in parallel
-        done = 0
-        if total:
-            with ThreadPoolExecutor(max_workers=6) as ex:
-                future_to_item = {}
-                for base_name, group in valid_groups_pre.items():
-                    for size, item in group.items():
-                        fut = ex.submit(_upload_one_with_thumbnail, item, base_name, size)
-                        future_to_item[fut] = (base_name, size, item["name"])
+            # Debug: Log detailed info when no results
+            if not results:
+                error_summary = f"⚠️ **모든 광고 생성 실패**\n\n"
+                error_summary += f"- 시도한 그룹 수: {len(video_groups)}\n"
+                error_summary += f"- 실패 수: {len(api_errors)}\n"
+                error_summary += f"- Reference Creative ID: {reference_creative_id or 'N/A'}\n\n"
                 
-                for fut in as_completed(future_to_item):
-                    base_name, size, name = future_to_item[fut]
-                    try:
-                        res = fut.result()
-                        uploads.append(res)
-                        done += 1
-                        if progress is not None:
-                            pct = int(done / total * 100)
-                            progress.progress(pct, text=f"Uploading {done}/{total} videos…")
-                    except Exception as e:
-                        st.error(f"Upload failed for {name}: {e}")
-        
-        progress.empty()
-        
-        # Wait for videos to be ready before creating creatives
-        # Facebook requires videos to be in READY or PUBLISHED status before use
-        logger.info(f"Waiting for {len(uploads)} videos to be ready...")
-        video_ids = [u["video_id"] for u in uploads]
-        ready_videos = _wait_for_videos_ready(account, video_ids, timeout_s=300)  # Increased timeout to 5 minutes
-        
-        # If no videos are ready, log warning but continue (retry logic will handle it)
-        if not ready_videos:
-            logger.warning(f"None of the {len(video_ids)} videos became ready within timeout. Will rely on retry logic during creative creation.")
-        else:
-            not_ready = [vid for vid in video_ids if vid not in ready_videos]
-            if not_ready:
-                logger.warning(f"{len(not_ready)} videos are not ready yet: {not_ready}. Will retry creative creation with retries.")
-            logger.info(f"Proceeding to create creatives for {len(uploads)} videos ({len(ready_videos)}/{len(video_ids)} ready)")
+                # Log video groups details
+                error_summary += "**비디오 그룹 상세**:\n"
+                for base_name, sizes_dict in video_groups.items():
+                    error_summary += f"- {base_name}: {len(sizes_dict)}개 사이즈\n"
+                    for size, up_info in sizes_dict.items():
+                        error_summary += f"  - {size}: video_id={up_info.get('video_id', 'N/A')}\n"
+                
+                if api_errors:
+                    error_summary += "\n**에러 내역**:\n" + "\n\n".join(api_errors)
+                else:
+                    error_summary += "\n**에러 내역이 기록되지 않았습니다.**\n"
+                    error_summary += "가능한 원인:\n"
+                    error_summary += "1. 모든 그룹이 3개 사이즈를 가지지 않음\n"
+                    error_summary += "2. Creative 생성 중 예외가 발생했지만 로그되지 않음\n"
+                    error_summary += "3. Reference Creative를 찾지 못함\n"
+                
+                st.error(error_summary)
+                logger.error(f"All {len(video_groups)} video groups failed to create ads. Errors: {api_errors}")
+                logger.error(f"Video groups details: {[(name, len(sizes)) for name, sizes in video_groups.items()]}")
 
-        # 3. Group uploaded videos by base name and create 1 creative per group
-        video_groups: dict[str, dict[str, dict]] = {}
-        for up in uploads:
-            base_name = up.get("base_name") or _get_base_name(up["name"])
-            size = up.get("size") or _get_video_size(up["name"])
-            if not size:
-                continue
-            if base_name not in video_groups:
-                video_groups[base_name] = {}
-            video_groups[base_name][size] = up
-        
-        # Create creatives
-        results = []
-        api_errors = []
-        
-        ig_actor_id = None
-        try:
-            from facebook_business.adobjects.page import Page
-            p = Page(page_id).api_get(fields=["instagram_business_account"])
-            ig_actor_id = p.get("instagram_business_account", {}).get("id")
-        except: pass
-
-        template = template_data or {}
-        
-        # Extract ALL Lists (not just first one)
-        headlines_list = template.get("headline") or ["New Game"]
-        messages_list = template.get("message") or []
-
-        # CTA Logic
-        orig_cta = template.get("call_to_action")
-        target_link = store_url
-
-        # Create creatives for each valid group
-        # For single video mode, if creative_title_override is provided, use it as a pattern
-        # If it contains {base_name} or similar, replace it; otherwise use as-is for all
-        creative_title_override = creative_name_manual
-        
-        for base_name, videos_by_size in video_groups.items():
-            # If creative_title_override is provided, use it; otherwise use base_name
-            # User can set a custom title that will be used for all creatives, or leave empty to use base_name
-            if creative_title_override:
-                # Use the provided title (same for all, or user can customize per video if needed)
-                final_title = creative_title_override
-            else:
-                # Default: use base_name extracted from video filename
-                final_title = base_name
-            res = _create_creative_with_3_videos(base_name, videos_by_size, creative_title_override=final_title)
-            if "error" in res:
-                api_errors.append(f"{res['name']}: {res['error']}")
-            else:
-                results.append(res)
-
-    if api_errors:
-        st.error("Some ads failed to create:\n" + "\n".join(api_errors))
-        
-    return results
+            return results
 
 # -------------------------------------------------------------------------
 # 6. Main Entry Point
@@ -2636,16 +2890,19 @@ def upload_to_facebook(
     headlines_found = template_data.get("headline") or []
     messages_found = template_data.get("message") or []
     
-    if headlines_found or messages_found:
-        h_preview = headlines_found[0] if headlines_found else "None"
-        m_preview = messages_found[0][:30] + "..." if messages_found else "None"
-        
-        st.info(f"📋 Copying settings from existing ad:\n"
-                f"- Headlines: {len(headlines_found)} found (e.g. '{h_preview}')\n"
-                f"- Messages: {len(messages_found)} found (e.g. '{m_preview}')")
-    else:
-        st.warning("⚠️ No existing active ads found to copy settings from. Using defaults.")
+    # ✅ 추가
+    # Show what we found (even if empty strings)
+    h_preview = f"'{headlines_found[0]}'" if headlines_found else "(없음)"
+    m_preview = f"'{messages_found[0][:50]}...'" if messages_found and len(messages_found[0]) > 50 else (f"'{messages_found[0]}'" if messages_found else "(없음)")
 
+    st.info(f"📋 Reference Creative에서 설정 복사:\n"
+            f"- Headlines: {len(headlines_found)}개 - {h_preview}\n"
+            f"- Messages: {len(messages_found)}개 - {m_preview}\n"
+            f"- Creative ID: {template_data.get('creative_id', 'N/A')}")
+
+    # Warning only if both are truly missing (empty list, not empty string)
+    if not headlines_found and not messages_found:
+        st.warning("⚠️ Headline과 Message가 비어있습니다. 다른 설정(CTA, URL 등)은 복사됩니다.")
     ad_name_prefix = (
         settings.get("ad_name_prefix") if settings.get("ad_name_mode") == "Prefix + filename" else None
     )
@@ -2661,7 +2918,7 @@ def upload_to_facebook(
     else:
         manual_creative_name = settings.get("single_creative_name")
 
-    upload_videos_create_ads_cloned(
+    results = upload_videos_create_ads_cloned(
         account=account,
         page_id=str(page_id),
         adset_id=target_adset_id,
@@ -2675,5 +2932,11 @@ def upload_to_facebook(
         game_name=game_name
     )
 
+    if not results:
+        raise RuntimeError("광고 생성 실패: upload_videos_create_ads_cloned returned empty results")
+    
     plan["adset_id"] = target_adset_id
+    plan["created_ads_count"] = len(results)  # ← 추가 정보
+    plan["created_ads"] = results  # ← 생성된 광고 목록
+    
     return plan

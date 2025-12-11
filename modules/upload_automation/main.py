@@ -348,8 +348,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         unity_ok_placeholder = st.empty()
                         # Unity 버튼들도 동일하게 적용
                         st.write("")
-                        if is_marketer and game == "XP HERO":
-                            # Marketer mode: Add dry run button for Unity
+                        if is_marketer:
+                            # Marketer mode: Add dry run button for Unity (all games)
                             dry_run_unity = st.button("🔍 Dry Run (Preview)", key=f"dry_run_unity_{game}", use_container_width=True)
                             st.write("")
                         cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{game}", use_container_width=True)
@@ -374,11 +374,11 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     unity_card = st.container(border=True)
                     
                     try:
-                        # XP HERO만 Marketer Mode 지원
-                        if is_marketer and game == "XP HERO":
+                        # Marketer Mode: All games support campaign selection and creative upload
+                        if is_marketer:
                             unity_module.render_unity_settings_panel(unity_card, game, i, is_marketer=True)
                         else:
-                            # 다른 게임들은 기존 Operation Mode 사용
+                            # Operation Mode: Use existing settings panel
                             uni_ops.render_unity_settings_panel(unity_card, game, i, is_marketer=False)
                     except Exception as e:
                         st.error(f"Unity 설정 패널 로드 실패: {e}")
@@ -581,7 +581,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 st.rerun()
 
             # --- UNITY DRY RUN ---
-            if platform == "Unity Ads" and is_marketer and game == "XP HERO" and "dry_run_unity" in locals() and dry_run_unity:
+            if platform == "Unity Ads" and is_marketer and "dry_run_unity" in locals() and dry_run_unity:
                 remote_list = st.session_state.remote_videos.get(game, [])
                 ok, msg = validate_count(remote_list)
                 if not ok:
@@ -589,12 +589,11 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 else:
                     try:
                         unity_settings = unity_module.get_unity_settings(game)
-                        is_unity_marketer = is_marketer and game == "XP HERO"
                         preview = unity_module.preview_unity_upload(
                             game=game,
                             videos=remote_list,
                             settings=unity_settings,
-                            is_marketer=is_unity_marketer
+                            is_marketer=True  # All games in marketer mode
                         )
                         
                         with st.expander("📋 Unity Ads Upload Preview", expanded=True):
@@ -697,10 +696,9 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         unity_ok_placeholder.error("No packs found. Create them first.")
                     else:
                         try:
-                            # Check if marketer mode for Unity (XP HERO only)
-                            is_unity_marketer = is_marketer and game == "XP HERO"
+                            # Marketer mode for Unity (all games)
                             res = unity_module.apply_unity_creative_packs_to_campaign(
-                                game=game, creative_pack_ids=pack_ids, settings=unity_settings, is_marketer=is_unity_marketer
+                                game=game, creative_pack_ids=pack_ids, settings=unity_settings, is_marketer=is_marketer
                             )
                             assigned = res.get("assigned_packs", [])
                             if assigned:

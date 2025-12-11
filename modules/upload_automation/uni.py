@@ -162,7 +162,8 @@ def fetch_playables_for_game(game: str, platform: str = "aos") -> List[Dict]:
 # -------------------------------------------------------------------------
 def render_unity_settings_panel(container, game: str, idx: int, is_marketer: bool = True) -> None:
     """
-    Marketer-mode Unity panel (XP HERO only)
+    Marketer-mode Unity panel (all games)
+    Allows campaign selection and creative/creative pack upload for all games in marketer mode.
     """
     _ensure_unity_settings_state()
     cur = get_unity_settings(game) or {}
