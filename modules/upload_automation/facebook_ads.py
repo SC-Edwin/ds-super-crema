@@ -916,8 +916,10 @@ def upload_videos_create_ads(
                 p_texts = [t.strip() for t in raw_text.split('\n\n') if t.strip()] or [""]
                 headlines = [h.strip() for h in raw_head.split('\n') if h.strip()] or [base_name]
 
-                # 3. Build Asset Feed (ad_formats을 배열이 아닌 단일 값으로!)
+                # 3. Build Asset Feed (실제 Facebook Ads 구조와 일치)
+                # 3. Build Asset Feed (실제 Facebook Ads 구조와 일치)
                 asset_feed = {
+                    "ad_formats": ["SINGLE_VIDEO"],  # <--- [중요] 이 줄을 반드시 추가해야 합니다!
                     "videos": [
                         {"video_id": vids["1x1"], "thumbnail_url": thumbs.get("1x1", "")},
                         {"video_id": vids["9x16"], "thumbnail_url": thumbs.get("9x16", "")},
@@ -926,7 +928,7 @@ def upload_videos_create_ads(
                     "bodies": [{"text": t} for t in p_texts],
                     "titles": [{"text": h} for h in headlines],
                     "call_to_action_types": [cta],
-                    "ad_formats": ["SINGLE_IMAGE"]  # ← 이게 핵심!
+                    "optimization_type": "DEGREES_OF_FREEDOM",
                 }
                 
                 if store_url:
@@ -970,23 +972,22 @@ def upload_videos_create_ads(
             except Exception as e:
                 return {"success": False, "error": f"{base_name}: {str(e)}"}
 
+        # Run creation for all video groups
+        total = len(video_groups)
+        prog = st.progress(0, text=f"Creating {total} Flexible ads...")
+        done = 0
 
-                # Run creation for all video groups
-                total = len(video_groups)
-                prog = st.progress(0, text=f"Creating {total} Flexible ads...")
-                done = 0
-
-                with ThreadPoolExecutor(max_workers=max_workers) as ex:
-                    futs = {ex.submit(_create_marketer_ad, b, f): b for b, f in video_groups.items()}
-                    for fut in as_completed(futs):
-                        res = fut.result()
-                        done += 1
-                        prog.progress(int(done/total*100))
-                        if res["success"]:
-                            results.append(res["result"])
-                        else:
-                            api_errors.append(res["error"])
-                prog.empty()
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futs = {ex.submit(_create_marketer_ad, b, f): b for b, f in video_groups.items()}
+            for fut in as_completed(futs):
+                res = fut.result()
+                done += 1
+                prog.progress(int(done/total*100), text=f"Creating ads... {done}/{total}")
+                if res["success"]:
+                    results.append(res["result"])
+                else:
+                    api_errors.append(res["error"])
+        prog.empty()
 
     else:
         # ==========================================

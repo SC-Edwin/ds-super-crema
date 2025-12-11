@@ -148,15 +148,64 @@ def fetch_latest_ad_creative_defaults(adset_id: str) -> dict:
         store_url = ""  # <--- New Field
 
         # 1. Check Dynamic (Asset Feed)
+        ad_formats = []
+        full_asset_feed_spec = None
         if c_data.get('asset_feed_spec'):
             afs = c_data['asset_feed_spec']
-            bodies = afs.get('bodies', [])
+            # Convert Facebook API object to plain dict for serialization
+            def _make_serializable(obj):
+                """Convert object to pickle-serializable types"""
+                if obj is None:
+                    return None
+                elif isinstance(obj, (str, int, float, bool)):
+                    return obj
+                elif isinstance(obj, dict):
+                    return {str(k): _make_serializable(v) for k, v in obj.items()}
+                elif isinstance(obj, (list, tuple)):
+                    return [_make_serializable(item) for item in obj]
+                elif hasattr(obj, '__dict__'):
+                    # Facebook API object - convert to dict
+                    try:
+                        return _make_serializable(dict(obj))
+                    except:
+                        return str(obj)
+                else:
+                    return str(obj)
+            
+            try:
+                # Force conversion to dict first
+                if hasattr(afs, '__dict__'):
+                    afs_dict = dict(afs)
+                elif isinstance(afs, dict):
+                    afs_dict = afs
+                else:
+                    afs_dict = {}
+                full_asset_feed_spec = _make_serializable(afs_dict)
+            except Exception as e:
+                logger.warning(f"Could not serialize asset_feed_spec: {e}")
+                full_asset_feed_spec = {}
+            
+            # Extract ad_formats safely
+            if isinstance(afs, dict):
+                ad_formats = list(afs.get('ad_formats', [])) if afs.get('ad_formats') else []
+                bodies = afs.get('bodies', [])
+                titles = afs.get('titles', [])
+                link_urls = afs.get('link_urls', [])
+            elif hasattr(afs, 'get'):
+                ad_formats = list(afs.get('ad_formats', [])) if afs.get('ad_formats') else []
+                bodies = afs.get('bodies', [])
+                titles = afs.get('titles', [])
+                link_urls = afs.get('link_urls', [])
+            else:
+                ad_formats = []
+                bodies = []
+                titles = []
+                link_urls = []
+            
             primary_texts = [b.get('text') for b in bodies if b.get('text')]
-            titles = afs.get('titles', [])
             headlines = [t.get('text') for t in titles if t.get('text')]
             
             # Extract URL & CTA from link_urls
-            link_urls = afs.get('link_urls', [])
             if link_urls:
                 found_cta = link_urls[0].get('call_to_action_type')
                 found_url = link_urls[0].get('website_url') # <--- Get URL
@@ -186,7 +235,9 @@ def fetch_latest_ad_creative_defaults(adset_id: str) -> dict:
             "headlines": list(dict.fromkeys(headlines)),
             "call_to_action": cta,
             "store_url": store_url, # <--- Return it
-            "source_ad_name": target_ad_data['name']
+            "source_ad_name": target_ad_data['name'],
+            "ad_formats": ad_formats,  # ad_formats 추가
+            "full_asset_feed_spec": full_asset_feed_spec  # 전체 구조 확인용
         }
 
     except Exception as e:
@@ -278,6 +329,21 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
                 val_cta_idx = FB_CTA_OPTIONS.index(fetched_cta)
             
             source_msg = f"✨ Loaded from: **{defaults.get('source_ad_name')}**"
+            
+            # Display ad_formats if available
+            ad_formats = defaults.get('ad_formats', [])
+            if ad_formats:
+                source_msg += f"\n\n📋 **ad_formats**: `{ad_formats}`"
+            
+            # Display full asset_feed_spec in expander for debugging
+            if defaults.get('full_asset_feed_spec'):
+                with st.expander("🔍 View Full asset_feed_spec (Debug)", expanded=False):
+                    spec = defaults.get('full_asset_feed_spec')
+                    # Ensure it's a dict before passing to st.json
+                    if isinstance(spec, dict):
+                        st.json(spec)
+                    else:
+                        st.code(str(spec), language='text')
 
         # 2. Ad Setup
         st.caption("Ad Setup")

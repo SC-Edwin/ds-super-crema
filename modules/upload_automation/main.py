@@ -546,6 +546,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         st.code(traceback.format_exc())
             
             # --- FACEBOOK ACTIONS ---
+            # Line 548-574
+            # --- FACEBOOK ACTIONS ---
             if platform == "Facebook" and cont:
                 # Preserve current tab
                 st.query_params["tab"] = game
@@ -559,20 +561,25 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         st.session_state.uploads[game] = remote_list
                         settings = st.session_state.settings.get(game, {})
                         
+                        # ✅ 디버깅 메시지 추가
+                        st.info(f"🔍 Mode: {'Marketer' if is_marketer else 'Test'}")
+                        st.info(f"🔍 Using module: {fb_module.__name__}")
+                        if 'creative_type' in settings:
+                            st.info(f"🔍 Creative Type: {settings['creative_type']}")
+                        
                         plan = fb_module.upload_to_facebook(game, remote_list, settings)
                         
                         if isinstance(plan, dict) and plan.get("adset_id"):
-                            ok_msg_placeholder.success("Uploaded successfully! Ad Set created.")
+                            ok_msg_placeholder.success("✅ Uploaded successfully! Ad Set created.")
                         else:
-                            ok_msg_placeholder.error("Upload failed or no Ad Set ID returned.")
+                            ok_msg_placeholder.error("❌ Upload failed or no Ad Set ID returned.")
                     except Exception as e:
                         import traceback
-                        st.error("Upload Error")
+                        st.error("❌ Upload Error")
                         st.code(traceback.format_exc())
                     finally:
                         # Ensure tab is preserved even after upload
                         st.query_params["tab"] = game
-
             if platform == "Facebook" and clr:
                 st.session_state.uploads.pop(game, None)
                 st.session_state.remote_videos.pop(game, None)
