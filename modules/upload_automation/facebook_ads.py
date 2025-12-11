@@ -919,7 +919,7 @@ def upload_videos_create_ads(
                 # 3. Build Asset Feed (실제 Facebook Ads 구조와 일치)
                 # 3. Build Asset Feed (실제 Facebook Ads 구조와 일치)
                 asset_feed = {
-                    "ad_formats": ["SINGLE_VIDEO"],  # <--- [중요] 이 줄을 반드시 추가해야 합니다!
+                    "ad_formats": ["AUTOMATIC_FORMAT"],
                     "videos": [
                         {"video_id": vids["1x1"], "thumbnail_url": thumbs.get("1x1", "")},
                         {"video_id": vids["9x16"], "thumbnail_url": thumbs.get("9x16", "")},
@@ -927,12 +927,16 @@ def upload_videos_create_ads(
                     ],
                     "bodies": [{"text": t} for t in p_texts],
                     "titles": [{"text": h} for h in headlines],
+                    "descriptions": [{"text": ""}],
                     "call_to_action_types": [cta],
-                    "optimization_type": "DEGREES_OF_FREEDOM",
+                    "optimization_type": "PLACEMENT",
                 }
                 
                 if store_url:
-                    asset_feed["link_urls"] = [{"website_url": store_url}]
+                    asset_feed["link_urls"] = [{
+                        "website_url": store_url,
+                        "display_url": ""
+                    }]
 
                 params = {
                     "name": base_name,
