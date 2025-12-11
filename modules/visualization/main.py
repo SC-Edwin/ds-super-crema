@@ -109,7 +109,6 @@ def load_prediction_data():
           SELECT MAX(prediction_timestamp)
           FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
         )
-        AND rank != 'nan'
     ),
     LatestSnapshot AS (
       SELECT *
@@ -1039,3 +1038,9 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+
+
+
+
+
