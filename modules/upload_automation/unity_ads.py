@@ -989,6 +989,39 @@ def _check_existing_pack(org_id: str, title_id: str, pack_name: str) -> str | No
     except Exception as e:
         logger.warning(f"Could not check existing pack: {e}")
         return None
+
+def _check_existing_pack_by_creatives(org_id: str, title_id: str, creative_ids: List[str]) -> tuple[str | None, str | None]:
+    """
+    Check if a creative pack already exists with the same creative IDs (video + playable combination).
+    Returns (pack_id, pack_name) if found, (None, None) otherwise.
+    """
+    try:
+        path = f"organizations/{org_id}/apps/{title_id}/creative-packs"
+        meta = _unity_get(path, params={"limit": 100})
+        
+        items = []
+        if isinstance(meta, list):
+            items = meta
+        elif isinstance(meta, dict):
+            items = meta.get("items") or meta.get("data") or []
+        
+        # Normalize creative_ids to set for comparison (order doesn't matter)
+        target_creative_set = set(str(cid) for cid in creative_ids if cid)
+        
+        for pack in items:
+            pack_creative_ids = pack.get("creativeIds") or pack.get("creative_ids") or []
+            pack_creative_set = set(str(cid) for cid in pack_creative_ids if cid)
+            
+            # Check if sets match (same video + playable combination)
+            if pack_creative_set == target_creative_set:
+                pack_id = str(pack.get("id", ""))
+                pack_name = pack.get("name", "")
+                return (pack_id, pack_name)
+        
+        return (None, None)
+    except Exception as e:
+        logger.warning(f"Could not check existing pack by creatives: {e}")
+        return (None, None)
 # --------------------------------------------------------------------
 # Dry Run / Preview Functions
 # --------------------------------------------------------------------
@@ -1367,8 +1400,25 @@ def upload_unity_creatives_to_campaign(
 
             pack_creatives = [p_id, l_id, playable_creative_id]
             
-            # Check if pack already exists
+            # Check if pack already exists by name first
             pack_id = _check_existing_pack(org_id, title_id, final_pack_name)
+            existing_pack_name = final_pack_name
+            
+            # Also check if pack exists with same video + playable combination (for marketer mode)
+            if not pack_id:
+                existing_pack_id, existing_pack_name = _check_existing_pack_by_creatives(
+                    org_id, title_id, pack_creatives
+                )
+                if existing_pack_id:
+                    pack_id = existing_pack_id
+                    status_container.warning(
+                        f"⚠️ **Creative pack already exists** with same video + playable combination:\n\n"
+                        f"   - Existing Pack Name: `{existing_pack_name}`\n"
+                        f"   - Existing Pack ID: `{existing_pack_id}`\n"
+                        f"   - Skipping upload for: `{final_pack_name}`\n\n"
+                        f"   Continuing with remaining uploads..."
+                    )
+                    logger.info(f"Skipping pack creation for {final_pack_name} - already exists as {existing_pack_name} ({existing_pack_id})")
             
             if not pack_id:
                 status_container.info(f"📦 Creating pack: {final_pack_name}")
@@ -1380,7 +1430,12 @@ def upload_unity_creatives_to_campaign(
                     pack_type="video+playable"
                 )
             else:
-                status_container.success(f"✅ Found existing pack: {final_pack_name}")
+                if existing_pack_name != final_pack_name:
+                    # Pack exists with same creatives but different name
+                    status_container.success(f"✅ Found existing pack with same video + playable: `{existing_pack_name}`")
+                else:
+                    # Pack exists with same name
+                    status_container.success(f"✅ Found existing pack: `{final_pack_name}`")
             
             upload_state["creative_packs"][final_pack_name] = pack_id
             upload_state["completed_packs"].append(pack_id)

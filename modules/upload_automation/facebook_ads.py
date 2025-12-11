@@ -371,41 +371,61 @@ OPT_GOAL_LABEL_TO_API = {
 def build_targeting_from_settings(countries: list[str], age_min: int, settings: dict) -> dict:
     """
     Build Meta targeting dict from UI settings.
-    
-    Args:
-        countries: List of ISO country codes e.g. ["US", "JP", "KR"]
-        age_min: Minimum age
-        settings: Other targeting settings
+    Automatically detects OS from Store URL if 'os_choice' matches or defaults.
     """
-    os_choice = settings.get("os_choice", "Both")
-    min_android = settings.get("min_android_os_token")
-    min_ios = settings.get("min_ios_os_token")
-
-    # CRITICAL: Ensure countries is always a list
+    # 1. Basic Targeting
     if isinstance(countries, str):
-        countries = [countries]  # Convert old single-country format
+        countries = [countries]
     
     targeting = {
-        "geo_locations": {"countries": countries},  # ← Must be a list
+        "geo_locations": {"countries": countries},
         "age_min": max(13, int(age_min)),
     }
 
-    user_os: list[str] = []
+    # 2. Determine OS Strategy
+    # Detect platform from URL to prevent "Mismatch" errors
+    store_url = (settings.get("store_url") or "").lower().strip()
+    target_platform = "Both"
+    
+    if "play.google.com" in store_url:
+        target_platform = "Android"  # <--- FORCE ANDROID
+    elif "apps.apple.com" in store_url:
+        target_platform = "iOS"      # <--- FORCE iOS
+    else:
+        # Only fallback to dropdown if URL is ambiguous
+        os_choice = settings.get("os_choice", "Both")
+        if os_choice == "Android only": target_platform = "Android"
+        elif os_choice == "iOS only": target_platform = "iOS"
 
-    if os_choice == "Android only":
+    # 3. Build user_os list
+    user_os = []
+    
+    # Get version limits from settings
+    min_android = settings.get("min_android_os_token")
+    min_ios = settings.get("min_ios_os_token")
+
+    if target_platform == "Android":
         token = min_android or "Android_ver_6.0_and_above"
         user_os.append(token)
-    elif os_choice == "iOS only":
+        
+    elif target_platform == "iOS":
         token = min_ios or "iOS_ver_11.0_and_above"
         user_os.append(token)
-    else:  # Both
-        if min_android:
-            user_os.append(min_android)
-        if min_ios:
-            user_os.append(min_ios)
+        
+    elif target_platform == "Both":
+        # Only add specific versions if "Both" is genuinely allowed
+        if min_android: user_os.append(min_android)
+        if min_ios: user_os.append(min_ios)
 
+    # 4. Apply to targeting
     if user_os:
         targeting["user_os"] = user_os
+        
+        # [Additional Safety] Explicitly set user_device to []
+        # This tells the API "All mobile devices compatible with the OS"
+        # and helps resolve the "Targeting Mismatch" error.
+        if target_platform in ("Android", "iOS"):
+            targeting["user_device"] = [] 
 
     return targeting
 
@@ -571,6 +591,55 @@ def _save_uploadedfile_tmp(u) -> str:
     raise ValueError("Unsupported video object type for saving.")
 
 # --------------------------------------------------------------------
+# Video status checking
+# --------------------------------------------------------------------
+def wait_for_video_ready(account: "AdAccount", video_id: str, max_wait: int = 300, progress_bar=None, progress_text: str = "") -> bool:
+    """
+    비디오가 ready 상태가 될 때까지 대기
+    Returns True if ready, False if timeout
+    """
+    from facebook_business.adobjects.advideo import AdVideo
+    import time
+    
+    video = AdVideo(video_id, api=account.get_api())
+    start_time = time.time()
+    check_count = 0
+    
+    while time.time() - start_time < max_wait:
+        try:
+            video.api_get(fields=["status"])
+            status = video.get("status", "")
+            
+            check_count += 1
+            elapsed = int(time.time() - start_time)
+            
+            # Progress bar 업데이트
+            if progress_bar:
+                estimated_progress = min(elapsed / max_wait, 0.95)
+                progress_bar.progress(
+                    estimated_progress,
+                    text=f"{progress_text} ⏳ Processing... ({elapsed}s)"
+                )
+            
+            if status == "ready":
+                if progress_bar:
+                    progress_bar.progress(1.0, text=f"{progress_text} ✅ Ready!")
+                return True
+            if status in ["failed", "error"]:
+                if progress_bar:
+                    progress_bar.progress(1.0, text=f"{progress_text} ❌ Failed")
+                return False
+                
+            time.sleep(5)  # 5초마다 확인
+        except Exception as e:
+            logger.warning(f"Error checking video {video_id} status: {e}")
+            time.sleep(5)
+    
+    if progress_bar:
+        progress_bar.progress(1.0, text=f"{progress_text} ⚠️ Timeout")
+    return False
+
+# --------------------------------------------------------------------
 # Resumable upload + ad creation
 # --------------------------------------------------------------------
 def upload_videos_create_ads(
@@ -583,459 +652,403 @@ def upload_videos_create_ads(
     max_workers: int = 6,
     store_url: str | None = None,
     try_instagram: bool = True,
+    settings: dict | None = None,
 ):
     """
-    Upload videos (resumable), wait for processing, then create creatives + ads in parallel.
-    Returns a list of {'name','ad_id'} and shows errors in Streamlit UI.
+    [Hybrid Mode]
+    - Test Mode: Uploads every video as a separate ad (Original behavior).
+    - Marketer Mode: Groups videos by name (3 sizes) & applies Multi-Text (New behavior).
     """
-    from facebook_business.adobjects.advideo import AdVideo
-    from facebook_business.adobjects.page import Page
     from facebook_business.adobjects.adcreative import AdCreative
     from facebook_business.adobjects.ad import Ad
     from facebook_business.exceptions import FacebookRequestError
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import time
+    import re
+    import pathlib
+    import os
 
+    # ------------------------------------------------------------------
+    # 0. DETECT MODE
+    # ------------------------------------------------------------------
+    # If "creative_type" is in settings, it comes from the Marketer UI.
+    is_marketer_mode = settings and "creative_type" in settings
+    
     allowed = {".mp4", ".mpeg4"}
+    def _fname_any(u) -> str:
+        return getattr(u, "name", None) or (u.get("name") if isinstance(u, dict) else "")
 
-    def _is_video(u):
-        n = _fname_any(u) or "video.mp4"
-        return pathlib.Path(n).suffix.lower() in allowed
+    # ------------------------------------------------------------------
+    # 1. VALIDATION & GROUPING (Only for Marketer Mode)
+    # ------------------------------------------------------------------
+    video_groups = {} 
+    unique_files_to_upload = []
+    
+    if is_marketer_mode:
+        # [Marketer Mode Logic] Group files by base name
+        def _get_ratio_from_name(fname):
+            lower = fname.lower()
+            # Check for pixel dimensions first (1080x1080, 1920x1080, 1080x1920)
+            if "1080x1080" in lower: return "1x1"
+            if "1080x1920" in lower: return "9x16"
+            if "1920x1080" in lower: return "16x9"
+            # Then check for ratio strings
+            if "9x16" in lower or "port" in lower or "story" in lower: return "9x16"
+            if "16x9" in lower or "land" in lower or "wide" in lower: return "16x9"
+            if "1x1" in lower or "sq" in lower or "feed" in lower: return "1x1"
+            return "unknown"
 
-    videos = _dedupe_by_name([u for u in (uploaded_files or []) if _is_video(u)])
+        def _get_base_name(fname):
+            # Remove both ratio strings and pixel dimensions
+            base = re.sub(r'[_ -]?(1x1|9x16|16x9|sq|port|land|story|feed|wide|1080x1080|1920x1080|1080x1920)', '', fname, flags=re.IGNORECASE)
+            base = pathlib.Path(base).stem
+            return base.strip()
 
-    def _persist_to_tmp(u):
-        return {"name": _fname_any(u) or "video.mp4", "path": _save_uploadedfile_tmp(u)}
+        seen_filenames = set()
+        errors = []
+        warnings = []
 
-    def simple_video_upload(path: str) -> str:
-        v = account.create_ad_video(params={"file": path, "content_category": "VIDEO_GAMING"})
-        return v["id"]
+        for u in uploaded_files:
+            fname = _fname_any(u)
+            if pathlib.Path(fname).suffix.lower() not in allowed: continue
+            
+            base = _get_base_name(fname)
+            ratio = _get_ratio_from_name(fname)
+            
+            if ratio == "unknown":
+                errors.append(f"❌ '{fname}': Filename missing ratio (1x1, 9x16, 16x9).")
+                continue
+
+            if base not in video_groups: video_groups[base] = {}
+            if ratio in video_groups[base]:
+                errors.append(f"❌ '{base}' group has duplicate '{ratio}'.")
+                continue
+            
+            video_groups[base][ratio] = u
+            if fname not in seen_filenames:
+                unique_files_to_upload.append(u)
+                seen_filenames.add(fname)
+
+        # Validation Checks
+        required = {"1x1", "9x16", "16x9"}
+        
+        for base, files in video_groups.items():
+            existing = set(files.keys())
+            missing = required - existing
+            
+            # [STRICT] If any size is missing -> ERROR (Block Upload)
+            if missing:
+                errors.append(
+                    f"❌ '{base}' group is incomplete.\n"
+                    f"   • Found: {', '.join(existing)}\n"
+                    f"   • Missing: {', '.join(missing)}\n"
+                    f"   (All 3 sizes are required for Marketer Mode)"
+                )
+
+        # Stop immediately if ANY errors found
+        if errors:
+            st.error("### ⛔ Upload Blocked: Incomplete Assets")
+            for e in errors:
+                st.write(e)
+            st.stop()  # STOPS EXECUTION HERE
+        
+        if warnings:
+            with st.expander("⚠️ Grouping Warnings", expanded=True):
+                for w in warnings: st.write(w)
+
+    else:
+        # [Test Mode Logic] Just dedupe files, no grouping
+        seen = set()
+        for u in uploaded_files:
+            fname = _fname_any(u)
+            if pathlib.Path(fname).suffix.lower() in allowed and fname not in seen:
+                unique_files_to_upload.append(u)
+                seen.add(fname)
+
+    # ------------------------------------------------------------------
+    # 2. UPLOAD FILES (Shared Logic)
+    # ------------------------------------------------------------------
+    def _save_uploadedfile_tmp(u) -> str:
+        if isinstance(u, dict) and "path" in u: return u["path"]
+        if hasattr(u, "getbuffer"):
+            suffix = pathlib.Path(u.name).suffix.lower() or ".mp4"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(u.getbuffer())
+                return tmp.name
+        raise ValueError("Unsupported video object")
 
     def upload_video_resumable(path: str) -> str:
-        """
-        Chunked upload to /{act_id}/advideos using the official 3-phase protocol.
-        Retries transient errors and verifies total bytes sent before finishing.
-        """
-        # Try to get token from [facebook] section first, then root
         if "facebook" in st.secrets:
             token = st.secrets["facebook"].get("access_token", "").strip()
         else:
             token = st.secrets.get("access_token", "").strip()
-
-        if not token:
-            raise RuntimeError("Missing access_token in st.secrets (check [facebook] section)")
-
+        
         act = account.get_id()
-        base = f"https://graph.facebook.com/v24.0/{act}/advideos"
+        base_url = f"https://graph.facebook.com/v24.0/{act}/advideos"
         file_size = os.path.getsize(path)
-
-        # ... (rest of the function remains the same)
 
         def _post(data, files=None, max_retries=5):
             delays = [0, 2, 4, 8, 12]
-            last = None
             for i, d in enumerate(delays[:max_retries], 1):
-                if d:
-                    time.sleep(d)
+                if d: time.sleep(d)
                 try:
-                    r = requests.post(
-                        base,
-                        data={**data, "access_token": token},
-                        files=files,
-                        timeout=180,
-                    )
-                    if r.status_code >= 500:
-                        last = RuntimeError(f"HTTP {r.status_code}: {r.text[:400]}")
-                        continue
+                    r = requests.post(base_url, data={**data, "access_token": token}, files=files, timeout=180)
+                    if r.status_code >= 500: continue
                     j = r.json()
-                    if "error" in j:
-                        code = j["error"].get("code")
-                        if code in (390,) and i < max_retries:
-                            last = RuntimeError(j["error"].get("message"))
-                            continue
-                        raise RuntimeError(j["error"].get("message", str(j["error"])))
+                    if "error" in j and j["error"].get("code") == 390 and i < max_retries: continue
+                    if "error" in j: raise RuntimeError(j["error"].get("message"))
                     return j
-                except Exception as e:
-                    last = e
-            raise last or RuntimeError("advideos POST failed")
+                except Exception: pass
+            raise RuntimeError("Upload failed")
 
-        start_resp = _post(
-            {"upload_phase": "start", "file_size": str(file_size), "content_category": "VIDEO_GAMING"}
-        )
-        upload_session_id = start_resp["upload_session_id"]
-        video_id = start_resp["video_id"]
-        start_offset = int(start_resp.get("start_offset", 0))
-        end_offset = int(start_resp.get("end_offset", 0))
-
-        sent_bytes = 0
+        start_resp = _post({"upload_phase": "start", "file_size": str(file_size), "content_category": "VIDEO_GAMING"})
+        sess_id, vid_id = start_resp["upload_session_id"], start_resp["video_id"]
+        start_off, end_off = int(start_resp.get("start_offset", 0)), int(start_resp.get("end_offset", 0))
 
         with open(path, "rb") as f:
             while True:
-                if start_offset == end_offset == file_size:
-                    if VERBOSE_UPLOAD_LOG:
-                        st.write(f"[Upload] ✅ All bytes acknowledged ({sent_bytes}/{file_size}).")
-                    break
-
-                if end_offset <= start_offset:
-                    if VERBOSE_UPLOAD_LOG:
-                        st.write(f"[Upload] ↻ Asking for next window at {start_offset}")
-                    tr = _post(
-                        {
-                            "upload_phase": "transfer",
-                            "upload_session_id": upload_session_id,
-                            "start_offset": str(start_offset),
-                        }
-                    )
-                    start_offset = int(tr.get("start_offset", start_offset))
-                    end_offset = int(tr.get("end_offset", end_offset or file_size))
+                if start_off == end_off == file_size: break
+                if end_off <= start_off:
+                    tr = _post({"upload_phase": "transfer", "upload_session_id": sess_id, "start_offset": str(start_off)})
+                    start_off, end_off = int(tr.get("start_offset", start_off)), int(tr.get("end_offset", end_off or file_size))
                     continue
+                f.seek(start_off)
+                chunk = f.read(end_off - start_off)
+                tr = _post({"upload_phase": "transfer", "upload_session_id": sess_id, "start_offset": str(start_off)}, 
+                           files={"video_file_chunk": ("chunk.bin", chunk, "application/octet-stream")})
+                start_off, end_off = int(tr.get("start_offset", start_off + len(chunk))), int(tr.get("end_offset", end_off))
 
-                to_read = end_offset - start_offset
-                f.seek(start_offset)
-                chunk = f.read(to_read)
-                if not chunk or len(chunk) != to_read:
-                    raise RuntimeError(f"Read {len(chunk) if chunk else 0} bytes; expected {to_read}.")
+        try: _post({"upload_phase": "finish", "upload_session_id": sess_id})
+        except: pass
+        return vid_id
 
-                files = {"video_file_chunk": ("chunk.bin", chunk, "application/octet-stream")}
-                tr = _post(
-                    {
-                        "upload_phase": "transfer",
-                        "upload_session_id": upload_session_id,
-                        "start_offset": str(start_offset),
-                    },
-                    files=files,
-                )
-
-                sent_bytes += to_read
-                new_start = int(tr.get("start_offset", start_offset + to_read))
-                new_end = int(tr.get("end_offset", end_offset))
-
-                if VERBOSE_UPLOAD_LOG:
-                    st.write(
-                        f"[Upload] Sent [{start_offset},{end_offset}) → "
-                        f"ack: start={new_start}, end={new_end}, sent={sent_bytes}/{file_size}"
-                    )
-
-                start_offset, end_offset = new_start, new_end
-                if start_offset > file_size:
-                    start_offset = file_size
-                if end_offset > file_size:
-                    end_offset = file_size
-
-        if sent_bytes != file_size:
-            raise RuntimeError(f"Uploaded bytes ({sent_bytes}) != file size ({file_size}).")
-
-        try:
-            _post({"upload_phase": "finish", "upload_session_id": upload_session_id})
-            return video_id
-        except Exception:
-            st.info(
-                f"Resumable finish failed for {os.path.basename(path)} — trying fallback upload once."
-            )
-            v = account.create_ad_video(params={"file": path, "content_category": "VIDEO_GAMING"})
-            return v["id"]
-
-    def wait_all_videos_ready(video_ids: list[str], *, timeout_s: int = 120, sleep_s: int = 10) -> dict[str, bool]:
-        """
-        Hybrid approach: Wait for thumbnails with shorter timeout.
-        Fast videos: Wait until ready.
-        Slow videos: Timeout after 2 minutes, continue with warning (Facebook will generate thumbnails later).
-        Handles rate limit errors gracefully.
-        """
-        from facebook_business.adobjects.advideo import AdVideo
-        import time
-        import warnings
-
-        ready = {vid: False for vid in video_ids}
-        deadline = time.time() + timeout_s
-        start_time = time.time()
-        consecutive_rate_limits = 0
-
-        while time.time() < deadline:
-            all_done = True
-            rate_limit_in_this_loop = False
-            
-            for vid in video_ids:
-                if ready[vid]:
-                    continue
-                try:
-                    # Suppress warnings about thumbnails field (not supported for all video types)
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        # Check video status and thumbnails
-                        info = AdVideo(vid).api_get(fields=["status", "thumbnails", "picture"])
-                    status = info.get("status")
-                    has_pic = bool(info.get("picture"))
-                    has_thumbs = bool(info.get("thumbnails"))
-                    
-                    # Video is ready if it has picture or thumbnails, and status is READY or PUBLISHED
-                    if (has_pic or has_thumbs) and status in ("READY", "PUBLISHED"):
-                        ready[vid] = True
-                    elif status == "PROCESSING":
-                        # Still processing, wait more
-                        all_done = False
-                    else:
-                        # No thumbnail yet, keep waiting
-                        all_done = False
-                    
-                    # Success - reset consecutive rate limit counter
-                    consecutive_rate_limits = 0
-                    
-                except Exception as e:
-                    # Check if this is a rate limit error (code 4)
-                    is_rate_limit = False
-                    error_code = None
-                    
-                    # Try multiple ways to detect rate limit error
-                    if isinstance(e, FacebookRequestError):
-                        # Use FacebookRequestError methods if available
-                        try:
-                            error_code = e.api_error_code()
-                        except:
-                            pass
-                        if not error_code:
-                            try:
-                                error_msg = (e.api_error_message() or "").lower()
-                                if "request limit" in error_msg or "#4" in str(e):
-                                    is_rate_limit = True
-                            except:
-                                pass
-                    
-                    # Check error code
-                    if error_code == 4:
-                        is_rate_limit = True
-                    
-                    # Check error message as fallback
-                    error_str = str(e).lower()
-                    if not is_rate_limit and ("request limit" in error_str or "#4" in error_str or "code 4" in error_str):
-                        is_rate_limit = True
-                    
-                    # Check error attributes
-                    if not is_rate_limit:
-                        if hasattr(e, 'api_error_code'):
-                            error_code = e.api_error_code
-                        elif hasattr(e, 'api_error') and isinstance(e.api_error, dict):
-                            error_code = e.api_error.get('code')
-                        elif hasattr(e, 'error') and isinstance(e.error, dict):
-                            error_code = e.error.get('code')
-                        
-                        if error_code == 4:
-                            is_rate_limit = True
-                    
-                    if is_rate_limit:
-                        rate_limit_in_this_loop = True
-                        consecutive_rate_limits += 1
-                        all_done = False
-                    else:
-                        # Other errors - assume not ready yet
-                        all_done = False
-                        logger.warning(f"Error checking video {vid}: {e}")
-            
-            # If rate limit detected in this loop, wait longer before continuing
-            if rate_limit_in_this_loop:
-                # Exponential backoff: 60s, 120s, 180s...
-                wait_time = min(60 * consecutive_rate_limits, 300)  # Max 5 minutes
-                logger.warning(f"Rate limit detected. Waiting {wait_time}s before retrying (consecutive: {consecutive_rate_limits})...")
-                time.sleep(wait_time)
-                # Continue to next iteration without checking all_done
-            
-            if all_done:
-                elapsed = time.time() - start_time
-                logger.info(f"All {len(video_ids)} videos have thumbnails after {elapsed:.1f}s")
-                break
-            
-            # Normal sleep between loops (only if no rate limit)
-            if not rate_limit_in_this_loop:
-                time.sleep(sleep_s)
-        
-        # Log which videos are ready/not ready (hybrid: continue even if not ready)
-        not_ready = [vid for vid, is_ready in ready.items() if not is_ready]
-        if not_ready:
-            elapsed = time.time() - start_time
-            logger.warning(f"Hybrid mode: {len(not_ready)} videos still processing thumbnails after {elapsed:.1f}s. Continuing - Facebook will generate thumbnails automatically.")
-        else:
-            elapsed = time.time() - start_time
-            logger.info(f"All videos ready after {elapsed:.1f}s")
-        
-        return ready
-
-    def resolve_instagram_actor_id(page_id: str) -> str | None:
-        try:
-            p = Page(page_id).api_get(fields=["instagram_business_account"])
-            iba = p.get("instagram_business_account") or {}
-            return iba.get("id")
-        except Exception:
-            return None
-
-    # Stage 1: persist to temp (parallel)
-    persisted, persist_errors = [], []
-    from concurrent.futures import ThreadPoolExecutor
-
+    # Execute Uploads
+    persisted = []
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futs = {ex.submit(_persist_to_tmp, u): _fname_any(u) for u in videos}
-        for fut, nm in futs.items():
-            try:
-                persisted.append(fut.result())
-            except Exception as e:
-                persist_errors.append(f"{nm}: {e}")
+        futs = {ex.submit(_save_uploadedfile_tmp, u): u for u in unique_files_to_upload}
+        for fut in as_completed(futs):
+            try: persisted.append({"name": _fname_any(futs[fut]), "path": fut.result()})
+            except: pass
 
-    if persist_errors:
-        st.warning("Some files failed to prepare:\n- " + "\n- ".join(persist_errors))
-
-    ig_actor_id = None
-    try:
-        ig_actor_id = st.session_state.get("ig_actor_id_from_page") or None
-    except Exception:
-        pass
-    if try_instagram and not ig_actor_id:
-        ig_actor_id = resolve_instagram_actor_id(page_id)
-
-    uploads, api_errors = [], []
-    total = len(persisted)
-    progress = st.progress(0, text=f"Uploading 0/{total} videos…") if total else None
-
-    def _upload_one(item):
-        name, path = item["name"], item["path"]
-        # Extract thumbnail before uploading video
-        thumbnail_path = None
-        thumbnail_url = None
+    uploads_map = {} 
+    total_up = len(persisted)
+    prog = st.progress(0, text=f"Uploading {total_up} videos...") if total_up else None
+    
+    def _upload_task(item):
+        path = item["path"]
+        thumb_url = None
         try:
-            thumbnail_path = extract_thumbnail_from_video(path)
-            thumbnail_url = upload_thumbnail_image(account, thumbnail_path)
-            logger.info(f"Extracted and uploaded thumbnail for {name}: {thumbnail_url}")
-        except Exception as e:
-            logger.warning(f"Failed to extract/upload thumbnail for {name}: {e}. Continuing without thumbnail.")
-            # Continue without thumbnail - will use Facebook's auto-generated one
-        
-        # Upload video
-        vid = upload_video_resumable(path)
-        
-        # Clean up temporary thumbnail file
-        if thumbnail_path and os.path.exists(thumbnail_path):
+            t_path = extract_thumbnail_from_video(path)
+            thumb_url = upload_thumbnail_image(account, t_path)
+            try: os.unlink(t_path)
+            except: pass
+        except: pass
+        return {"name": item["name"], "video_id": upload_video_resumable(path), "thumbnail_url": thumb_url}
+
+    done_up = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = {ex.submit(_upload_task, i): i for i in persisted}
+        for fut in as_completed(futs):
             try:
-                os.unlink(thumbnail_path)
-            except Exception:
-                pass
-        
-        return {
-            "name": name,
-            "path": path,
-            "video_id": vid,
-            "thumbnail_url": thumbnail_url  # This is the image hash from AdImage
-        }
+                res = fut.result()
+                uploads_map[res["name"]] = res
+                done_up += 1
+                if prog: prog.progress(int(done_up/total_up*100))
+            except: pass
+    if prog: prog.empty()
 
-    done = 0
-    if total:
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            future_to_item = {ex.submit(_upload_one, item): item for item in persisted}
-            for fut in as_completed(future_to_item):
-                item = future_to_item[fut]
-                name = item["name"]
-                try:
-                    res = fut.result()
-                    res["ready"] = False
-                    uploads.append(res)
-                    done += 1
-                    if progress is not None:
-                        pct = int(done / total * 100)
-                        progress.progress(pct, text=f"Uploading {done}/{total} videos…")
-                except Exception as e:
-                    api_errors.append(f"{name}: upload failed: {e}")
+    # ------------------------------------------------------------------
+    # 2.5. WAIT FOR VIDEOS TO BE READY (Marketer Mode only)
+    # ------------------------------------------------------------------
+    if is_marketer_mode:
+        st.info(f"✅ {len(uploads_map)}개 비디오 업로드 완료. 광고 생성 시작...")
 
-    if progress:
-        progress.empty()
-
-    # No need to wait for video status - we're using our own extracted thumbnails
-    # Videos will be processed by Facebook in the background while we create creatives
-    logger.info(f"Proceeding to create creatives for {len(uploads)} videos (thumbnails already uploaded)")
-
-    # Create creatives + ads in parallel
+    # ------------------------------------------------------------------
+    # 3. CREATE ADS (Branching Logic)
+    # ------------------------------------------------------------------
     results = []
-    total_c = len(uploads)
-    progress_c = st.progress(0, text=f"Creating 0/{total_c} ads…") if total_c else None
-    done_c = 0
+    api_errors = []
+    
+    ig_actor_id = None
+    if try_instagram:
+        ig_actor_id = st.session_state.get("ig_actor_id_from_page")
 
-    def _process_one_video(up):
-        from facebook_business.adobjects.adcreative import AdCreative
-        from facebook_business.adobjects.ad import Ad
-        from facebook_business.exceptions import FacebookRequestError
-        import time
+    # Helper: Determine Ad Name
+    def _make_name(base):
+        return f"{ad_name_prefix.strip()}_{base}" if ad_name_prefix else base
 
-        name, video_id = up["name"], up["video_id"]
-        # Use pre-uploaded thumbnail from _upload_one
-        thumbnail_url = up.get("thumbnail_url")
+    if is_marketer_mode:
+        # ==========================================
+        # PATH A: MARKETER MODE (Grouping + Asset Feed)
+        # ==========================================
+        
+        # Parse Text Settings
+        raw_text = settings.get("primary_text", "")
+        raw_head = settings.get("headline", "")
+        cta = settings.get("call_to_action", "INSTALL_MOBILE_APP")
+        
+        p_texts = [t.strip() for t in raw_text.split('\n') if t.strip()] or [""]
+        headlines = [h.strip() for h in raw_head.split('\n') if h.strip()] 
 
-        try:
-            def _create_once(allow_ig: bool) -> str:
-                vd = {
-                    "video_id": video_id,
-                    "title": name,
-                    "message": "",
+        # facebook_ads.py - PATH A (Marketer Mode)
+
+        # facebook_ads.py - 섹션 3 PATH A
+
+        def _create_marketer_ad(base_name, group_files):
+            """Create Flexible ad with 3 video sizes"""
+            # 1. Collect video IDs
+            vids, thumbs = {}, {}
+            for ratio, f_obj in group_files.items():
+                fn = _fname_any(f_obj)
+                if fn in uploads_map:
+                    vids[ratio] = uploads_map[fn]["video_id"]
+                    thumbs[ratio] = uploads_map[fn].get("thumbnail_url")
+            
+            if len(vids) < 3:
+                return {"success": False, "error": f"{base_name}: Need all 3 sizes"}
+
+            try:
+                # 2. Parse settings
+                raw_text = settings.get("primary_text", "")
+                raw_head = settings.get("headline", "")
+                cta = settings.get("call_to_action", "INSTALL_MOBILE_APP")
+                
+                p_texts = [t.strip() for t in raw_text.split('\n\n') if t.strip()] or [""]
+                headlines = [h.strip() for h in raw_head.split('\n') if h.strip()] or [base_name]
+
+                # 3. Build Asset Feed (ad_formats을 배열이 아닌 단일 값으로!)
+                asset_feed = {
+                    "videos": [
+                        {"video_id": vids["1x1"], "thumbnail_url": thumbs.get("1x1", "")},
+                        {"video_id": vids["9x16"], "thumbnail_url": thumbs.get("9x16", "")},
+                        {"video_id": vids["16x9"], "thumbnail_url": thumbs.get("16x9", "")}
+                    ],
+                    "bodies": [{"text": t} for t in p_texts],
+                    "titles": [{"text": h} for h in headlines],
+                    "call_to_action_types": [cta],
+                    "ad_formats": ["SINGLE_IMAGE"]  # ← 이게 핵심!
                 }
-                # Use our extracted thumbnail (image hash from AdImage)
-                if thumbnail_url:
-                    vd["image_url"] = thumbnail_url
+                
                 if store_url:
-                    vd["call_to_action"] = {
-                        "type": "INSTALL_MOBILE_APP",
-                        "value": {"link": store_url},
-                    }
-                spec = {"page_id": page_id, "video_data": vd}
-                if allow_ig and ig_actor_id:
-                    spec["instagram_actor_id"] = ig_actor_id
+                    asset_feed["link_urls"] = [{"website_url": store_url}]
 
-                creative = account.create_ad_creative(
-                    fields=[],
-                    params={"name": name, "object_story_spec": spec},
-                )
-                ad = account.create_ad(
-                    fields=[],
-                    params={
-                        "name": make_ad_name(name, ad_name_prefix),
+                params = {
+                    "name": base_name,
+                    "asset_feed_spec": asset_feed,
+                    "object_story_spec": {"page_id": page_id}
+                }
+                
+                # 4. Create Creative with Retry
+                max_retries = 5
+                creative = None
+                
+                for attempt in range(max_retries):
+                    try:
+                        creative = account.create_ad_creative(fields=[], params=params)
+                        break
+                        
+                    except FacebookRequestError as e:
+                        if e.api_error_code() == 100 and e.api_error_subcode() == 1885252 and attempt < max_retries - 1:
+                            wait_sec = 15 * (attempt + 1)
+                            time.sleep(wait_sec)
+                            continue
+                        raise
+                
+                if not creative:
+                    return {"success": False, "error": f"{base_name}: Creative failed"}
+                
+                # 5. Create Ad
+                ad = account.create_ad(fields=[], params={
+                    "name": _make_name(base_name),
+                    "adset_id": adset_id,
+                    "creative": {"creative_id": creative["id"]},
+                    "status": Ad.Status.active,
+                })
+                
+                return {"success": True, "result": {"name": base_name, "ad_id": ad["id"]}}
+                
+            except Exception as e:
+                return {"success": False, "error": f"{base_name}: {str(e)}"}
+
+
+                # Run creation for all video groups
+                total = len(video_groups)
+                prog = st.progress(0, text=f"Creating {total} Flexible ads...")
+                done = 0
+
+                with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                    futs = {ex.submit(_create_marketer_ad, b, f): b for b, f in video_groups.items()}
+                    for fut in as_completed(futs):
+                        res = fut.result()
+                        done += 1
+                        prog.progress(int(done/total*100))
+                        if res["success"]:
+                            results.append(res["result"])
+                        else:
+                            api_errors.append(res["error"])
+                prog.empty()
+
+    else:
+        # ==========================================
+        # PATH B: TEST MODE (One File = One Ad)
+        # ==========================================
+        
+        def _create_test_ad(file_data):
+            name = file_data["name"]
+            vid_id = file_data["video_id"]
+            thumb = file_data.get("thumbnail_url")
+            
+            try:
+                # Standard Object Story (Simple)
+                vd = {"video_id": vid_id, "title": name, "message": ""}
+                if thumb: vd["image_url"] = thumb
+                if store_url:
+                    vd["call_to_action"] = {"type": "INSTALL_MOBILE_APP", "value": {"link": store_url}}
+                
+                spec = {"page_id": page_id, "video_data": vd}
+                if ig_actor_id: spec["instagram_actor_id"] = ig_actor_id
+                
+                # Retry logic for IG actor issues
+                def _do_create(s):
+                    creative = account.create_ad_creative(fields=[], params={"name": name, "object_story_spec": s})
+                    ad = account.create_ad(fields=[], params={
+                        "name": _make_name(name),
                         "adset_id": adset_id,
                         "creative": {"creative_id": creative["id"]},
-                        "status": Ad.Status.active,
-                    },
-                )
-                return ad["id"]
+                        "status": Ad.Status.active
+                    })
+                    return ad["id"]
 
-            try:
-                ad_id = _create_once(True)
-            except FacebookRequestError as e:
-                msg = (e.api_error_message() or "").lower()
-                if "instagram" in msg or "not ready" in msg or "processing" in msg:
-                    time.sleep(5)
-                    ad_id = _create_once(False)
-                else:
-                    raise
+                try:
+                    ad_id = _do_create(spec)
+                except FacebookRequestError as e:
+                    # If IG fails, try without IG actor
+                    if "instagram" in str(e).lower() and ig_actor_id:
+                        spec.pop("instagram_actor_id", None)
+                        ad_id = _do_create(spec)
+                    else: raise
 
-            return {"success": True, "result": {"name": name, "ad_id": ad_id}}
-        except Exception as e:
-            return {"success": False, "error": f"{name}: creative/ad failed: {e}"}
+                return {"success": True, "result": {"name": name, "ad_id": ad_id}}
+            except Exception as e:
+                return {"success": False, "error": f"{name}: {e}"}
 
-    if total_c:
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            future_to_video = {ex.submit(_process_one_video, up): up for up in uploads}
-            for fut in as_completed(future_to_video):
-                res = fut.result()
-                done_c += 1
-                if progress_c:
-                    pct = int(done_c / total_c * 100)
-                    progress_c.progress(pct, text=f"Creating {done_c}/{total_c} ads…")
-                if res["success"]:
-                    results.append(res["result"])
-                else:
-                    api_errors.append(res["error"])
-
-    if progress_c:
-        progress_c.empty()
+        # Run Test Creation
+        total = len(uploads_map)
+        if total:
+            prog = st.progress(0, text="Creating Standard Ads...")
+            done = 0
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                futs = {ex.submit(_create_test_ad, data): name for name, data in uploads_map.items()}
+                for fut in as_completed(futs):
+                    res = fut.result()
+                    done += 1
+                    prog.progress(int(done/total*100))
+                    if res["success"]: results.append(res["result"])
+                    else: api_errors.append(res["error"])
+            prog.empty()
 
     if api_errors:
-        st.error(
-            f"{len(api_errors)} video(s) failed during creation:\n"
-            + "\n".join(f"- {e}" for e in api_errors[:20])
-            + ("\n..." if len(api_errors) > 20 else "")
-        )
+        st.error(f"{len(api_errors)} errors during creation:\n" + "\n".join([f"- {e}" for e in api_errors]))
 
     return results
 
@@ -1123,37 +1136,6 @@ def _plan_upload(
         "opt_goal_label": settings.get("opt_goal_label"),
     }
 
-    def _name(u):
-        return getattr(u, "name", None) or (u.get("name") if isinstance(u, dict) else "")
-
-    def _is_video(u):
-        return pathlib.Path(_name(u)).suffix.lower() in allowed
-
-    vids_local = [u for u in (uploaded_files or []) if _is_video(u)]
-    vids_all = _dedupe_by_name(vids_local + [rv for rv in remote if _is_video(rv)])
-
-    budget_usd_per_day = compute_budget_from_settings(vids_all, settings)
-
-    ad_name_prefix = (
-        settings.get("ad_name_prefix") if settings.get("ad_name_mode") == "Prefix + filename" else None
-    )
-    ad_names = [make_ad_name(_name(u), ad_name_prefix) for u in vids_all]
-
-    return {
-        "campaign_id": campaign_id,
-        "adset_name": adset_name,
-        "country": settings.get("country", "US"),
-        "age_min": int(settings.get("age_min", 18)),
-        "budget_usd_per_day": int(budget_usd_per_day),
-        "start_iso": start_iso,
-        "end_iso": end_iso,
-        "page_id": page_id,
-        "n_videos": len(vids_all),
-        "ad_names": ad_names,
-        "campaign_name": settings.get("campaign_name"),
-        "app_store": settings.get("app_store"),
-        "opt_goal_label": settings.get("opt_goal_label"),
-    }
 
 def create_creativetest_adset(
     account: "AdAccount",
@@ -1174,7 +1156,7 @@ def create_creativetest_adset(
     This function will block Taiwan and provide clear guidance to users.
     """
     from facebook_business.adobjects.adset import AdSet
-
+    
     # Check for Taiwan BEFORE creating the ad set
     countries = targeting.get("geo_locations", {}).get("countries", [])
     if "TW" in countries:
@@ -1424,9 +1406,10 @@ def upload_to_facebook(
         page_id=str(page_id),
         adset_id=adset_id,
         uploaded_files=uploaded_files,
-        ad_name_prefix=ad_name_prefix,
+        ad_name_prefix=settings.get("dco_creative_name"), # 이름 통일됨
         store_url=store_url,
         try_instagram=True,
+        settings=settings, 
     )
 
     plan["adset_id"] = adset_id
