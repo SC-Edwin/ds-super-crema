@@ -109,7 +109,6 @@ def load_prediction_data():
           SELECT MAX(prediction_timestamp)
           FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
         )
-        AND rank != 'nan'
     ),
     LatestSnapshot AS (
       SELECT *
@@ -355,8 +354,10 @@ def run():
 
 
     # ========== 팝업 모달 (Dialog) ==========
-    @st.dialog("🤖 Henry & Kyle AI 추천", width="large")
+    @st.dialog("한눈에 보기 AI 추천", width="large")
     def show_ai_modal(filtered_df, selected_app, selected_locality, selected_week_label):
+
+        
         """AI 추천 모달"""
         
         app_text = selected_app if selected_app != 'All' else '전체'
@@ -366,26 +367,50 @@ def run():
         st.markdown(f"**{app_text}** × **{loc_text}** × **{week_text}** - {len(filtered_df)}개 소재 분析")
         
         st.markdown("---")
+
         
-        # 소재별 최적 경로 계산
-        best_per_creative = filtered_df.loc[
-            filtered_df.groupby('subject_label')['ranking_score'].idxmax()
-        ]
         
+        # # 소재별 최적 경로 계산
+        # best_per_creative = filtered_df.loc[
+        #     filtered_df.groupby('subject_label')['ranking_score'].idxmax()
+        # ]
+        
+        # best_per_creative['path'] = (
+        #     best_per_creative['past_network'] + ' → ' + 
+        #     best_per_creative['network']
+        # )
+        
+        # # 2등과의 차이 계산
+        # def get_score_gap(row):
+        #     same_creative = filtered_df[filtered_df['subject_label'] == row['subject_label']]
+        #     sorted_scores = same_creative['ranking_score'].sort_values(ascending=False)
+        #     if len(sorted_scores) >= 2:
+        #         return sorted_scores.iloc[0] - sorted_scores.iloc[1]
+        #     return 0
+        
+        # best_per_creative['gap'] = best_per_creative.apply(get_score_gap, axis=1)
+
+        # 모든 데이터 사용 (네트워크별 전체 소재)
+        best_per_creative = filtered_df.copy()
+
         best_per_creative['path'] = (
             best_per_creative['past_network'] + ' → ' + 
             best_per_creative['network']
         )
-        
-        # 2등과의 차이 계산
-        def get_score_gap(row):
-            same_creative = filtered_df[filtered_df['subject_label'] == row['subject_label']]
-            sorted_scores = same_creative['ranking_score'].sort_values(ascending=False)
-            if len(sorted_scores) >= 2:
-                return sorted_scores.iloc[0] - sorted_scores.iloc[1]
-            return 0
-        
-        best_per_creative['gap'] = best_per_creative.apply(get_score_gap, axis=1)
+
+        # gap 계산 (필요 없지만 컬럼 유지)
+        best_per_creative['gap'] = 0.0
+
+        # 아이콘 추가
+        def add_icon(row):
+            rank = row['rank_per_network']
+            if rank <= 3:
+                return '🏆'
+            elif rank <= 10:
+                return '⭐'
+            return ''
+
+        best_per_creative['icon'] = best_per_creative.apply(add_icon, axis=1)        
         
         # 아이콘 추가
         def add_icon(row):
@@ -398,32 +423,97 @@ def run():
         
         best_per_creative['icon'] = best_per_creative.apply(add_icon, axis=1)
         
+
+
         # 테이블
         st.markdown("### 📊 소재별 최적 투자 경로")
-        
-        # 확률(%) 계산
-        best_per_creative['probability_pct'] = (best_per_creative['prediction_score'] * 100).round(1)
 
-        display_df = best_per_creative[[
-            'icon', 'subject_label', 'path', 'probability_pct',
-            'rank_per_network', 'sum_CPI', 'gap'
-        ]].sort_values('probability_pct', ascending=False).reset_index(drop=True)
+        # 모든 네트워크 데이터 사용
+        all_data = filtered_df.copy()
+        all_data['path'] = all_data['past_network'] + ' → ' + all_data['network']
+        all_data['probability_pct'] = (all_data['prediction_score'] * 100).round(1)
 
-        st.dataframe(
-            display_df,
-            column_config={
-                'icon': st.column_config.TextColumn('', width='small'),
-                'subject_label': st.column_config.TextColumn('소재', width='small'),
-                'path': st.column_config.TextColumn('최적 경로', width='medium'),
-                'probability_pct': st.column_config.NumberColumn('확률', format="%.1f%%", width='small'),
-                'rank_per_network': st.column_config.TextColumn('순위', width='small'),
-                'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small'),
-                'gap': st.column_config.NumberColumn('차이', format="+%.2f", width='small')
-            },
-            hide_index=True,
-            use_container_width=True,
-            height=400
-        )
+        # 아이콘 추가
+        def add_icon(rank):
+            if rank <= 3:
+                return '🏆'
+            elif rank <= 10:
+                return '⭐'
+            return ''
+
+        all_data['icon'] = all_data['rank_per_network'].apply(add_icon)
+
+        # 네트워크 목록
+        networks = sorted(all_data['network'].unique())
+
+        # 병렬 배치 (최대 3개씩)
+        num_networks = len(networks)
+        if num_networks <= 3:
+            cols = st.columns(num_networks)
+            network_groups = [networks]
+        else:
+            # 3개씩 묶어서 행으로 나눔
+            cols = st.columns(3)
+            network_groups = [networks[i:i+3] for i in range(0, num_networks, 3)]
+
+        # 첫 번째 행 (최대 3개)
+        for idx, net in enumerate(networks[:min(3, num_networks)]):
+            with cols[idx]:
+                network_data = all_data[all_data['network'] == net].copy()
+                network_data = network_data.sort_values('probability_pct', ascending=False)
+                
+                st.markdown(f"#### 🎯 {net.upper()}")
+                st.caption(f"{len(network_data)}개 소재")
+                
+                # display_df에서 rank_per_network 제거
+                display_df = network_data[[
+                    'icon', 'subject_label', 'probability_pct', 'sum_CPI'
+                ]].head(10)
+
+                st.dataframe(
+                    display_df,
+                    column_config={
+                        'icon': st.column_config.TextColumn('', width='small'),
+                        'subject_label': st.column_config.TextColumn('소재', width='small'),
+                        'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small'),
+                        'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small')
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                    height=400
+                )
+
+        # 두 번째 행 (4개 이상일 경우)
+        if num_networks > 3:
+            st.markdown("---")
+            remaining_networks = networks[3:]
+            cols2 = st.columns(min(3, len(remaining_networks)))
+            
+            for idx, net in enumerate(remaining_networks):
+                with cols2[idx]:
+                    network_data = all_data[all_data['network'] == net].copy()
+                    network_data = network_data.sort_values('probability_pct', ascending=False)
+                    
+                    st.markdown(f"#### 🎯 {net.upper()}")
+                    st.caption(f"{len(network_data)}개 소재")
+                    
+                    # display_df에서 rank_per_network 제거
+                    display_df = network_data[[
+                        'icon', 'subject_label', 'probability_pct', 'sum_CPI'
+                    ]].head(10)
+                    
+                    st.dataframe(
+                        display_df,
+                        column_config={
+                            'icon': st.column_config.TextColumn('', width='small'),
+                            'subject_label': st.column_config.TextColumn('소재', width='small'),
+                            'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small'),
+                            'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small')
+                        },
+                        hide_index=True,
+                        use_container_width=True,
+                        height=400
+                    )
         
         # 인사이트 시각화
         st.markdown("---")
@@ -948,3 +1038,9 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+
+
+
+
+
