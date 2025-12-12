@@ -254,7 +254,7 @@ def main():
     
 
     with tab3:
-        st.info("🚧 동영상 자동화 모듈 개발 예정")
+        st.info("🚧 Comming Soon")  
 
 
     with tab4:
