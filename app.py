@@ -297,6 +297,11 @@ def main():
         st.info("🚧 동영상 자동화 모듈 개발 예정")
 
     with tab4:
+        try:
+            from modules.video_generation.frontend.streamlit_app import render_video_localization_app
+            render_video_localization_app()
+        except Exception as e:
+            st.error(f"로컬라이징 모듈 로드 실패: {str(e)}")
         st.info("🚧 로컬라이징 자동화 Comming Soon 12/12")        
     
     st.markdown("---")
