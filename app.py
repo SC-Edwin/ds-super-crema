@@ -226,27 +226,14 @@ def main():
     render_header()
 
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 모델링 시각화", "🚀 소재 업로드", "🌐 로컬라이징", "🎬 동영상 제작"])
     
-    # with tab1:
-    #     try:
-    #         from modules.visualization import main as viz_main
-    #         viz_main.run()
-    #     except Exception as e:
-    #         st.error(f"시각화 모듈 로드 실패: {str(e)}")
-    
-    # # with tab2:
-    # #     st.info("🚧 업로드 자동화 모듈 개발 예정")
-
-    # with tab2:
-    #         try:
-    #             from modules.upload_automation import main as upload_main
-    #             upload_main.run()
-    #         except Exception as e:
-    #             st.error(f"소재 업로드 모듈 로드 실패: {str(e)}")
-    #             import traceback
-    #             st.code(traceback.format_exc())
-
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Performance M/L", 
+        "👁️ Creative Upload",
+        "📊 Video M/L", 
+        "🌐 Localization", 
+        "🎬 Video Generation",
+    ])
 
 
     with tab1:
@@ -274,7 +261,11 @@ def main():
 
 
     with tab4:
-        st.info("🚧 로컬라이징 자동화 Comming Soon 12/12")   
+        st.info("🚧 Comming Soon")  
+        
+
+    with tab5:
+        st.info("🚧 Comming Soon")  
              
     
     st.markdown("---")
