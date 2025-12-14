@@ -177,6 +177,9 @@ def create_plotly_theme():
         'colorway': ['#ff006e', '#ff4d8f', '#ff77a0', '#a855f7', '#8b00ff']
     }
 
+
+
+
 def run():
     """시각화 모듈 메인"""
     
@@ -296,11 +299,13 @@ def run():
             all_apps = ['All'] + sorted(df['app'].unique().tolist())
             selected_app = st.selectbox("📱 App", all_apps)
 
+                        
             clicked_hk = st.button(
-                "한눈에 보기",
+                "One Click View",
                 key="ai_btn",
-                help="한눈에 보는 AI 추천"
+                help="AI-powered quick insights"
             )
+                        
 
             if clicked_hk:
                 st.session_state['show_ai_recommendation'] = True
@@ -354,7 +359,8 @@ def run():
 
 
     # ========== 팝업 모달 (Dialog) ==========
-    @st.dialog("한눈에 보기 AI 추천", width="large")
+    
+    @st.dialog("One Click View - AI Recommendations", width="large")
     def show_ai_modal(filtered_df, selected_app, selected_locality, selected_week_label):
 
         
@@ -401,30 +407,6 @@ def run():
         # gap 계산 (필요 없지만 컬럼 유지)
         best_per_creative['gap'] = 0.0
 
-        # 아이콘 추가
-        def add_icon(row):
-            rank = row['rank_per_network']
-            if rank <= 3:
-                return '🏆'
-            elif rank <= 10:
-                return '⭐'
-            return ''
-
-        best_per_creative['icon'] = best_per_creative.apply(add_icon, axis=1)        
-        
-        # 아이콘 추가
-        def add_icon(row):
-            rank = row['rank_per_network']
-            if rank <= 3:
-                return '🏆'
-            elif rank <= 10:
-                return '⭐'
-            return ''
-        
-        best_per_creative['icon'] = best_per_creative.apply(add_icon, axis=1)
-        
-
-
         # 테이블
         st.markdown("### 📊 소재별 최적 투자 경로")
 
@@ -433,15 +415,6 @@ def run():
         all_data['path'] = all_data['past_network'] + ' → ' + all_data['network']
         all_data['probability_pct'] = (all_data['prediction_score'] * 100).round(1)
 
-        # 아이콘 추가
-        def add_icon(rank):
-            if rank <= 3:
-                return '🏆'
-            elif rank <= 10:
-                return '⭐'
-            return ''
-
-        all_data['icon'] = all_data['rank_per_network'].apply(add_icon)
 
         # 네트워크 목록
         networks = sorted(all_data['network'].unique())
@@ -467,13 +440,12 @@ def run():
                 
                 # display_df에서 rank_per_network 제거
                 display_df = network_data[[
-                    'icon', 'subject_label', 'probability_pct', 'sum_CPI'
+                    'subject_label', 'probability_pct', 'sum_CPI'
                 ]].head(10)
 
                 st.dataframe(
                     display_df,
                     column_config={
-                        'icon': st.column_config.TextColumn('', width='small'),
                         'subject_label': st.column_config.TextColumn('소재', width='small'),
                         'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small'),
                         'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small')
@@ -496,16 +468,16 @@ def run():
                     
                     st.markdown(f"#### 🎯 {net.upper()}")
                     st.caption(f"{len(network_data)}개 소재")
+
                     
                     # display_df에서 rank_per_network 제거
                     display_df = network_data[[
-                        'icon', 'subject_label', 'probability_pct', 'sum_CPI'
+                         'subject_label', 'probability_pct', 'sum_CPI'  # ← 'icon' 제거 필요
                     ]].head(10)
                     
                     st.dataframe(
                         display_df,
                         column_config={
-                            'icon': st.column_config.TextColumn('', width='small'),
                             'subject_label': st.column_config.TextColumn('소재', width='small'),
                             'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small'),
                             'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small')
@@ -1038,6 +1010,16 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+
+
+
+
+
+
+
+
+
 
 
 
