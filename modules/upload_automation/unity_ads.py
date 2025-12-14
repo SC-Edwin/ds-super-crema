@@ -1039,6 +1039,9 @@ def preview_unity_upload(
     # Get title_id: Test Mode에서는 campaign set ID를 사용, Marketer Mode에서는 app ID 사용
     title_id = (settings.get("title_id") or "").strip()
     if not title_id:
+        # Marketer Mode: campaign_set_id를 title_id로 사용 (플랫폼별 app ID)
+        title_id = (settings.get("campaign_set_id") or "").strip()
+    if not title_id:
         title_id = str(UNITY_GAME_IDS.get(game, ""))
         if not title_id:
             try:
@@ -1163,6 +1166,9 @@ def upload_unity_creatives_to_campaign(
     """
     # Get title_id: Test Mode에서는 campaign set ID를 사용, Marketer Mode에서는 app ID 사용
     title_id = (settings.get("title_id") or "").strip()
+    if not title_id:
+        # Marketer Mode: campaign_set_id를 title_id로 사용 (플랫폼별 app ID)
+        title_id = (settings.get("campaign_set_id") or "").strip()
     if not title_id:
         # Try to get from UNITY_GAME_IDS (for Marketer Mode) or campaign set ID (for Test Mode)
         title_id = str(UNITY_GAME_IDS.get(game, ""))

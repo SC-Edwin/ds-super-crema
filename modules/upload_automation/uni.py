@@ -260,6 +260,7 @@ def render_unity_settings_panel(container, game: str, idx: int, is_marketer: boo
             "platform": platform,
             "org_id": UNITY_ORG_ID_DEFAULT,
             "campaign_set_id": campaign_set_id,  # ← Campaign Set ID 저장
+            "title_id": campaign_set_id,  # ← title_id도 저장 (플랫폼별 app ID)
             "campaign_id": selected_campaign_id,
             "existing_playable_id": selected_playable_id,
             "existing_playable_label": selected_playable_label,
