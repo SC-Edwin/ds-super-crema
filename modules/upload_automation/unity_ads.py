@@ -973,16 +973,39 @@ def _check_existing_pack(org_id: str, title_id: str, pack_name: str) -> str | No
     """
     try:
         path = f"organizations/{org_id}/apps/{title_id}/creative-packs"
-        meta = _unity_get(path, params={"limit": 100})
         
-        items = []
-        if isinstance(meta, list):
-            items = meta
-        elif isinstance(meta, dict):
-            items = meta.get("items") or meta.get("data") or []
+        # ✅ limit을 늘리거나 pagination 처리
+        # Unity API는 보통 최대 100개씩 반환하므로, 여러 번 요청해야 할 수 있음
+        all_items = []
+        offset = 0
+        limit = 100
         
-        for pack in items:
-            if pack.get("name") == pack_name:
+        while True:
+            meta = _unity_get(path, params={"limit": limit, "offset": offset})
+            
+            items = []
+            if isinstance(meta, list):
+                items = meta
+            elif isinstance(meta, dict):
+                items = meta.get("items") or meta.get("data") or []
+            
+            if not items:
+                break
+                
+            all_items.extend(items)
+            
+            # 더 이상 데이터가 없으면 중단
+            if len(items) < limit:
+                break
+                
+            offset += limit
+        
+        # ✅ 이름 비교를 더 정확하게 (trim, case-insensitive)
+        pack_name_normalized = pack_name.strip().lower()
+        
+        for pack in all_items:
+            existing_name = pack.get("name", "").strip().lower()
+            if existing_name == pack_name_normalized:
                 return str(pack.get("id", ""))
         
         return None
@@ -1406,12 +1429,21 @@ def upload_unity_creatives_to_campaign(
 
             pack_creatives = [p_id, l_id, playable_creative_id]
             
-            # Check if pack already exists by name first
+            # ✅ Check if pack already exists by name first
             pack_id = _check_existing_pack(org_id, title_id, final_pack_name)
             existing_pack_name = final_pack_name
             
-            # Also check if pack exists with same video + playable combination (for marketer mode)
-            if not pack_id:
+            # ✅ 이름으로 찾았으면 명확하게 스킵
+            if pack_id:
+                status_container.warning(
+                    f"⚠️ **Creative pack already exists with same name:**\n\n"
+                    f"   - Pack Name: `{final_pack_name}`\n"
+                    f"   - Pack ID: `{pack_id}`\n"
+                    f"   - Skipping creation...\n"
+                )
+                logger.info(f"Skipping pack creation for {final_pack_name} - already exists ({pack_id})")
+            else:
+                # Also check if pack exists with same video + playable combination (for marketer mode)
                 existing_pack_id, existing_pack_name = _check_existing_pack_by_creatives(
                     org_id, title_id, pack_creatives
                 )
@@ -1426,6 +1458,7 @@ def upload_unity_creatives_to_campaign(
                     )
                     logger.info(f"Skipping pack creation for {final_pack_name} - already exists as {existing_pack_name} ({existing_pack_id})")
             
+            # ✅ pack_id가 있으면 생성하지 않고 기존 팩 사용
             if not pack_id:
                 status_container.info(f"📦 Creating pack: {final_pack_name}")
                 pack_id = _unity_create_creative_pack(
@@ -1436,12 +1469,11 @@ def upload_unity_creatives_to_campaign(
                     pack_type="video+playable"
                 )
             else:
+                # ✅ 기존 팩이 있으면 명확하게 표시
                 if existing_pack_name != final_pack_name:
-                    # Pack exists with same creatives but different name
                     status_container.success(f"✅ Found existing pack with same video + playable: `{existing_pack_name}`")
                 else:
-                    # Pack exists with same name
-                    status_container.success(f"✅ Found existing pack: `{final_pack_name}`")
+                    status_container.success(f"✅ Found existing pack with same name: `{final_pack_name}`")
             
             upload_state["creative_packs"][final_pack_name] = pack_id
             upload_state["completed_packs"].append(pack_id)

@@ -339,6 +339,15 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             # Marketer mode: Add dry run button
                             dry_run_fb = st.button("🔍 Dry Run (Preview)", key=f"dry_run_fb_{game}", use_container_width=True)
                             st.write("")
+                        if is_marketer:
+                            upload_and_create = st.button(
+                                "📚 Ad Library 업로드 + 단일 광고 생성",
+                                key=f"upload_lib_single_{game}",
+                                use_container_width=True,
+                                help="비디오를 Ad Library에 업로드하고 단일 모드 광고 생성"
+                            )
+                            st.write("")
+
                         cont = st.button(btn_label, key=f"continue_{game}", use_container_width=True)
                         # Store current tab in query params when button is clicked
                         if cont:
@@ -544,6 +553,100 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         import traceback
                         st.error(f"Preview failed: {e}")
                         st.code(traceback.format_exc())
+
+
+            # 📍 EXECUTION LOGIC 섹션에 추가
+
+            # --- FACEBOOK AD LIBRARY + SINGLE AD CREATION ---
+            if platform == "Facebook" and is_marketer and "upload_and_create" in locals() and upload_and_create:
+                st.query_params["tab"] = game
+                
+                remote_list = st.session_state.remote_videos.get(game, [])
+                ok, msg = validate_count(remote_list)
+                
+                if not ok:
+                    ok_msg_placeholder.error(msg)
+                else:
+                    try:
+                        cfg = fb_module.FB_GAME_MAPPING.get(game)
+                        settings = st.session_state.settings.get(game, {})
+                        
+                        # Check if campaign/adset selected
+                        adset_id = settings.get("adset_id")
+                        if not adset_id:
+                            st.error("❌ Settings에서 Campaign/AdSet을 먼저 선택해주세요.")
+                        else:
+                            account = fb_module.init_fb_from_secrets(cfg["account_id"])
+                            
+                            # Get Page ID
+                            page_id_key = cfg.get("page_id_key")
+                            if "facebook" in st.secrets and page_id_key in st.secrets["facebook"]:
+                                page_id = st.secrets["facebook"][page_id_key]
+                            elif page_id_key in st.secrets:
+                                page_id = st.secrets[page_id_key]
+                            else:
+                                raise RuntimeError(f"Missing {page_id_key} in secrets")
+                            
+                            # Execute
+                            # ✅ Store URL 가져오기 (GAME_DEFAULTS에서)
+                            from modules.upload_automation.facebook_ads import GAME_DEFAULTS
+                            game_defaults = GAME_DEFAULTS.get(game, {})
+                            store_url = game_defaults.get("store_url", "")
+                            
+                            result = fb_module.upload_videos_to_library_and_create_single_ads(
+                                account=account,
+                                page_id=str(page_id),
+                                adset_id=adset_id,
+                                uploaded_files=remote_list,
+                                settings=settings,
+                                store_url=store_url,  # ✅ 추가
+                                max_workers=6
+                            )
+                            
+                            with st.expander("📋 생성된 광고", expanded=True):
+                                for ad in result["ads"]:
+                                    st.write(f"### 📹 {ad['name']}")
+                                    st.caption(f"Ad ID: `{ad['ad_id']}`")
+                                    st.caption(f"Creative ID: `{ad['creative_id']}`")
+                                    
+                                    # ✅ Placement별 비디오 정보
+                                    st.markdown("**Placement Mapping:**")
+                                    placements = ad.get("placements", {})
+                                    st.write(f"  • Feed/Marketplace → {placements.get('feed', 'N/A')}")
+                                    st.write(f"  • Stories/Reels → {placements.get('story', 'N/A')}")
+                                    st.write(f"  • Search → {placements.get('search', 'N/A')}")
+                                    
+                                    # Thumbnail 상태
+                                    thumbs = ad.get("thumbnails", {})
+                                    st.caption(f"Thumbnails: 1080x1080={'✅' if thumbs.get('1080x1080') else '⚠️'} | "
+                                            f"1080x1920={'✅' if thumbs.get('1080x1920') else '⚠️'} | "
+                                            f"1920x1080={'✅' if thumbs.get('1920x1080') else '⚠️'}")
+                                    
+                                    # Multi-text 정보
+                                    if "used_values" in ad:
+                                        vals = ad["used_values"]
+                                        st.caption(f"📝 Primary Texts: {vals['primary_texts_count']}개")
+                                        st.caption(f"📰 Headlines: {vals['headlines_count']}개")
+                                        st.caption(f"🎯 CTA: {vals['cta']}")
+                                    
+                                    st.divider()
+
+                            if result["errors"]:
+                                st.warning("⚠️ 일부 광고 생성 실패:")
+                                for err in result["errors"]:
+                                    st.write(f"- {err}")
+
+                            ok_msg_placeholder.success(
+                                f"🎉 {result['total_created']}개 광고 생성 완료!"
+                            )
+                            
+                            
+                    except Exception as e:
+                        import traceback
+                        st.error("❌ 광고 생성 실패")
+                        st.code(traceback.format_exc())
+                    finally:
+                        st.query_params["tab"] = game            
             
             # --- FACEBOOK ACTIONS ---
             # Line 548-574
