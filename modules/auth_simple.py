@@ -115,21 +115,117 @@ def handle_google_callback():
 
 
 # ========== Google Sheets 연동 ==========
-@st.cache_data(ttl=300)  # 5분 캐시
+@st.cache_data(ttl=300)
 def load_users():
-    """임시 하드코딩 사용자 목록 (테스트용)"""
-    # Google Sheets 대신 임시 하드코딩
+    import hashlib
+
+    def h(pw: str) -> str:
+        return hashlib.sha256(pw.encode()).hexdigest()
+
     return {
-        'test_admin': {
-            'password_hash': '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918',  # 비밀번호: admin
-            'name': 'Test Admin',
-            'role': 'admin',
+        # ===== Admin =====
+        "edwin": {
+            "password_hash": h("edwin42"),
+            "name": "Edwin",
+            "role": "admin",
         },
-        'edi': {
-            'password_hash': '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4',  # 비밀번호: 1234
-            'name': 'Edi',
-            'role': 'admin',
-        }
+        "jaepark": {
+            "password_hash": h("jaepark17"),
+            "name": "Jaepark",
+            "role": "admin",
+        },
+        "eader": {
+            "password_hash": h("eader29"),
+            "name": "Eader",
+            "role": "admin",
+        },
+
+        # ===== Members =====
+        "sam": {
+            "password_hash": h("sam83"),
+            "name": "Sam",
+            "role": "user",
+        },
+        "sonak": {
+            "password_hash": h("sonak61"),
+            "name": "Sonak",
+            "role": "user",
+        },
+        "sonic": {
+            "password_hash": h("sonic74"),
+            "name": "Sonic",
+            "role": "user",
+        },
+        "seyoung": {
+            "password_hash": h("seyoung58"),
+            "name": "Seyoung",
+            "role": "user",
+        },
+        "eli": {
+            "password_hash": h("eli91"),
+            "name": "Eli",
+            "role": "user",
+        },
+        "jonghoon": {
+            "password_hash": h("jonghoon36"),
+            "name": "Jonghoon",
+            "role": "user",
+        },
+        "kyle": {
+            "password_hash": h("kyle64"),
+            "name": "Kyle",
+            "role": "user",
+        },
+        "tory": {
+            "password_hash": h("tory27"),
+            "name": "Tory",
+            "role": "user",
+        },
+        "hini": {
+            "password_hash": h("hini55"),
+            "name": "Hini",
+            "role": "user",
+        },
+        "nova": {
+            "password_hash": h("nova48"),
+            "name": "Nova",
+            "role": "user",
+        },
+        "dawoony": {
+            "password_hash": h("dawoony72"),
+            "name": "Dawoony",
+            "role": "user",
+        },
+        "luca": {
+            "password_hash": h("luca19"),
+            "name": "Luca",
+            "role": "user",
+        },
+        "elin": {
+            "password_hash": h("elin83"),
+            "name": "Elin",
+            "role": "user",
+        },
+        "zino": {
+            "password_hash": h("zino46"),
+            "name": "Zino",
+            "role": "user",
+        },
+        "crissy": {
+            "password_hash": h("crissy31"),
+            "name": "Crissy",
+            "role": "user",
+        },
+        "kira": {
+            "password_hash": h("kira69"),
+            "name": "Kira",
+            "role": "user",
+        },
+        "heny": {
+            "password_hash": h("heny88"),
+            "name": "Heny",
+            "role": "user",
+        },
     }
 
 # ========== 로그 기록 ==========
