@@ -20,7 +20,13 @@ SHEET_NAME = "super_crema_users"
 
 # ========== Google OAuth 헬퍼 함수 (추가) ==========
 def get_google_oauth_flow():
-    """Google OAuth Flow 생성"""
+    """Google OAuth Flow 생성 (local / cloud 분기)"""
+
+    if os.getenv("STREAMLIT_ENV") == "local":
+        redirect_uri = "http://localhost:8501"
+    else:
+        redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
+
     flow = Flow.from_client_config(
         {
             "web": {
@@ -28,28 +34,35 @@ def get_google_oauth_flow():
                 "client_secret": st.secrets["google_oauth"]["client_secret"],
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [st.secrets["google_oauth"]["redirect_uri"]]
+                "redirect_uris": [redirect_uri],
             }
         },
         scopes=[
             "openid",
             "https://www.googleapis.com/auth/userinfo.email",
-            "https://www.googleapis.com/auth/userinfo.profile"
+            "https://www.googleapis.com/auth/userinfo.profile",
         ],
-        redirect_uri=st.secrets["google_oauth"]["redirect_uri"]
+        redirect_uri=redirect_uri,
     )
     return flow
 
-
 def get_google_login_url():
-    """Google 로그인 URL 생성"""
     flow = get_google_oauth_flow()
+
+    # after (배포용)
+    print(f"[OAUTH] STREAMLIT_ENV={os.getenv('STREAMLIT_ENV')}")
+    print(f"[OAUTH] redirect_uri={flow.redirect_uri}")
+
     auth_url, state = flow.authorization_url(
-        access_type='offline',
-        prompt='select_account'
+        access_type="offline",
+        prompt="select_account"
     )
     st.session_state.oauth_state = state
     return auth_url
+
+
+
+
 
 def handle_google_callback():
     query_params = st.query_params
@@ -61,19 +74,25 @@ def handle_google_callback():
     if isinstance(code, list):
         code = code[0]
 
+    # 🔒 이미 처리한 code면 무시 (중요)
+    if st.session_state.get("oauth_code_used") == code:
+        return None
+
     state = query_params.get("state")
     if isinstance(state, list):
         state = state[0]
 
-    # state 검증 (중요: 루프/실패 원인 분리에도 도움)
     expected_state = st.session_state.get("oauth_state")
     if expected_state and state and state != expected_state:
-        st.error("OAuth state mismatch (세션이 초기화되었거나 콜백이 꼬였습니다).")
+        st.error("OAuth state mismatch")
         return None
 
     try:
         flow = get_google_oauth_flow()
         flow.fetch_token(code=code)
+
+        # 🔒 code 소비 완료 기록
+        st.session_state.oauth_code_used = code
 
         credentials = flow.credentials
 
@@ -90,6 +109,7 @@ def handle_google_callback():
     except Exception as e:
         st.error(f"OAuth 처리 실패: {repr(e)}")
         return None
+
 
 
 
@@ -256,7 +276,7 @@ def show_login_page():
             # Google 로그인 버튼
             auth_url = get_google_login_url()
             st.markdown(f"""
-            <a href="{auth_url}" target="_self">
+            <a href="{auth_url}" target="_blank" rel="noopener noreferrer">
                 <button style="
                     width: 100%;
                     padding: 12px;
