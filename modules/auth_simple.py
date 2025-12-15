@@ -18,14 +18,14 @@ SPREADSHEET_ID = st.secrets["user_management"]["spreadsheet_id"]
 SHEET_NAME = "super_crema_users"
 
 
-# ========== Google OAuth 헬퍼 함수 (추가) ==========
+# ========== Google OAuth 헬퍼 함수 ==========
 def get_google_oauth_flow():
-    """Google OAuth Flow 생성 (local / cloud 분기)"""
-
-    if os.getenv("STREAMLIT_ENV") == "local":
-        redirect_uri = "http://localhost:8501"
-    else:
-        redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
+    """
+    Google OAuth Flow 생성
+    - redirect_uri는 환경별 Secrets에서만 가져온다
+    - (local / dev / main 모두 동일 코드)
+    """
+    redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
 
     flow = Flow.from_client_config(
         {
@@ -45,6 +45,13 @@ def get_google_oauth_flow():
         redirect_uri=redirect_uri,
     )
     return flow
+
+
+
+
+
+
+
 
 def get_google_login_url():
     flow = get_google_oauth_flow()
