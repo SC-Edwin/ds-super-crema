@@ -51,38 +51,48 @@ def get_google_login_url():
     st.session_state.oauth_state = state
     return auth_url
 
-
 def handle_google_callback():
-    """Google OAuth 콜백 처리"""
-    # URL에서 code 파라미터 가져오기
     query_params = st.query_params
-    
+
     if "code" not in query_params:
         return None
-    
-    code = query_params["code"]
-    
+
+    code = query_params.get("code")
+    if isinstance(code, list):
+        code = code[0]
+
+    state = query_params.get("state")
+    if isinstance(state, list):
+        state = state[0]
+
+    # state 검증 (중요: 루프/실패 원인 분리에도 도움)
+    expected_state = st.session_state.get("oauth_state")
+    if expected_state and state and state != expected_state:
+        st.error("OAuth state mismatch (세션이 초기화되었거나 콜백이 꼬였습니다).")
+        return None
+
     try:
         flow = get_google_oauth_flow()
         flow.fetch_token(code=code)
-        
+
         credentials = flow.credentials
-        
-        # 사용자 정보 가져오기
+
         from google.oauth2 import id_token
         from google.auth.transport import requests
-        
+
         idinfo = id_token.verify_oauth2_token(
             credentials.id_token,
             requests.Request(),
             st.secrets["google_oauth"]["client_id"]
         )
-        
         return idinfo.get("email")
-        
+
     except Exception as e:
-        st.error(f"OAuth 처리 실패: {str(e)}")
+        st.error(f"OAuth 처리 실패: {repr(e)}")
         return None
+
+
+
 
 # ========== Google Sheets 연동 ==========
 @st.cache_data(ttl=300)  # 5분 캐시
