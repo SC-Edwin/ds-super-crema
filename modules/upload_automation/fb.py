@@ -401,11 +401,19 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         sel_a_id = a_ids[a_opts.index(sel_a_lbl)]
         
         # Reset fetch flag if AdSet changes
+        # Reset fetch flag if AdSet changes
         if st.session_state.get(f"prev_fb_a_{idx}") != sel_a_id:
-             st.session_state[f"defaults_fetched_{idx}"] = False
-             # Reset primary texts and headlines when AdSet changes
-             st.session_state.pop(f"primary_texts_{idx}", None)
-             st.session_state.pop(f"headlines_{idx}", None)
+            st.session_state[f"defaults_fetched_{idx}"] = False
+            # Reset primary texts and headlines when AdSet changes
+            st.session_state.pop(f"primary_texts_{idx}", None)
+            st.session_state.pop(f"headlines_{idx}", None)
+            # ✅ Clear all template cache when AdSet changes
+            st.session_state.pop(f"template_source_{idx}", None)
+            for key in list(st.session_state.keys()):
+                if key.startswith(f"defaults_fetched_") and f"_{idx}" in key:
+                    st.session_state.pop(key, None)
+                if key.startswith(f"mimic_data_") and f"_{idx}" in key:
+                    st.session_state.pop(key, None)
         st.session_state[f"prev_fb_a_{idx}"] = sel_a_id
         st.session_state[a_key] = sel_a_id
 
@@ -444,6 +452,12 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         )
 
         st.session_state[template_key] = selected_template
+        prev_template_key = f"prev_template_{idx}"
+        if st.session_state.get(prev_template_key) != selected_template:
+            # Template changed - force reset
+            st.session_state.pop(f"primary_texts_{idx}", None)
+            st.session_state.pop(f"headlines_{idx}", None)
+            st.session_state[prev_template_key] = selected_template
 
         # ====================================================================
         # LOAD TEMPLATE DATA
@@ -544,10 +558,21 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         # 2. Ad Setup
         st.caption("Ad Setup")
         
-        # Ad Name
+        # Ad Format & Ad Name
         col_d1, col_d2 = st.columns(2)
-        dco_aspect_ratio = col_d1.selectbox("Ratio (For Preview)", ["1:1", "9:16", "16:9"], key=f"dco_r_{idx}")
-        ad_name_input = col_d2.text_input("Ad Name", key=f"dco_n_{idx}")
+        dco_aspect_ratio = col_d1.selectbox(
+            "Ad Format", 
+            ["단일 영상", "다이내믹-single video", "다이내믹-1x1", "다이내믹-9x16", "다이내믹-16:9"], 
+            key=f"dco_r_{idx}"
+        )
+        
+        # Ad Name은 다이내믹일 때만 표시
+        if dco_aspect_ratio.startswith("다이내믹"):
+            ad_name_input = col_d2.text_input("Ad Name", key=f"dco_n_{idx}")
+        else:
+            # 단일 영상일 때는 Ad Name 숨김 (기본값 사용)
+            ad_name_input = ""
+            col_d2.empty()  # 빈 공간 유지
         st.markdown("**Ad Name Customization** (Optional)")
         
         col_pre, col_suf = st.columns(2)
@@ -648,18 +673,20 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         
         # Initialize session state for headlines
         headlines_key = f"headlines_{idx}"
-        if headlines_key not in st.session_state:
-            # Load from defaults or existing settings
+
+        # ✅ Force reload if template changed or if current values don't match defaults
+        force_reload = False
+        if h_lines != st.session_state.get(headlines_key, []):
+            force_reload = True
+
+        if headlines_key not in st.session_state or force_reload:
+            # Load from defaults
             if h_lines:
                 st.session_state[headlines_key] = h_lines.copy()
-            elif defaults:
-                existing = defaults.get("headlines", [])
-                if existing:
-                    st.session_state[headlines_key] = existing.copy()
-                else:
-                    st.session_state[headlines_key] = [""]
+            elif defaults and defaults.get("headlines"):
+                st.session_state[headlines_key] = defaults["headlines"].copy()
             else:
-                st.session_state[headlines_key] = [""]
+                st.session_state[headlines_key] = [""]  # Empty default
         
         headlines_list = st.session_state[headlines_key]
         
@@ -1049,11 +1076,12 @@ def upload_videos_to_library_and_create_single_ads(
     # ✅ 모든 Headline 복사 (배열 그대로)
     default_headlines = []
     if template.get("headlines") and len(template["headlines"]) > 0:
-        default_headlines = template["headlines"]
+        # "New Game"을 빈 문자열로 변환
+        default_headlines = ["" if h.strip().lower() == "new game" else h for h in template["headlines"]]
     elif settings.get("headline"):
         # Settings에서 온 경우 '\n'로 split
         headline = settings["headline"].strip()
-        default_headlines = [h.strip() for h in headline.split('\n') if h.strip()] if headline else []
+        default_headlines = ["" if h.strip().lower() == "new game" else h.strip() for h in headline.split('\n') if h.strip()] if headline else []
 
     # ✅ CTA 복사 (템플릿 우선, 없으면 세팅, 없으면 기본값)
     default_cta = "INSTALL_MOBILE_APP"
@@ -1369,7 +1397,10 @@ def upload_videos_to_library_and_create_single_ads(
                     
                     # Headlines - 비어있으면 빈 값 유지
                     if default_headlines:
-                        final_headlines = [h.strip() for h in default_headlines if h.strip()]
+                        # "New Game"을 빈 문자열로 변환하고, 빈 문자열 제거
+                        final_headlines = ["" if h.strip().lower() == "new game" else h.strip() for h in default_headlines]
+                        # 빈 문자열 제거
+                        final_headlines = [h for h in final_headlines if h.strip()]
                     else:
                         final_headlines = []
                     
@@ -1382,7 +1413,6 @@ def upload_videos_to_library_and_create_single_ads(
                     
                     # ✅ Standard Object Story Spec (Test Mode와 동일)
                     final_message = "\n\n".join(final_primary_texts)
-                    final_title = final_headlines[0] if final_headlines else ""
                     
                     # Video Data 구성
                     video_data = {
@@ -1390,11 +1420,19 @@ def upload_videos_to_library_and_create_single_ads(
                     }
 
                     # Title 추가 (비어있지 않을 때만!)
-                    if final_headlines:
-                        final_title = final_headlines[0]
-                        if final_title.strip():  # 공백이 아닌지 재확인
+                    # final_headlines가 있고, 첫 번째 값이 비어있지 않을 때만 title 추가
+                    if final_headlines and len(final_headlines) > 0:
+                        final_title = final_headlines[0].strip() if final_headlines[0] else ""
+                        # 빈 문자열이 아니고, "New Game" 같은 기본값도 제외
+                        if final_title and final_title.strip():
                             video_data["title"] = final_title
                             logger.info(f"    - ✅ Title: {final_title[:30]}...")
+                        else:
+                            # Title이 빈칸이면 video_data에 title 필드를 추가하지 않음
+                            logger.info(f"    - ⚠️ Title 비어있음 - video_data에 title 필드 추가 안 함")
+                    else:
+                        # final_headlines가 비어있으면 title 추가 안 함
+                        logger.info(f"    - ⚠️ Headlines 없음 - video_data에 title 필드 추가 안 함")
 
                     # Message 추가 (비어있지 않을 때만!)
                     if final_primary_texts:
