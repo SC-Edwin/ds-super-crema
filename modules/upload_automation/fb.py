@@ -834,14 +834,7 @@ def upload_videos_to_library_and_create_single_ads(
         match = re.search(r'video(\d+)', fname.lower())
         return f"video{match.group(1)}" if match else None
     
-    def _get_ratio_from_name(fname):
-        lower = fname.lower()
-        if "1080x1080" in lower: return "1080x1080"
-        if "1080x1920" in lower: return "1080x1920"
-        if "1920x1080" in lower: return "1920x1080"
-        return None
-    
-    # Group files by video number
+    # Group files by video number (1080x1080만 필터링)
     video_groups = {}
     
     for u in uploaded_files:
@@ -849,34 +842,34 @@ def upload_videos_to_library_and_create_single_ads(
         if not fname: continue
         
         video_num = _extract_video_number(fname)
-        ratio = _get_ratio_from_name(fname)
         
-        if not video_num or not ratio:
-            st.warning(f"⚠️ 파일명 형식 오류: {fname} (video 번호나 해상도 누락)")
+        # ✅ 1080x1080만 처리
+        if "1080x1080" not in fname.lower():
+            continue  # 1080x1080이 아닌 파일은 스킵
+        
+        if not video_num:
+            st.warning(f"⚠️ 파일명 형식 오류: {fname} (video 번호 누락)")
             continue
         
         if video_num not in video_groups:
             video_groups[video_num] = {}
         
-        video_groups[video_num][ratio] = u
+        video_groups[video_num]["1080x1080"] = u
     
-    # Validate: Each group must have all 3 sizes
+    # ✅ 1080x1080만 필수로 변경
     valid_groups = {}
-    required_ratios = {"1080x1080", "1080x1920", "1920x1080"}
+    required_ratio = "1080x1080"  # 단일 해상도만 필요
     
     for video_num, files in video_groups.items():
-        existing = set(files.keys())
-        missing = required_ratios - existing
-        
-        if missing:
-            st.error(f"❌ {video_num}: 누락된 해상도 {missing}")
+        if required_ratio in files:
+            valid_groups[video_num] = {required_ratio: files[required_ratio]}
         else:
-            valid_groups[video_num] = files
+            st.error(f"❌ {video_num}: 1080x1080 해상도가 필요합니다")
     
     if not valid_groups:
-        raise RuntimeError("❌ 유효한 비디오 그룹이 없습니다. 각 video는 3개 해상도가 모두 필요합니다.")
+        raise RuntimeError("❌ 유효한 비디오 그룹이 없습니다. 각 video는 1080x1080 해상도가 필요합니다.")
     
-    st.success(f"✅ {len(valid_groups)}개 비디오 그룹 검증 완료")
+    st.success(f"✅ {len(valid_groups)}개 비디오 검증 완료 (1080x1080만 사용)")
     
     # ====================================================================
     # STEP 2: Upload videos to Ad Library (with original filename)
@@ -966,22 +959,20 @@ def upload_videos_to_library_and_create_single_ads(
     # STEP 2+3: 그룹별 병렬 처리
     # ====================================================================
     def _process_one_group(video_num: str, group_files: dict) -> dict:
-        """한 그룹 처리: 업로드 → 대기 → 광고 생성"""
+        """한 그룹 처리: 업로드 → 대기 → 광고 생성 (1080x1080만 사용)"""
         import time
         
         try:
-            # 1. 비디오 업로드
-            vids = {}
+            # 1. 비디오 업로드 (1080x1080만)
+            if "1080x1080" not in group_files:
+                return {"success": False, "error": f"{video_num}: 1080x1080 비디오가 필요합니다"}
             
-            for ratio, f_obj in group_files.items():
-                fname = getattr(f_obj, "name", None) or f_obj.get("name", "")
-                
-                # 파일 저장
-                file_data = _save_tmp(f_obj)
-                
-                # 업로드
-                vid_id, _ = _upload_video_with_title(file_data["path"], fname)
-                vids[ratio] = vid_id
+            f_obj = group_files["1080x1080"]
+            fname = getattr(f_obj, "name", None) or f_obj.get("name", "")
+            
+            # 파일 저장 및 업로드
+            file_data = _save_tmp(f_obj)
+            vid_id, _ = _upload_video_with_title(file_data["path"], fname)
             
             # 2. 대기
             time.sleep(20)
@@ -992,77 +983,43 @@ def upload_videos_to_library_and_create_single_ads(
                     # ✅ 텍스트 준비 및 검증
                     # Primary Texts
                     if default_primary_texts:
-                        final_primary_texts = [t.strip() for t in default_primary_texts if t.strip()]
+                        final_primary_texts = [t.strip() for t in default_primary_texts if t.strip()] or [""]
                     else:
-                        final_primary_texts = []
-                    
+                        final_primary_texts = [""]
                     
                     # Headlines
                     if default_headlines:
-                        final_headlines = [h.strip() for h in default_headlines if h.strip()]
+                        final_headlines = [h.strip() for h in default_headlines if h.strip()] or [video_num]
                     else:
-                        final_headlines = []
-                    
+                        final_headlines = [video_num]
                     
                     # CTA
                     final_cta = default_cta if default_cta else "INSTALL_MOBILE_APP"
                     
-                    # ✅ 디버그 로그
-                    logger.info(f"{video_num}: Primary Texts={len(final_primary_texts)}, Headlines={len(final_headlines)}")
-                                
-                    # Creative Params
+                    # ✅ Creative Params (단일 비디오, placement 무시)
                     creative_params = {
                         "name": video_num,
                         "object_story_spec": {"page_id": page_id},
                         "asset_feed_spec": {
-                            # ✅ videos 배열 제거 - asset_customization_rules에 video_id가 있으므로 불필요
-                            # "videos": [
-                            #     {"video_id": vids["1080x1080"]},
-                            #     {"video_id": vids["1080x1920"]},
-                            #     {"video_id": vids["1920x1080"]}
-                            # ],
+                            "videos": [
+                                {"video_id": vid_id}  # ✅ 1080x1080 하나만
+                            ],
                             "bodies": [{"text": text} for text in final_primary_texts],
                             "titles": [{"text": h} for h in final_headlines],
-                            # ❌ descriptions 제거 - 에러의 원인
                             "call_to_action_types": [final_cta],
                             "ad_formats": ["AUTOMATIC_FORMAT"],
-                            "optimization_type": "ASSET_CUSTOMIZATION",
-                            "asset_customization_rules": [
-                                {
-                                    "customization_spec": {
-                                        "publisher_platforms": ["facebook", "instagram"],
-                                        "facebook_positions": ["feed", "video_feeds", "instant_article", "marketplace", "instream_video"],
-                                        "instagram_positions": ["stream"]
-                                    },
-                                    "video_id": vids["1080x1080"]
-                                },
-                                {
-                                    "customization_spec": {
-                                        "publisher_platforms": ["facebook", "instagram"],
-                                        "facebook_positions": ["story"],
-                                        "instagram_positions": ["story", "reels"]
-                                    },
-                                    "video_id": vids["1080x1920"]
-                                },
-                                {
-                                    "customization_spec": {
-                                        "publisher_platforms": ["facebook"],
-                                        "facebook_positions": ["search"]
-                                    },
-                                    "video_id": vids["1920x1080"]
-                                }
-                            ]
+                            "optimization_type": "PLACEMENT",  # ✅ ASSET_CUSTOMIZATION → PLACEMENT
+                            # ✅ asset_customization_rules 제거 - placement별 비디오 지정 불필요
                         }
                     }
                     
-                    # ✅ Store URL 필수 주입
+                    # Store URL 필수 주입
                     if final_store_url:
                         creative_params["asset_feed_spec"]["link_urls"] = [{
                             "website_url": final_store_url,
                         }]
                     else:
-                        # URL이 없으면 생성을 중단하고 에러를 리턴
-                        return {"success": False, "error": f"{video_num}: ❌ Store URL Missing (앱 설치 링크 누락)"}
+                        return {"success": False, "error": f"{video_num}: ❌ Store URL Missing"}
                     
                     # Create Creative
                     creative = account.create_ad_creative(fields=[], params=creative_params)
@@ -1081,11 +1038,6 @@ def upload_videos_to_library_and_create_single_ads(
                             "name": video_num,
                             "ad_id": ad["id"],
                             "creative_id": creative["id"],
-                            "placements": {
-                                "feed": "1080x1080",
-                                "story": "1080x1920",
-                                "search": "1920x1080"
-                            },
                             "used_values": {
                                 "primary_texts_count": len(final_primary_texts),
                                 "headlines_count": len(final_headlines),
