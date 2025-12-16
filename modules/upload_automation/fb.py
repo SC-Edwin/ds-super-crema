@@ -1091,19 +1091,24 @@ def upload_videos_to_library_and_create_single_ads(
         default_cta = settings["call_to_action"]
 
     # ✅ Store URL 결정 순서:
-    # 1. 함수 인자로 전달받은 값 (upload_to_facebook에서 계산된 값)
-    # 2. 템플릿(기존 광고)에서 가져온 값
-    # 3. settings(UI 입력)에서 가져온 값
+    # AdSet의 promoted_object URL이 있으면 무조건 사용 (일치 보장 필수)
+    # 없을 때만 다른 소스 사용
     
-    final_store_url = store_url  # 인자로 받은 값 최우선 (Ad Set과 동일한 URL)
-
-    if not final_store_url and settings.get("store_url"):
-        final_store_url = settings["store_url"]  # 사용자 입력 우선
-    elif not final_store_url and template.get("store_url"):
-        final_store_url = template["store_url"]  
-
-    if final_store_url:
-        final_store_url = sanitize_store_url(final_store_url)
+    if adset_store_url:
+        # AdSet URL을 최우선으로 사용 (일치 보장)
+        final_store_url = sanitize_store_url(adset_store_url)
+        st.info(f"✅ Ad Set의 Store URL 사용: {final_store_url[:50]}...")
+    else:
+        # AdSet URL이 없을 때만 다른 소스 사용
+        final_store_url = store_url  # 인자로 받은 값
+        
+        if not final_store_url and settings.get("store_url"):
+            final_store_url = settings["store_url"]
+        elif not final_store_url and template.get("store_url"):
+            final_store_url = template["store_url"]
+        
+        if final_store_url:
+            final_store_url = sanitize_store_url(final_store_url)
     
     # 결과 출력
     st.success(f"✅ 템플릿 로드 완료 (from: {template.get('source_ad_name', 'N/A')})")
@@ -1471,6 +1476,9 @@ def upload_videos_to_library_and_create_single_ads(
                         "object_story_spec": {
                             "page_id": page_id,
                             "video_data": video_data
+                        },
+                        "contextual_multi_ads": {
+                            "enroll_status": "OPT_OUT"
                         }
                     }
                     

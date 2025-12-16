@@ -966,7 +966,16 @@ def upload_videos_create_ads(
                 
                 # Retry logic for ad creation
                 def _do_create(s):
-                    creative = account.create_ad_creative(fields=[], params={"name": name, "object_story_spec": s})
+                    creative = account.create_ad_creative(
+                        fields=[], 
+                        params={
+                            "name": name, 
+                            "object_story_spec": s,
+                            "contextual_multi_ads": {
+                                "enroll_status": "OPT_OUT"
+                            }
+                        }
+                    )
                     ad = account.create_ad(fields=[], params={
                         "name": _make_name(name),
                         "adset_id": adset_id,
@@ -1022,7 +1031,16 @@ def upload_videos_create_ads(
                 
                 # Retry logic for ad creation
                 def _do_create(s):
-                    creative = account.create_ad_creative(fields=[], params={"name": name, "object_story_spec": s})
+                    creative = account.create_ad_creative(
+                        fields=[], 
+                        params={
+                            "name": name, 
+                            "object_story_spec": s,
+                            "contextual_multi_ads": {
+                                "enroll_status": "OPT_OUT"
+                            }
+                        }
+                    )
                     ad = account.create_ad(fields=[], params={
                         "name": _make_name(name),
                         "adset_id": adset_id,
