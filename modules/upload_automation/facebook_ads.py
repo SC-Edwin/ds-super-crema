@@ -286,6 +286,7 @@ def sanitize_store_url(raw: str) -> str:
       - Google Play: keep ?id=<package> only
       - App Store: drop query/fragment
       - Other hosts: return as-is
+      - Convert http:// to https://
     """
     from urllib.parse import urlsplit, urlunsplit, parse_qs, urlencode
 
@@ -294,6 +295,9 @@ def sanitize_store_url(raw: str) -> str:
 
     parts = urlsplit(raw)
     host = parts.netloc.lower()
+    
+    # Convert http:// to https://
+    scheme = "https" if parts.scheme == "http" else parts.scheme
 
     # Google Play: MUST preserve 'id' param only
     if "play.google.com" in host:
@@ -306,14 +310,17 @@ def sanitize_store_url(raw: str) -> str:
             )
         new_query = urlencode({"id": pkg})
         return urlunsplit(
-            (parts.scheme, parts.netloc, parts.path or "/store/apps/details", new_query, "")
+            (scheme, parts.netloc, parts.path or "/store/apps/details", new_query, "")
         )
 
     # Apple App Store: keep path only
     if "apps.apple.com" in host:
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+        return urlunsplit((scheme, parts.netloc, parts.path, "", ""))
 
-    # Other hosts: unchanged
+    # Other hosts: convert http to https if needed
+    if parts.scheme == "http":
+        return urlunsplit((scheme, parts.netloc, parts.path, parts.query, parts.fragment))
+    
     return raw
 
 def compute_budget_from_settings(files: list, settings: dict, fallback_per_video: int = 10) -> int:
