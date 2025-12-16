@@ -336,18 +336,18 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         # 간격을 두어 시각적으로 분리
                         st.write("") 
                         if is_marketer:
+                            media_library_btn = st.button(
+                                "📤 Media Library에 업로드 (모든 비디오)", 
+                                key=f"media_library_{game}", 
+                                use_container_width=True,
+                                help="Drive에서 가져온 모든 비디오를 Account Media Library에 원본 파일명으로 저장합니다."
+                            )
+                            st.write("")
                             # Marketer mode: Add dry run button
                             dry_run_fb = st.button("🔍 Dry Run (Preview)", key=f"dry_run_fb_{game}", use_container_width=True)
                             st.write("")
-                        if is_marketer:
-                            upload_and_create = st.button(
-                                "📚 Ad Library 업로드 + 단일 광고 생성",
-                                key=f"upload_lib_single_{game}",
-                                use_container_width=True,
-                                help="비디오를 Ad Library에 업로드하고 단일 모드 광고 생성"
-                            )
-                            st.write("")
-
+            
+                        btn_label = "Creative 업로드하기" if is_marketer else "Creative Test 업로드하기"
                         cont = st.button(btn_label, key=f"continue_{game}", use_container_width=True)
                         # Store current tab in query params when button is clicked
                         if cont:
@@ -397,7 +397,55 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
             # =========================
             # EXECUTION LOGIC
             # =========================
-            
+            if platform == "Facebook" and is_marketer and "media_library_btn" in locals() and media_library_btn:
+                remote_list = st.session_state.remote_videos.get(game, [])
+                ok, msg = validate_count(remote_list)
+                if not ok:
+                    ok_msg_placeholder.error(msg)
+                else:
+                    try:
+                        # Get account
+                        cfg = fb_ops.FB_GAME_MAPPING.get(game)
+                        if not cfg:
+                            raise ValueError(f"No FB mapping for {game}")
+                        
+                        account = fb_ops.init_fb_from_secrets(cfg["account_id"])
+                        
+                        # Upload all videos to media library
+                        with st.status("📤 Uploading to Media Library...", expanded=True) as status:
+                            result = fb_marketer.upload_all_videos_to_media_library(
+                                account=account,
+                                uploaded_files=remote_list,
+                                max_workers=6
+                            )
+                            
+                            uploaded_count = result["total"]
+                            failed_count = result["failed"]
+                            
+                            if uploaded_count > 0:
+                                status.update(
+                                    label=f"✅ Uploaded {uploaded_count} video(s) to Media Library", 
+                                    state="complete"
+                                )
+                                ok_msg_placeholder.success(
+                                    f"✅ Media Library 업로드 완료!\n\n"
+                                    f"- 성공: {uploaded_count}개\n"
+                                    f"- 실패: {failed_count}개"
+                                )
+                            else:
+                                status.update(label="❌ No videos uploaded", state="error")
+                                ok_msg_placeholder.error("업로드 실패")
+                            
+                            # Show errors if any
+                            if result["errors"]:
+                                with st.expander("⚠️ Upload Errors", expanded=False):
+                                    for err in result["errors"]:
+                                        st.write(f"- {err}")
+                    except Exception as e:
+                        import traceback
+                        st.error("❌ Media Library Upload Error")
+                        st.code(traceback.format_exc())
+                        
             # --- FACEBOOK DRY RUN ---
             if platform == "Facebook" and is_marketer and "dry_run_fb" in locals() and dry_run_fb:
                 remote_list = st.session_state.remote_videos.get(game, [])
@@ -557,100 +605,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
 
             # 📍 EXECUTION LOGIC 섹션에 추가
 
-            # --- FACEBOOK AD LIBRARY + SINGLE AD CREATION ---
-            if platform == "Facebook" and is_marketer and "upload_and_create" in locals() and upload_and_create:
-                st.query_params["tab"] = game
-                
-                remote_list = st.session_state.remote_videos.get(game, [])
-                ok, msg = validate_count(remote_list)
-                
-                if not ok:
-                    ok_msg_placeholder.error(msg)
-                else:
-                    try:
-                        cfg = fb_module.FB_GAME_MAPPING.get(game)
-                        settings = st.session_state.settings.get(game, {})
-                        
-                        # Check if campaign/adset selected
-                        adset_id = settings.get("adset_id")
-                        if not adset_id:
-                            st.error("❌ Settings에서 Campaign/AdSet을 먼저 선택해주세요.")
-                        else:
-                            account = fb_module.init_fb_from_secrets(cfg["account_id"])
-                            
-                            # Get Page ID
-                            page_id_key = cfg.get("page_id_key")
-                            if "facebook" in st.secrets and page_id_key in st.secrets["facebook"]:
-                                page_id = st.secrets["facebook"][page_id_key]
-                            elif page_id_key in st.secrets:
-                                page_id = st.secrets[page_id_key]
-                            else:
-                                raise RuntimeError(f"Missing {page_id_key} in secrets")
-                            
-                            # Execute
-                            # ✅ Store URL 가져오기 (GAME_DEFAULTS에서)
-                            from modules.upload_automation.facebook_ads import GAME_DEFAULTS
-                            game_defaults = GAME_DEFAULTS.get(game, {})
-                            store_url = game_defaults.get("store_url", "")
-                            
-                            result = fb_module.upload_videos_to_library_and_create_single_ads(
-                                account=account,
-                                page_id=str(page_id),
-                                adset_id=adset_id,
-                                uploaded_files=remote_list,
-                                settings=settings,
-                                store_url=store_url,  # ✅ 추가
-                                max_workers=6
-                            )
-                            
-                            with st.expander("📋 생성된 광고", expanded=True):
-                                for ad in result["ads"]:
-                                    st.write(f"### 📹 {ad['name']}")
-                                    st.caption(f"Ad ID: `{ad['ad_id']}`")
-                                    st.caption(f"Creative ID: `{ad['creative_id']}`")
-                                    
-                                    # ✅ Placement별 비디오 정보
-                                    st.markdown("**Placement Mapping:**")
-                                    placements = ad.get("placements", {})
-                                    st.write(f"  • Feed/Marketplace → {placements.get('feed', 'N/A')}")
-                                    st.write(f"  • Stories/Reels → {placements.get('story', 'N/A')}")
-                                    st.write(f"  • Search → {placements.get('search', 'N/A')}")
-                                    
-                                    # Thumbnail 상태
-                                    thumbs = ad.get("thumbnails", {})
-                                    st.caption(f"Thumbnails: 1080x1080={'✅' if thumbs.get('1080x1080') else '⚠️'} | "
-                                            f"1080x1920={'✅' if thumbs.get('1080x1920') else '⚠️'} | "
-                                            f"1920x1080={'✅' if thumbs.get('1920x1080') else '⚠️'}")
-                                    
-                                    # Multi-text 정보
-                                    if "used_values" in ad:
-                                        vals = ad["used_values"]
-                                        st.caption(f"📝 Primary Texts: {vals['primary_texts_count']}개")
-                                        st.caption(f"📰 Headlines: {vals['headlines_count']}개")
-                                        st.caption(f"🎯 CTA: {vals['cta']}")
-                                    
-                                    st.divider()
-
-                            if result["errors"]:
-                                st.warning("⚠️ 일부 광고 생성 실패:")
-                                for err in result["errors"]:
-                                    st.write(f"- {err}")
-
-                            ok_msg_placeholder.success(
-                                f"🎉 {result['total_created']}개 광고 생성 완료!"
-                            )
-                            
-                            
-                    except Exception as e:
-                        import traceback
-                        st.error("❌ 광고 생성 실패")
-                        st.code(traceback.format_exc())
-                    finally:
-                        st.query_params["tab"] = game            
             
-            # --- FACEBOOK ACTIONS ---
-            # Line 548-574
-            # --- FACEBOOK ACTIONS ---
             if platform == "Facebook" and cont:
                 # Preserve current tab
                 st.query_params["tab"] = game
@@ -663,12 +618,17 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     try:
                         st.session_state.uploads[game] = remote_list
                         settings = st.session_state.settings.get(game, {})
-                        
-                        # ✅ 디버깅 메시지 추가
+        
+                        # ✅ 디버깅 메시지
                         st.info(f"🔍 Mode: {'Marketer' if is_marketer else 'Test'}")
                         st.info(f"🔍 Using module: {fb_module.__name__}")
                         if 'creative_type' in settings:
                             st.info(f"🔍 Creative Type: {settings['creative_type']}")
+                        
+                        # ✅ Marketer Mode인 경우 adset_id 확인
+                        if is_marketer:
+                            adset_id = settings.get("adset_id")
+                            st.info(f"🔍 Selected AdSet ID: {adset_id if adset_id else '❌ 없음'}")
                         
                         plan = fb_module.upload_to_facebook(game, remote_list, settings)
                         

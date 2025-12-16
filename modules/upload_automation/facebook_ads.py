@@ -640,6 +640,115 @@ def wait_for_video_ready(account: "AdAccount", video_id: str, max_wait: int = 30
     return False
 
 # --------------------------------------------------------------------
+# Helper: Extract creative data from highest numbered ad in adset
+# --------------------------------------------------------------------
+def _extract_number_from_name(name: str) -> int:
+    """
+    Extracts the largest integer found in a string to determine 'version'.
+    Returns -1 if no number is found.
+    """
+    import re
+    matches = re.findall(r'\d+', name)
+    if not matches:
+        return -1
+    return max([int(m) for m in matches])
+
+def _fetch_highest_ad_creative_data(account: "AdAccount", adset_id: str) -> dict:
+    """
+    Fetches the highest numbered ad in the adset and extracts Text, Headline, CTA.
+    Returns dict with primary_texts, headlines, call_to_action, or empty dict if none found.
+    """
+    from facebook_business.adobjects.adset import AdSet
+    from facebook_business.adobjects.ad import Ad
+    from facebook_business.adobjects.adcreative import AdCreative
+    
+    try:
+        adset = AdSet(adset_id, api=account.get_api())
+        ads = adset.get_ads(
+            fields=[Ad.Field.name, Ad.Field.creative],
+            params={"limit": 100, "effective_status": ["ACTIVE", "PAUSED", "ARCHIVED"]}
+        )
+        
+        if not ads:
+            return {}
+
+        candidate_ads = []
+        for ad in ads:
+            num = _extract_number_from_name(ad['name'])
+            if num > -1:
+                candidate_ads.append((num, ad))
+        
+        if not candidate_ads:
+            return {}
+
+        candidate_ads.sort(key=lambda x: x[0], reverse=True)
+        target_ad_data = candidate_ads[0][1]
+        
+        c_id = target_ad_data['creative']['id']
+        c_data = AdCreative(c_id, api=account.get_api()).api_get(fields=[
+            AdCreative.Field.asset_feed_spec,
+            AdCreative.Field.object_story_spec,
+            AdCreative.Field.body,
+            AdCreative.Field.title,
+            AdCreative.Field.call_to_action_type,
+        ])
+        
+        primary_texts = []
+        headlines = []
+        cta = "INSTALL_MOBILE_APP"
+
+        # Check Dynamic (Asset Feed)
+        if c_data.get('asset_feed_spec'):
+            afs = c_data['asset_feed_spec']
+            if hasattr(afs, '__dict__'):
+                afs = dict(afs)
+            
+            if isinstance(afs, dict):
+                bodies = afs.get('bodies', [])
+                titles = afs.get('titles', [])
+                link_urls = afs.get('link_urls', [])
+                
+                primary_texts = [b.get('text') for b in bodies if b.get('text')]
+                headlines = [t.get('text') for t in titles if t.get('text')]
+                
+                if link_urls:
+                    found_cta = link_urls[0].get('call_to_action_type')
+                    if found_cta:
+                        cta = found_cta
+
+        # Check Standard (Object Story)
+        if not primary_texts:
+            if c_data.get('body'):
+                primary_texts.append(c_data['body'])
+            if c_data.get('title'):
+                headlines.append(c_data['title'])
+            
+            story_spec = c_data.get('object_story_spec', {})
+            video_data = story_spec.get('video_data', {})
+            
+            if video_data.get('message'):
+                primary_texts.append(video_data['message'])
+            if video_data.get('title'):
+                headlines.append(video_data['title'])
+            
+            cta_obj = video_data.get('call_to_action', {})
+            if cta_obj and cta_obj.get('type'):
+                cta = cta_obj['type']
+        
+        if c_data.get('call_to_action_type'):
+            cta = c_data['call_to_action_type']
+
+        return {
+            "primary_texts": list(dict.fromkeys(primary_texts)),
+            "headlines": list(dict.fromkeys(headlines)),
+            "call_to_action": cta,
+            "source_ad_name": target_ad_data['name'],
+        }
+    except Exception as e:
+        logger.warning(f"Could not fetch highest ad creative data: {e}")
+        return {}
+
+# --------------------------------------------------------------------
 # Resumable upload + ad creation
 # --------------------------------------------------------------------
 def upload_videos_create_ads(
@@ -657,7 +766,8 @@ def upload_videos_create_ads(
     """
     [Hybrid Mode]
     - Test Mode: Uploads every video as a separate ad (Original behavior).
-    - Marketer Mode: Groups videos by name (3 sizes) & applies Multi-Text (New behavior).
+    - Marketer Mode: Uploads every video as a separate ad (same as test mode), 
+      but uses headlines, primary text, and CTA from the highest numbered ad in the adset.
     """
     from facebook_business.adobjects.adcreative import AdCreative
     from facebook_business.adobjects.ad import Ad
@@ -667,7 +777,8 @@ def upload_videos_create_ads(
     import re
     import pathlib
     import os
-
+    st.warning("⚠️ **WARNING: upload_videos_create_ads 실행 중 (Test Mode 함수)**")
+    st.write("Marketer Mode에서는 upload_videos_to_library_and_create_single_ads를 사용해야 합니다!")
     # ------------------------------------------------------------------
     # 0. DETECT MODE
     # ------------------------------------------------------------------
@@ -679,91 +790,15 @@ def upload_videos_create_ads(
         return getattr(u, "name", None) or (u.get("name") if isinstance(u, dict) else "")
 
     # ------------------------------------------------------------------
-    # 1. VALIDATION & GROUPING (Only for Marketer Mode)
+    # 1. FILE DEDUPLICATION (Both modes use same logic now)
     # ------------------------------------------------------------------
-    video_groups = {} 
     unique_files_to_upload = []
-    
-    if is_marketer_mode:
-        # [Marketer Mode Logic] Group files by base name
-        def _get_ratio_from_name(fname):
-            lower = fname.lower()
-            # Check for pixel dimensions first (1080x1080, 1920x1080, 1080x1920)
-            if "1080x1080" in lower: return "1x1"
-            if "1080x1920" in lower: return "9x16"
-            if "1920x1080" in lower: return "16x9"
-            # Then check for ratio strings
-            if "9x16" in lower or "port" in lower or "story" in lower: return "9x16"
-            if "16x9" in lower or "land" in lower or "wide" in lower: return "16x9"
-            if "1x1" in lower or "sq" in lower or "feed" in lower: return "1x1"
-            return "unknown"
-
-        def _get_base_name(fname):
-            # Remove both ratio strings and pixel dimensions
-            base = re.sub(r'[_ -]?(1x1|9x16|16x9|sq|port|land|story|feed|wide|1080x1080|1920x1080|1080x1920)', '', fname, flags=re.IGNORECASE)
-            base = pathlib.Path(base).stem
-            return base.strip()
-
-        seen_filenames = set()
-        errors = []
-        warnings = []
-
-        for u in uploaded_files:
-            fname = _fname_any(u)
-            if pathlib.Path(fname).suffix.lower() not in allowed: continue
-            
-            base = _get_base_name(fname)
-            ratio = _get_ratio_from_name(fname)
-            
-            if ratio == "unknown":
-                errors.append(f"❌ '{fname}': Filename missing ratio (1x1, 9x16, 16x9).")
-                continue
-
-            if base not in video_groups: video_groups[base] = {}
-            if ratio in video_groups[base]:
-                errors.append(f"❌ '{base}' group has duplicate '{ratio}'.")
-                continue
-            
-            video_groups[base][ratio] = u
-            if fname not in seen_filenames:
-                unique_files_to_upload.append(u)
-                seen_filenames.add(fname)
-
-        # Validation Checks
-        required = {"1x1", "9x16", "16x9"}
-        
-        for base, files in video_groups.items():
-            existing = set(files.keys())
-            missing = required - existing
-            
-            # [STRICT] If any size is missing -> ERROR (Block Upload)
-            if missing:
-                errors.append(
-                    f"❌ '{base}' group is incomplete.\n"
-                    f"   • Found: {', '.join(existing)}\n"
-                    f"   • Missing: {', '.join(missing)}\n"
-                    f"   (All 3 sizes are required for Marketer Mode)"
-                )
-
-        # Stop immediately if ANY errors found
-        if errors:
-            st.error("### ⛔ Upload Blocked: Incomplete Assets")
-            for e in errors:
-                st.write(e)
-            st.stop()  # STOPS EXECUTION HERE
-        
-        if warnings:
-            with st.expander("⚠️ Grouping Warnings", expanded=True):
-                for w in warnings: st.write(w)
-
-    else:
-        # [Test Mode Logic] Just dedupe files, no grouping
-        seen = set()
-        for u in uploaded_files:
-            fname = _fname_any(u)
-            if pathlib.Path(fname).suffix.lower() in allowed and fname not in seen:
-                unique_files_to_upload.append(u)
-                seen.add(fname)
+    seen = set()
+    for u in uploaded_files:
+        fname = _fname_any(u)
+        if pathlib.Path(fname).suffix.lower() in allowed and fname not in seen:
+            unique_files_to_upload.append(u)
+            seen.add(fname)
 
     # ------------------------------------------------------------------
     # 2. UPLOAD FILES (Shared Logic)
@@ -858,10 +893,17 @@ def upload_videos_create_ads(
     if prog: prog.empty()
 
     # ------------------------------------------------------------------
-    # 2.5. WAIT FOR VIDEOS TO BE READY (Marketer Mode only)
+    # 2.5. FETCH CREATIVE DATA FROM HIGHEST AD (Marketer Mode only)
     # ------------------------------------------------------------------
+    highest_ad_data = {}
     if is_marketer_mode:
-        st.info(f"✅ {len(uploads_map)}개 비디오 업로드 완료. 광고 생성 시작...")
+        st.info(f"✅ {len(uploads_map)}개 비디오 업로드 완료. 최고 번호 광고에서 텍스트 가져오는 중...")
+        highest_ad_data = _fetch_highest_ad_creative_data(account, adset_id)
+        if highest_ad_data:
+            source_name = highest_ad_data.get("source_ad_name", "N/A")
+            st.success(f"✨ 텍스트 로드 완료: {source_name}")
+        else:
+            st.warning("⚠️ 기존 광고에서 텍스트를 찾을 수 없습니다. 기본값을 사용합니다.")
 
     # ------------------------------------------------------------------
     # 3. CREATE ADS (Branching Logic)
@@ -869,129 +911,95 @@ def upload_videos_create_ads(
     results = []
     api_errors = []
     
-    ig_actor_id = None
-    if try_instagram:
-        ig_actor_id = st.session_state.get("ig_actor_id_from_page")
-
     # Helper: Determine Ad Name
     def _make_name(base):
         return f"{ad_name_prefix.strip()}_{base}" if ad_name_prefix else base
 
     if is_marketer_mode:
         # ==========================================
-        # PATH A: MARKETER MODE (Grouping + Asset Feed)
+        # PATH A: MARKETER MODE (Same as Test Mode, but with extracted text)
         # ==========================================
         
-        # Parse Text Settings
-        raw_text = settings.get("primary_text", "")
-        raw_head = settings.get("headline", "")
-        cta = settings.get("call_to_action", "INSTALL_MOBILE_APP")
+        # Get creative data from highest ad (or fallback to settings)
+        primary_texts = highest_ad_data.get("primary_texts", [])
+        headlines = highest_ad_data.get("headlines", [])
+        cta = highest_ad_data.get("call_to_action", "INSTALL_MOBILE_APP")
         
-        p_texts = [t.strip() for t in raw_text.split('\n') if t.strip()] or [""]
-        headlines = [h.strip() for h in raw_head.split('\n') if h.strip()] 
-
-        # facebook_ads.py - PATH A (Marketer Mode)
-
-        # facebook_ads.py - 섹션 3 PATH A
-
-        def _create_marketer_ad(base_name, group_files):
-            """Create Flexible ad with 3 video sizes"""
-            # 1. Collect video IDs
-            vids, thumbs = {}, {}
-            for ratio, f_obj in group_files.items():
-                fn = _fname_any(f_obj)
-                if fn in uploads_map:
-                    vids[ratio] = uploads_map[fn]["video_id"]
-                    thumbs[ratio] = uploads_map[fn].get("thumbnail_url")
+        # Fallback to settings if no data from highest ad
+        if not primary_texts:
+            raw_text = settings.get("primary_text", "")
+            primary_texts = [t.strip() for t in raw_text.split('\n\n') if t.strip()] if raw_text else [""]
+        if not headlines:
+            raw_head = settings.get("headline", "")
+            headlines = [h.strip() for h in raw_head.split('\n') if h.strip()] if raw_head else [""]
+        if cta == "INSTALL_MOBILE_APP" and settings.get("call_to_action"):
+            cta = settings.get("call_to_action", "INSTALL_MOBILE_APP")
+        
+        # Use first headline/primary text for object_story_spec (test mode format)
+        primary_text = primary_texts[0] if primary_texts else ""
+        headline = headlines[0] if headlines else ""
+        
+        # Ensure CTA is valid (fallback to INSTALL_MOBILE_APP if invalid)
+        valid_ctas = ["INSTALL_MOBILE_APP", "PLAY_GAME", "USE_APP", "DOWNLOAD", "SHOP_NOW", "LEARN_MORE", "SIGN_UP", "WATCH_MORE", "NO_BUTTON"]
+        if not cta or cta not in valid_ctas:
+            cta = "INSTALL_MOBILE_APP"
+        
+        def _create_marketer_ad(file_data):
+            """Create ad like test mode, but with extracted headlines/primary text/CTA"""
+            name = file_data["name"]
+            vid_id = file_data["video_id"]
+            thumb = file_data.get("thumbnail_url")
             
-            if len(vids) < 3:
-                return {"success": False, "error": f"{base_name}: Need all 3 sizes"}
-
             try:
-                # 2. Parse settings
-                raw_text = settings.get("primary_text", "")
-                raw_head = settings.get("headline", "")
-                cta = settings.get("call_to_action", "INSTALL_MOBILE_APP")
+                # Standard Object Story (Same as test mode)
+                # Use headline if available, otherwise use name (like test mode)
+                final_title = headline if headline else name
+                final_message = primary_text if primary_text else ""
                 
-                p_texts = [t.strip() for t in raw_text.split('\n\n') if t.strip()] or [""]
-                headlines = [h.strip() for h in raw_head.split('\n') if h.strip()] or [base_name]
-
-                # 3. Build Asset Feed (실제 Facebook Ads 구조와 일치)
-                # 3. Build Asset Feed (실제 Facebook Ads 구조와 일치)
-                asset_feed = {
-                    "ad_formats": ["AUTOMATIC_FORMAT"],
-                    "videos": [
-                        {"video_id": vids["1x1"], "thumbnail_url": thumbs.get("1x1", "")},
-                        {"video_id": vids["9x16"], "thumbnail_url": thumbs.get("9x16", "")},
-                        {"video_id": vids["16x9"], "thumbnail_url": thumbs.get("16x9", "")}
-                    ],
-                    "bodies": [{"text": t} for t in p_texts],
-                    "titles": [{"text": h} for h in headlines],
-                    "descriptions": [{"text": ""}],
-                    "call_to_action_types": [cta],
-                    "optimization_type": "PLACEMENT",
-                }
-                
+                vd = {"video_id": vid_id, "title": final_title, "message": final_message}
+                if thumb:
+                    vd["image_url"] = thumb
                 if store_url:
-                    asset_feed["link_urls"] = [{
-                        "website_url": store_url,
-                        "display_url": ""
-                    }]
+                    vd["call_to_action"] = {"type": cta, "value": {"link": store_url}}
+                
+                spec = {"page_id": page_id, "video_data": vd}
+                
+                # Retry logic for ad creation
+                def _do_create(s):
+                    creative = account.create_ad_creative(fields=[], params={"name": name, "object_story_spec": s})
+                    ad = account.create_ad(fields=[], params={
+                        "name": _make_name(name),
+                        "adset_id": adset_id,
+                        "creative": {"creative_id": creative["id"]},
+                        "status": Ad.Status.active
+                    })
+                    return ad["id"]
 
-                params = {
-                    "name": base_name,
-                    "asset_feed_spec": asset_feed,
-                    "object_story_spec": {"page_id": page_id}
-                }
-                
-                # 4. Create Creative with Retry
-                max_retries = 5
-                creative = None
-                
-                for attempt in range(max_retries):
-                    try:
-                        creative = account.create_ad_creative(fields=[], params=params)
-                        break
-                        
-                    except FacebookRequestError as e:
-                        if e.api_error_code() == 100 and e.api_error_subcode() == 1885252 and attempt < max_retries - 1:
-                            wait_sec = 15 * (attempt + 1)
-                            time.sleep(wait_sec)
-                            continue
-                        raise
-                
-                if not creative:
-                    return {"success": False, "error": f"{base_name}: Creative failed"}
-                
-                # 5. Create Ad
-                ad = account.create_ad(fields=[], params={
-                    "name": _make_name(base_name),
-                    "adset_id": adset_id,
-                    "creative": {"creative_id": creative["id"]},
-                    "status": Ad.Status.active,
-                })
-                
-                return {"success": True, "result": {"name": base_name, "ad_id": ad["id"]}}
-                
+                try:
+                    ad_id = _do_create(spec)
+                except FacebookRequestError as e:
+                    raise
+
+                return {"success": True, "result": {"name": name, "ad_id": ad_id}}
             except Exception as e:
-                return {"success": False, "error": f"{base_name}: {str(e)}"}
+                return {"success": False, "error": f"{name}: {e}"}
 
-        # Run creation for all video groups
-        total = len(video_groups)
-        prog = st.progress(0, text=f"Creating {total} Flexible ads...")
-        done = 0
-
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            futs = {ex.submit(_create_marketer_ad, b, f): b for b, f in video_groups.items()}
-            for fut in as_completed(futs):
-                res = fut.result()
-                done += 1
-                prog.progress(int(done/total*100), text=f"Creating ads... {done}/{total}")
-                if res["success"]:
-                    results.append(res["result"])
-                else:
-                    api_errors.append(res["error"])
-        prog.empty()
+        # Run Marketer Creation (same as test mode)
+        total = len(uploads_map)
+        if total:
+            prog = st.progress(0, text="Creating Ads with extracted text...")
+            done = 0
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                futs = {ex.submit(_create_marketer_ad, data): name for name, data in uploads_map.items()}
+                for fut in as_completed(futs):
+                    res = fut.result()
+                    done += 1
+                    prog.progress(int(done/total*100))
+                    if res["success"]:
+                        results.append(res["result"])
+                    else:
+                        api_errors.append(res["error"])
+            prog.empty()
 
     else:
         # ==========================================
@@ -1011,9 +1019,8 @@ def upload_videos_create_ads(
                     vd["call_to_action"] = {"type": "INSTALL_MOBILE_APP", "value": {"link": store_url}}
                 
                 spec = {"page_id": page_id, "video_data": vd}
-                if ig_actor_id: spec["instagram_actor_id"] = ig_actor_id
                 
-                # Retry logic for IG actor issues
+                # Retry logic for ad creation
                 def _do_create(s):
                     creative = account.create_ad_creative(fields=[], params={"name": name, "object_story_spec": s})
                     ad = account.create_ad(fields=[], params={
@@ -1027,11 +1034,7 @@ def upload_videos_create_ads(
                 try:
                     ad_id = _do_create(spec)
                 except FacebookRequestError as e:
-                    # If IG fails, try without IG actor
-                    if "instagram" in str(e).lower() and ig_actor_id:
-                        spec.pop("instagram_actor_id", None)
-                        ad_id = _do_create(spec)
-                    else: raise
+                    raise
 
                 return {"success": True, "result": {"name": name, "ad_id": ad_id}}
             except Exception as e:

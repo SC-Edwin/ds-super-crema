@@ -353,8 +353,46 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         col_d1, col_d2 = st.columns(2)
         dco_aspect_ratio = col_d1.selectbox("Ratio (For Preview)", ["1:1", "9:16", "16:9"], key=f"dco_r_{idx}")
         ad_name_input = col_d2.text_input("Ad Name", key=f"dco_n_{idx}")
+        st.markdown("**Ad Name Customization** (Optional)")
+        
+        col_pre, col_suf = st.columns(2)
+        
+        with col_pre:
+            use_prefix = st.checkbox("Add Prefix", key=f"use_prefix_{idx}")
+            if use_prefix:
+                prefix_text = st.text_input(
+                    "Prefix", 
+                    key=f"prefix_text_{idx}",
+                    placeholder="e.g., a",
+                    help="Result: a_video164"
+                )
+            else:
+                prefix_text = ""
+        
+        with col_suf:
+            use_suffix = st.checkbox("Add Suffix", key=f"use_suffix_{idx}")
+            if use_suffix:
+                suffix_text = st.text_input(
+                    "Suffix", 
+                    key=f"suffix_text_{idx}",
+                    placeholder="e.g., a",
+                    help="Result: video164_a"
+                )
+            else:
+                suffix_text = ""
+        
+        # Preview
+        if use_prefix or use_suffix:
+            preview_name = ""
+            if use_prefix and prefix_text:
+                preview_name = f"{prefix_text}_"
+            preview_name += "videoxxx"
+            if use_suffix and suffix_text:
+                preview_name += f"_{suffix_text}"
+            st.caption(f"📝 Preview: `{preview_name}`")
 
         st.divider()
+
 
         # 3. Ad Creative Inputs
         col_head, col_info = st.columns([1, 2])
@@ -476,6 +514,10 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "primary_text": primary_text,
             "headline": headline,
             "call_to_action": call_to_action,
+            "use_prefix": use_prefix,
+            "prefix_text": prefix_text.strip() if use_prefix else "",
+            "use_suffix": use_suffix,
+            "suffix_text": suffix_text.strip() if use_suffix else "",
         }
 
 
@@ -491,18 +533,17 @@ def upload_to_facebook(
     simulate: bool = False,
 ) -> dict:
     """
-    Main entry point called by main.py.
-    Orchestrates the entire flow: Auth -> Plan -> Create Ad Set -> Upload Videos -> Create Ads.
+    Marketer Mode: 선택된 AdSet에 바로 업로드
+    Test Mode: 새 AdSet 생성 후 업로드
     """
     
-    # 1. Validation & Setup
     if game_name not in FB_GAME_MAPPING:
         raise ValueError(f"No FB mapping configured for game: {game_name}")
 
     cfg = FB_GAME_MAPPING[game_name]
     account = init_fb_from_secrets(cfg["account_id"])
 
-    # Resolve Page ID
+    # Page ID 가져오기
     page_id_key = cfg.get("page_id_key")
     if "facebook" in st.secrets and page_id_key in st.secrets["facebook"]:
         page_id = st.secrets["facebook"][page_id_key]
@@ -511,42 +552,52 @@ def upload_to_facebook(
     else:
         raise RuntimeError(f"Missing {page_id_key} in secrets.")
 
-    # Validate Page & Get Instagram Actor
+    # Validate Page
     page_check = validate_page_binding(account, page_id)
     ig_actor_id_from_page = page_check.get("instagram_business_account_id")
-    
-    # Store IG actor in session for the uploader to use
     if ig_actor_id_from_page:
         st.session_state["ig_actor_id_from_page"] = ig_actor_id_from_page
 
     settings = dict(settings or {})
     
-    # MARKETER MODE: Use selected adset if available
+    # ✅ Marketer Mode: 선택된 AdSet 확인
     selected_adset_id = settings.get("adset_id")
+    
     if selected_adset_id:
-        # Get store URL
+        # ========================================
+        # MARKETER MODE: 선택된 AdSet에 바로 업로드
+        # ========================================
+        st.info("📌 Marketer Mode: 선택된 Ad Set에 업로드")
+        
+        # Store URL 가져오기
         game_defaults = GAME_DEFAULTS.get(game_name, {})
-        store_url = (settings.get("store_url") or "").strip()
-        if not store_url:
-            campaign_id = settings.get("campaign_id", "")
-            if "ios" in str(campaign_id).lower():
-                store_url = game_defaults.get("store_url_ios", game_defaults.get("store_url", ""))
-            else:
-                store_url = game_defaults.get("store_url_aos", game_defaults.get("store_url", ""))
+        user_store_url = (settings.get("store_url") or "").strip()
+        
+        # [SMART URL LOGIC] - 기존 코드 유지
+        target_campaign_name = cfg.get("campaign_name", "").lower()
+        is_ios_campaign = "ios" in target_campaign_name
+        
+        if is_ios_campaign:
+            default_url = game_defaults.get("store_url_ios", "")
+            if not default_url: default_url = game_defaults.get("store_url", "")
+        else:
+            default_url = game_defaults.get("store_url_aos", "")
+            if not default_url: default_url = game_defaults.get("store_url", "")
+        
+        store_url = user_store_url if user_store_url else default_url
+        
         if store_url:
             store_url = sanitize_store_url(store_url)
         
-        # Upload directly to selected adset
-        ad_name_prefix = settings.get("ad_name_prefix") if settings.get("ad_name_mode") == "Prefix + filename" else None
-        upload_videos_create_ads(
+        # ✅ 핵심: upload_videos_to_library_and_create_single_ads 사용
+        result = upload_videos_to_library_and_create_single_ads(
             account=account,
             page_id=str(page_id),
             adset_id=selected_adset_id,
             uploaded_files=uploaded_files,
-            ad_name_prefix=ad_name_prefix,
-            store_url=store_url,
-            try_instagram=True,
             settings=settings,
+            store_url=store_url,
+            max_workers=6
         )
         
         return {
@@ -555,6 +606,8 @@ def upload_to_facebook(
             "adset_name": "(Selected Ad Set)",
             "page_id": str(page_id),
             "n_videos": len(uploaded_files),
+            "ads_created": result.get("total_created", 0),
+            "errors": result.get("errors", [])
         }
     
     # TEST MODE: Create new creativetest adset
@@ -685,7 +738,7 @@ def upload_to_facebook(
         uploaded_files=uploaded_files,
         ad_name_prefix=ad_name_prefix,
         store_url=store_url,
-        try_instagram=True,
+        try_instagram=False,
         settings=settings,  # <--- WE MUST PASS SETTINGS HERE
     )
 
@@ -709,6 +762,20 @@ def upload_videos_to_library_and_create_single_ads(
     1. Upload videos to Ad Library (with original filename as title)
     2. Create Single Video Ads with placement-specific videos
     """
+
+    st.write("🔧 **DEBUG: upload_videos_to_library_and_create_single_ads 실행 중**")
+    st.write(f"- 업로드된 파일 수: {len(uploaded_files)}")
+    st.write(f"- Ad Set ID: {adset_id}")
+    st.write(f"- Settings: {settings.keys()}")
+    
+    # Prefix/Suffix 설정 확인
+    use_prefix = settings.get("use_prefix", False)
+    prefix_text = settings.get("prefix_text", "").strip()
+    use_suffix = settings.get("use_suffix", False)
+    suffix_text = settings.get("suffix_text", "").strip()
+    
+    st.write(f"- Prefix: {'✅ ' + prefix_text if use_prefix else '❌'}")
+    st.write(f"- Suffix: {'✅ ' + suffix_text if use_suffix else '❌'}")
     # ✅ 필요한 모듈들을 함수 내부에서 import
     import os
     import pathlib
@@ -726,7 +793,22 @@ def upload_videos_to_library_and_create_single_ads(
         upload_thumbnail_image,
         sanitize_store_url
     )
-    
+    try:
+        adset = AdSet(adset_id)
+        adset_data = adset.api_get(fields=["promoted_object"])
+        promoted_obj = adset_data.get("promoted_object", {})
+        adset_store_url = promoted_obj.get("object_store_url", "")
+        
+        if adset_store_url:
+            st.info(f"📌 Ad Set의 Store URL: {adset_store_url[:60]}...")
+            # ✅ Ad Set URL을 최우선으로 사용 (일치 보장)
+            if not store_url:
+                store_url = adset_store_url
+                st.success("✅ Ad Set URL을 사용합니다 (일치 보장)")
+        else:
+            st.warning("⚠️ Ad Set에 promoted_object가 없습니다")
+    except Exception as e:
+        st.warning(f"⚠️ Ad Set 조회 실패: {e}")
     # ====================================================================
     # STEP 0: Get template from highest video in AdSet
     # ====================================================================
@@ -790,12 +872,12 @@ def upload_videos_to_library_and_create_single_ads(
     # 2. 템플릿(기존 광고)에서 가져온 값
     # 3. settings(UI 입력)에서 가져온 값
     
-    final_store_url = store_url  # 인자로 받은 값 우선
+    final_store_url = store_url  # 인자로 받은 값 최우선 (Ad Set과 동일한 URL)
 
-    if not final_store_url and template.get("store_url"):
-        final_store_url = template["store_url"]
-    elif not final_store_url and settings.get("store_url"):
-        final_store_url = settings["store_url"]
+    if not final_store_url and settings.get("store_url"):
+        final_store_url = settings["store_url"]  # 사용자 입력 우선
+    elif not final_store_url and template.get("store_url"):
+        final_store_url = template["store_url"]  
 
     if final_store_url:
         final_store_url = sanitize_store_url(final_store_url)
@@ -826,6 +908,25 @@ def upload_videos_to_library_and_create_single_ads(
     else:
         st.error("❌ Store URL이 없습니다! 앱 설치 광고는 URL이 필수입니다.")
     
+    use_prefix = settings.get("use_prefix", False)
+    prefix_text = settings.get("prefix_text", "").strip()
+    use_suffix = settings.get("use_suffix", False)
+    suffix_text = settings.get("suffix_text", "").strip()
+
+    def _build_ad_name(video_num: str) -> str:
+        """Build ad name with optional prefix/suffix"""
+        name_parts = []
+        
+        if use_prefix and prefix_text:
+            name_parts.append(prefix_text)
+        
+        name_parts.append(video_num)
+        
+        if use_suffix and suffix_text:
+            name_parts.append(suffix_text)
+        
+        return "_".join(name_parts)
+    
     # ====================================================================
     # STEP 1: Group videos by base name (video164, video165, ...)
     # ====================================================================
@@ -833,38 +934,84 @@ def upload_videos_to_library_and_create_single_ads(
         """Extract video number from filename (e.g., video164)"""
         match = re.search(r'video(\d+)', fname.lower())
         return f"video{match.group(1)}" if match else None
+    def _extract_resolution(fname):
+        """Extract resolution from filename (e.g., 1080x1080)"""
+        if "1080x1080" in fname.lower():
+            return "1080x1080"
+        elif "1920x1080" in fname.lower():
+            return "1920x1080"
+        elif "1080x1920" in fname.lower():
+            return "1080x1920"
+        return None
     
-    # Group files by video number (1080x1080만 필터링)
     video_groups = {}
-    
+
     for u in uploaded_files:
         fname = getattr(u, "name", None) or u.get("name", "")
-        if not fname: continue
+        if not fname: 
+            continue
         
         video_num = _extract_video_number(fname)
-        
-        # ✅ 1080x1080만 처리
-        if "1080x1080" not in fname.lower():
-            continue  # 1080x1080이 아닌 파일은 스킵
+        resolution = _extract_resolution(fname)
         
         if not video_num:
             st.warning(f"⚠️ 파일명 형식 오류: {fname} (video 번호 누락)")
             continue
         
+        if not resolution:
+            st.warning(f"⚠️ 해상도 인식 실패: {fname} (1080x1080, 1920x1080, 1080x1920 필요)")
+            continue
+        
         if video_num not in video_groups:
             video_groups[video_num] = {}
         
-        video_groups[video_num]["1080x1080"] = u
-    
-    # ✅ 1080x1080만 필수로 변경
+        video_groups[video_num][resolution] = u
+    st.write("📦 **그룹화 결과:**")
+    for video_num, resolutions in video_groups.items():
+        st.write(f"- {video_num}: {list(resolutions.keys())}")
+
+    # ✅ 해상도 우선순위에 따라 최적 비디오 선택
     valid_groups = {}
-    required_ratio = "1080x1080"  # 단일 해상도만 필요
-    
+    RESOLUTION_PRIORITY = ["1080x1080", "1920x1080", "1080x1920"]
+
     for video_num, files in video_groups.items():
-        if required_ratio in files:
-            valid_groups[video_num] = {required_ratio: files[required_ratio]}
+        selected_resolution = None
+        selected_file = None
+        
+        # 우선순위대로 해상도 찾기
+        for res in RESOLUTION_PRIORITY:
+            if res in files:
+                selected_resolution = res
+                selected_file = files[res]
+                break
+        
+        if selected_resolution:
+            valid_groups[video_num] = {
+                "resolution": selected_resolution,
+                "file": selected_file
+            }
+            # 우선순위 정보 표시
+            if selected_resolution != "1080x1080":
+                st.info(f"ℹ️ {video_num}: 1080x1080 없음, {selected_resolution} 사용")
         else:
-            st.error(f"❌ {video_num}: 1080x1080 해상도가 필요합니다")
+            st.error(f"❌ {video_num}: 사용 가능한 해상도 없음 (1080x1080, 1920x1080, 1080x1920 필요)")
+    if not valid_groups:
+        raise RuntimeError("❌ 유효한 비디오 그룹이 없습니다. 각 video는 1080x1080, 1920x1080, 또는 1080x1920 해상도가 필요합니다.")
+    st.write("✅ **최종 선택된 비디오:**")
+    for video_num, data in valid_groups.items():
+        st.write(f"- {video_num}: {data['resolution']}")
+
+    st.success(f"✅ {len(valid_groups)}개 비디오 검증 완료")
+
+    # 해상도별 통계 표시
+    resolution_stats = {}
+    for vg in valid_groups.values():
+        res = vg["resolution"]
+        resolution_stats[res] = resolution_stats.get(res, 0) + 1
+
+    st.caption("📊 사용된 해상도:")
+    for res, count in sorted(resolution_stats.items()):
+        st.caption(f"  - {res}: {count}개")
     
     if not valid_groups:
         raise RuntimeError("❌ 유효한 비디오 그룹이 없습니다. 각 video는 1080x1080 해상도가 필요합니다.")
@@ -958,86 +1105,182 @@ def upload_videos_to_library_and_create_single_ads(
     # ====================================================================
     # STEP 2+3: 그룹별 병렬 처리
     # ====================================================================
-    def _process_one_group(video_num: str, group_files: dict) -> dict:
-        """한 그룹 처리: 업로드 → 대기 → 광고 생성 (1080x1080만 사용)"""
+    def _process_one_group(video_num: str, group_data: dict) -> dict:
+        """한 그룹 처리: 업로드 → 대기 → 광고 생성 (우선순위 해상도 사용)"""
         import time
+        import re
+        import logging
+        
+        logger = logging.getLogger(__name__)
         
         try:
-            # 1. 비디오 업로드 (1080x1080만)
-            if "1080x1080" not in group_files:
-                return {"success": False, "error": f"{video_num}: 1080x1080 비디오가 필요합니다"}
+            logger.info(f"[{video_num}] 처리 시작")
             
-            f_obj = group_files["1080x1080"]
+            # 선택된 해상도와 파일 가져오기
+            resolution = group_data["resolution"]
+            f_obj = group_data["file"]
+            
             fname = getattr(f_obj, "name", None) or f_obj.get("name", "")
+            logger.info(f"  - 파일명: {fname}")
+            logger.info(f"  - 해상도: {resolution}")
             
-            # 파일 저장 및 업로드
+            # 파일명에서 videoxxx 추출 (Ad 이름용)
+            match = re.search(r'(video\d+)', fname.lower())
+            base_video_num = match.group(1) if match else video_num
+            
+            # Prefix/Suffix 적용하여 최종 Ad 이름 생성
+            ad_name = _build_ad_name(base_video_num)
+            logger.info(f"  - Ad 이름: {ad_name}")
+            
+            # 1. 파일 저장
+            logger.info(f"  - 📤 비디오 업로드 중...")
             file_data = _save_tmp(f_obj)
-            vid_id, _ = _upload_video_with_title(file_data["path"], fname)
+            video_path = file_data["path"]
+            
+            # ✅ 1-1. 썸네일 추출 및 업로드
+            logger.info(f"  - 🖼️ 썸네일 추출 중...")
+            try:
+                thumb_path = extract_thumbnail_from_video(video_path)
+                thumb_url = upload_thumbnail_image(account, thumb_path)
+                logger.info(f"  - ✅ 썸네일 업로드 완료: {thumb_url[:50]}...")
+                # 임시 파일 정리
+                try:
+                    os.unlink(thumb_path)
+                except:
+                    pass
+            except Exception as e:
+                logger.warning(f"  - ⚠️ 썸네일 추출 실패: {e}")
+                thumb_url = None
+            
+            # 1-2. 비디오 업로드
+            vid_id, _ = _upload_video_with_title(video_path, fname)
+            logger.info(f"  - ✅ 비디오 업로드 완료: {vid_id}")
             
             # 2. 대기
+            logger.info(f"  - ⏳ 20초 대기 중...")
             time.sleep(20)
             
             # 3. 광고 생성 (재시도 포함)
             for attempt in range(3):
                 try:
+                    logger.info(f"  - 🎨 Creative 생성 시도 ({attempt + 1}/3)...")
+                    
                     # ✅ 텍스트 준비 및 검증
                     # Primary Texts
                     if default_primary_texts:
-                        final_primary_texts = [t.strip() for t in default_primary_texts if t.strip()] or [""]
+                        final_primary_texts = [t.strip() for t in default_primary_texts if t.strip()]
+                        if not final_primary_texts:
+                            final_primary_texts = ["Play now!"]  # 기본값
                     else:
-                        final_primary_texts = [""]
+                        final_primary_texts = ["Play now!"]  # 기본값
                     
-                    # Headlines
+                    # Headlines - 비어있으면 빈 값 유지
                     if default_headlines:
-                        final_headlines = [h.strip() for h in default_headlines if h.strip()] or [video_num]
+                        final_headlines = [h.strip() for h in default_headlines if h.strip()]
                     else:
-                        final_headlines = [video_num]
+                        final_headlines = []
                     
                     # CTA
                     final_cta = default_cta if default_cta else "INSTALL_MOBILE_APP"
                     
-                    # ✅ Creative Params (단일 비디오, placement 무시)
+                    logger.info(f"    - Primary Texts: {len(final_primary_texts)}개")
+                    logger.info(f"    - Headlines: {len(final_headlines)}개")
+                    logger.info(f"    - CTA: {final_cta}")
+                    
+                    # ✅ Standard Object Story Spec (Test Mode와 동일)
+                    final_message = "\n\n".join(final_primary_texts)
+                    final_title = final_headlines[0] if final_headlines else ""
+                    
+                    # Video Data 구성
+                    video_data = {
+                        "video_id": vid_id,
+                    }
+                    
+                    # Title 추가 (있을 때만)
+                    if final_title:
+                        video_data["title"] = final_title
+                    
+                    # Message 추가 (있을 때만)
+                    if final_message:
+                        video_data["message"] = final_message
+                    
+                    # Store URL 확인
+                    if not final_store_url:
+                        logger.error(f"    - ❌ Store URL이 없습니다!")
+                        return {"success": False, "error": f"{ad_name}: ❌ Store URL Missing"}
+
+                    # ✅ 썸네일 추가 (필수!)
+                    if thumb_url:
+                        video_data["image_url"] = thumb_url
+                        logger.info(f"    - ✅ 썸네일 추가됨")
+                    else:
+                        logger.warning(f"    - ⚠️ 썸네일 없음 - Creative 생성 실패 가능!")
+
+                    # CTA + Store URL 추가
+                    video_data["call_to_action"] = {
+                        "type": final_cta,
+                        "value": {"link": final_store_url}
+                    }
+
+                    logger.info(f"    - Store URL: {final_store_url[:50]}...")
+                    
+                    # ✅ Creative Params - Standard Object Story
                     creative_params = {
-                        "name": video_num,
-                        "object_story_spec": {"page_id": page_id},
-                        "asset_feed_spec": {
-                            "videos": [
-                                {"video_id": vid_id}  # ✅ 1080x1080 하나만
-                            ],
-                            "bodies": [{"text": text} for text in final_primary_texts],
-                            "titles": [{"text": h} for h in final_headlines],
-                            "call_to_action_types": [final_cta],
-                            "ad_formats": ["AUTOMATIC_FORMAT"],
-                            "optimization_type": "PLACEMENT",  # ✅ ASSET_CUSTOMIZATION → PLACEMENT
-                            # ✅ asset_customization_rules 제거 - placement별 비디오 지정 불필요
+                        "name": ad_name,
+                        "object_story_spec": {
+                            "page_id": page_id,
+                            "video_data": video_data
                         }
                     }
                     
-                    # Store URL 필수 주입
-                    if final_store_url:
-                        creative_params["asset_feed_spec"]["link_urls"] = [{
-                            "website_url": final_store_url,
-                        }]
-                    else:
-                        return {"success": False, "error": f"{video_num}: ❌ Store URL Missing"}
-                    
-                    # Create Creative
+                    # Creative 생성
+                    logger.info(f"    - 🔨 Creative 생성 API 호출 중...")
                     creative = account.create_ad_creative(fields=[], params=creative_params)
+                    creative_id = creative["id"]
+                    logger.info(f"    - ✅ Creative 생성 완료: {creative_id}")
                     
-                    # Create Ad
-                    ad = account.create_ad(fields=[], params={
-                        "name": video_num,
+                    # Ad 생성
+                    # Ad 생성
+                    logger.info(f"    - 🔨 Ad 생성 API 호출 중...")
+                    logger.info(f"      - Ad Name: {ad_name}")
+                    logger.info(f"      - AdSet ID: {adset_id}")
+                    logger.info(f"      - Creative ID: {creative_id}")
+
+                    ad_params = {
+                        "name": ad_name,
                         "adset_id": adset_id,
-                        "creative": {"creative_id": creative["id"]},
+                        "creative": {"creative_id": creative_id},
                         "status": Ad.Status.active
-                    })
+                    }
+
+                    # ✅ Ad 생성 시도
+                    try:
+                        ad_response = account.create_ad(fields=[], params=ad_params)
+                        ad_id = ad_response.get("id")
+                        
+                        # ID 검증
+                        if not ad_id:
+                            raise RuntimeError(f"API 응답에 Ad ID 없음: {ad_response}")
+                        
+                        logger.info(f"  - ✅ Ad 생성 완료: {ad_id}")
+                        
+                    except FacebookRequestError as e:
+                        error_code = e.api_error_code()
+                        error_msg = e.api_error_message()
+                        logger.error(f"    - ❌ Facebook API Error: [{error_code}] {error_msg}")
+                        raise RuntimeError(f"Ad 생성 실패: [{error_code}] {error_msg}")
+                        
+                    except Exception as e:
+                        logger.error(f"    - ❌ Ad 생성 중 예상치 못한 오류: {str(e)}")
+                        raise
                     
                     return {
                         "success": True,
                         "result": {
-                            "name": video_num,
-                            "ad_id": ad["id"],
-                            "creative_id": creative["id"],
+                            "name": ad_name,
+                            "ad_id": ad_id,
+                            "creative_id": creative_id,
+                            "resolution": resolution,
                             "used_values": {
                                 "primary_texts_count": len(final_primary_texts),
                                 "headlines_count": len(final_headlines),
@@ -1046,22 +1289,35 @@ def upload_videos_to_library_and_create_single_ads(
                         }
                     }
                     
-                except Exception as e:
-                    error_str = str(e)
+                except FacebookRequestError as e:
+                    error_code = e.api_error_code()
+                    error_msg = e.api_error_message()
                     
-                    # Error 1885252 체크
-                    if "1885252" in error_str and attempt < 2:
+                    logger.error(f"    - ❌ Facebook API Error: [{error_code}] {error_msg}")
+                    
+                    # Error 1885252 체크 (비디오 처리 중)
+                    if error_code == 1885252 and attempt < 2:
                         wait_time = 15 * (attempt + 1)
-                        logger.info(f"⏳ {video_num}: 비디오 처리 중, {wait_time}초 후 재시도... ({attempt+1}/3)")
+                        logger.warning(f"    - ⏳ 비디오 처리 중, {wait_time}초 후 재시도...")
                         time.sleep(wait_time)
                         continue
                     
+                    # 다른 에러는 즉시 실패
+                    raise
+                    
+                except Exception as e:
+                    logger.error(f"    - ❌ 예상치 못한 에러: {str(e)}")
+                    logger.exception("Full traceback:")
                     raise
             
+            # 재시도 횟수 초과
+            logger.error(f"  - ❌ 최대 재시도 횟수 초과")
             return {"success": False, "error": f"{video_num}: 최대 재시도 횟수 초과"}
             
         except Exception as e:
-            return {"success": False, "error": f"{video_num}: {str(e)}"}
+            logger.error(f"❌ [{video_num}] 처리 실패: {str(e)}")
+            logger.exception("Full traceback:")
+            return {"success": False, "error": f"{video_num} ({resolution}): {str(e)}"}
     
     # ====================================================================
     # 병렬 실행
@@ -1069,12 +1325,12 @@ def upload_videos_to_library_and_create_single_ads(
     results = []
     errors = []
     total = len(valid_groups)
-    
+
     prog = st.progress(0, text=f"🚀 비디오 처리 중... 0/{total}")
     done = 0
-    
+
     with ThreadPoolExecutor(max_workers=3) as ex:
-        futs = {ex.submit(_process_one_group, vn, vf): vn for vn, vf in valid_groups.items()}
+        futs = {ex.submit(_process_one_group, vn, vdata): vn for vn, vdata in valid_groups.items()}
         
         for fut in as_completed(futs):
             res = fut.result()
@@ -1087,14 +1343,201 @@ def upload_videos_to_library_and_create_single_ads(
             
             if res["success"]:
                 results.append(res["result"])
+                
+                # ✅ Ad ID 확인 및 표시
+                ad_id = res["result"].get("ad_id", "❌ 없음")
+                resolution = res["result"].get("resolution", "N/A")
+                
+                if ad_id and ad_id != "❌ 없음":
+                    st.success(f"✅ {res['result']['name']} ({resolution}) - Ad ID: {ad_id}")
+                else:
+                    st.warning(f"⚠️ {res['result']['name']} ({resolution}) - Creative만 생성됨, Ad ID 없음!")
             else:
                 errors.append(res["error"])
-    
+                st.error(f"❌ 실패: {res['error']}")
+
     prog.empty()
     
+    st.write("---")
+    st.write("### 📊 최종 결과")
+
+    success_with_ad = [r for r in results if r.get("ad_id")]
+    success_no_ad = [r for r in results if not r.get("ad_id")]
+
+    if success_with_ad:
+        st.success(f"✅ Ad 생성 완료: {len(success_with_ad)}개")
+        with st.expander("생성된 Ad 목록 보기", expanded=True):
+            for r in success_with_ad:
+                st.write(f"- **{r['name']}**: Ad ID `{r['ad_id']}`")
+
+    if success_no_ad:
+        st.warning(f"⚠️ Creative만 생성됨 (Ad 없음): {len(success_no_ad)}개")
+        with st.expander("Creative만 있는 항목 보기"):
+            for r in success_no_ad:
+                st.write(f"- **{r['name']}**: Creative ID `{r.get('creative_id', 'N/A')}`")
+
+    if errors:
+        st.error(f"❌ 실패: {len(errors)}개")
+        with st.expander("실패 항목 보기"):
+            for e in errors:
+                st.write(f"- {e}")
+
     return {
         "ads": results,
         "errors": errors,
         "total_created": len(results),
         "uploads_map": {}
+    }
+
+def upload_all_videos_to_media_library(
+    account,
+    uploaded_files: list,
+    max_workers: int = 6
+) -> dict:
+    """
+    Upload all videos to Account Media Library with original filenames.
+    No ad creation - just video storage.
+    
+    Returns:
+        {
+            "uploaded": [{"name": "video164.mp4", "video_id": "123..."}],
+            "errors": ["video165.mp4: Upload failed"]
+        }
+    """
+    import os
+    import pathlib
+    import tempfile
+    import requests
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    # Helper: Save uploaded file to temp
+    def _save_tmp(u):
+        if isinstance(u, dict) and "path" in u:
+            return {"name": u["name"], "path": u["path"]}
+        if hasattr(u, "getbuffer"):
+            suffix = pathlib.Path(u.name).suffix.lower() or ".mp4"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(u.getbuffer())
+                return {"name": u.name, "path": tmp.name}
+        raise ValueError("Unsupported video object")
+    
+    # Helper: Upload video with original filename as title
+    def _upload_video_with_title(path: str, title: str) -> str:
+        """Upload video to media library with title"""
+        if "facebook" in st.secrets:
+            token = st.secrets["facebook"].get("access_token", "").strip()
+        else:
+            token = st.secrets.get("access_token", "").strip()
+        
+        act = account.get_id()
+        base_url = f"https://graph.facebook.com/v24.0/{act}/advideos"
+        file_size = os.path.getsize(path)
+        
+        def _post(data, files=None):
+            r = requests.post(base_url, data={**data, "access_token": token}, files=files, timeout=180)
+            j = r.json()
+            if "error" in j: 
+                raise RuntimeError(j["error"].get("message"))
+            return j
+        
+        # Start upload
+        start_resp = _post({
+            "upload_phase": "start",
+            "file_size": str(file_size),
+            "title": title,
+            "content_category": "VIDEO_GAMING"
+        })
+        
+        sess_id = start_resp["upload_session_id"]
+        vid_id = start_resp["video_id"]
+        start_off = int(start_resp.get("start_offset", 0))
+        end_off = int(start_resp.get("end_offset", 0))
+        
+        # Upload chunks
+        with open(path, "rb") as f:
+            while True:
+                if start_off == end_off == file_size: 
+                    break
+                if end_off <= start_off:
+                    tr = _post({
+                        "upload_phase": "transfer",
+                        "upload_session_id": sess_id,
+                        "start_offset": str(start_off)
+                    })
+                    start_off = int(tr.get("start_offset", start_off))
+                    end_off = int(tr.get("end_offset", end_off or file_size))
+                    continue
+                
+                f.seek(start_off)
+                chunk = f.read(end_off - start_off)
+                tr = _post(
+                    {
+                        "upload_phase": "transfer",
+                        "upload_session_id": sess_id,
+                        "start_offset": str(start_off)
+                    },
+                    files={"video_file_chunk": ("chunk.bin", chunk, "application/octet-stream")}
+                )
+                start_off = int(tr.get("start_offset", start_off + len(chunk)))
+                end_off = int(tr.get("end_offset", end_off))
+        
+        # Finish
+        try: 
+            _post({
+                "upload_phase": "finish", 
+                "upload_session_id": sess_id,
+                "title": title
+            })
+        except: 
+            pass
+        
+        return vid_id
+    
+    # Process files
+    persisted = []
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = {ex.submit(_save_tmp, u): u for u in uploaded_files}
+        for fut in as_completed(futs):
+            try: 
+                fname = getattr(futs[fut], "name", None) or futs[fut].get("name", "")
+                persisted.append({"name": fname, "path": fut.result()["path"]})
+            except: 
+                pass
+    
+    # Upload videos
+    uploaded = []
+    errors = []
+    total = len(persisted)
+    
+    prog = st.progress(0, text=f"📤 Uploading to Media Library... 0/{total}")
+    done = 0
+    
+    def _upload_task(item):
+        try:
+            vid_id = _upload_video_with_title(item["path"], item["name"])
+            return {"success": True, "name": item["name"], "video_id": vid_id}
+        except Exception as e:
+            return {"success": False, "name": item["name"], "error": str(e)}
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = {ex.submit(_upload_task, item): item for item in persisted}
+        
+        for fut in as_completed(futs):
+            res = fut.result()
+            done += 1
+            prog.progress(int(done / total * 100), text=f"📤 Uploading... {done}/{total}")
+            
+            if res["success"]:
+                uploaded.append({"name": res["name"], "video_id": res["video_id"]})
+            else:
+                errors.append(f"{res['name']}: {res['error']}")
+    
+    prog.empty()
+    
+    return {
+        "uploaded": uploaded,
+        "errors": errors,
+        "total": len(uploaded),
+        "failed": len(errors)
     }
