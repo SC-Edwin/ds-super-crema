@@ -241,6 +241,123 @@ def fetch_latest_ad_creative_defaults(adset_id: str) -> dict:
     except Exception as e:
         logger.warning(f"Could not fetch ad defaults: {e}")
         return {}
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_ads_in_adset(adset_id: str) -> list[dict]:
+    """
+    Fetch all ads in an adset and return list with name and creative data.
+    Returns: [{"id": "...", "name": "...", "number": 123}, ...]
+    """
+    try:
+        adset = AdSet(adset_id)
+        ads = adset.get_ads(
+            fields=[Ad.Field.name, Ad.Field.id],
+            params={"limit": 100, "effective_status": ["ACTIVE", "PAUSED", "ARCHIVED"]}
+        )
+        
+        result = []
+        for ad in ads:
+            num = _extract_number_from_name(ad['name'])
+            result.append({
+                "id": ad["id"],
+                "name": ad["name"],
+                "number": num
+            })
+        
+        # Sort by number (highest first)
+        result.sort(key=lambda x: x["number"], reverse=True)
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error fetching ads: {e}")
+        return []
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_ad_creative_by_ad_id(ad_id: str) -> dict:
+    """
+    Fetch creative data for a specific ad ID.
+    Returns same format as fetch_latest_ad_creative_defaults.
+    """
+    try:
+        ad = Ad(ad_id)
+        ad_data = ad.api_get(fields=[Ad.Field.name, Ad.Field.creative])
+        
+        c_id = ad_data['creative']['id']
+        c_data = AdCreative(c_id).api_get(fields=[
+            AdCreative.Field.asset_feed_spec,
+            AdCreative.Field.object_story_spec,
+            AdCreative.Field.body,
+            AdCreative.Field.title,
+            AdCreative.Field.call_to_action_type,
+        ])
+        
+        # --- Extraction Logic (Same as fetch_latest_ad_creative_defaults) ---
+        primary_texts = []
+        headlines = []
+        cta = "INSTALL_MOBILE_APP"
+        store_url = ""
+        
+        # 1. Check Dynamic (Asset Feed)
+        if c_data.get('asset_feed_spec'):
+            afs = c_data['asset_feed_spec']
+            
+            # Extract bodies, titles, link_urls
+            if isinstance(afs, dict):
+                bodies = afs.get('bodies', [])
+                titles = afs.get('titles', [])
+                link_urls = afs.get('link_urls', [])
+            elif hasattr(afs, 'get'):
+                bodies = afs.get('bodies', [])
+                titles = afs.get('titles', [])
+                link_urls = afs.get('link_urls', [])
+            else:
+                bodies = []
+                titles = []
+                link_urls = []
+            
+            primary_texts = [b.get('text') for b in bodies if b.get('text')]
+            headlines = [t.get('text') for t in titles if t.get('text')]
+            
+            # Extract URL & CTA from link_urls
+            if link_urls:
+                found_cta = link_urls[0].get('call_to_action_type')
+                found_url = link_urls[0].get('website_url')
+                if found_cta: cta = found_cta
+                if found_url: store_url = found_url
+
+        # 2. Check Standard (Object Story)
+        if not primary_texts:
+            # Direct fields
+            if c_data.get('body'): primary_texts.append(c_data['body'])
+            if c_data.get('title'): headlines.append(c_data['title'])
+            
+            story_spec = c_data.get('object_story_spec', {})
+            video_data = story_spec.get('video_data', {})
+            
+            if video_data.get('message'): primary_texts.append(video_data['message'])
+            if video_data.get('title'): headlines.append(video_data['title'])
+            
+            # Extract CTA & URL from video_data
+            cta_obj = video_data.get('call_to_action', {})
+            if cta_obj:
+                if cta_obj.get('type'): cta = cta_obj['type']
+                if cta_obj.get('value', {}).get('link'): store_url = cta_obj['value']['link']
+
+        # 3. Check top-level call_to_action_type
+        if c_data.get('call_to_action_type'):
+            cta = c_data['call_to_action_type']
+
+        return {
+            "primary_texts": list(dict.fromkeys(primary_texts)),
+            "headlines": list(dict.fromkeys(headlines)),
+            "call_to_action": cta,
+            "store_url": store_url,
+            "source_ad_name": ad_data['name'],
+        }
+        
+    except Exception as e:
+        logger.warning(f"Could not fetch ad creative: {e}")
+        return {}
+
+
 # --- UI Renderer ---
 
 def render_facebook_settings_panel(container, game: str, idx: int) -> None:
@@ -294,20 +411,98 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
 
         st.divider()
 
-        # --- SMART MIMIC LOGIC (Simplified) ---
-        defaults = {}
-        defaults_flag = f"defaults_fetched_{idx}"
-        
-        # Always fetch defaults regardless of format selection
-        if not st.session_state.get(defaults_flag, False):
-             with st.spinner(f"Mimicking highest number ad..."):
-                defaults = fetch_latest_ad_creative_defaults(sel_a_id)
-                st.session_state[f"mimic_data_{idx}"] = defaults 
-                st.session_state[defaults_flag] = True
-        else:
-            defaults = st.session_state.get(f"mimic_data_{idx}", {})
+        # ====================================================================
+        # TEMPLATE SOURCE SELECTION
+        # ====================================================================
+        st.markdown("**📋 Template Source**")
 
-        # Prep Default Values
+        # Fetch ad list
+        ads_in_adset = fetch_ads_in_adset(sel_a_id)
+
+        # Build options: [빈칸] + [Highest Number (Auto)] + [All Ads]
+        template_options = ["빈칸 (Empty)"]
+
+        if ads_in_adset:
+            highest_ad = ads_in_adset[0]  # Already sorted by number desc
+            template_options.append(f"🏆 {highest_ad['name']} (Auto)")
+            
+            # Add all other ads
+            for ad in ads_in_adset:
+                template_options.append(f"📄 {ad['name']}")
+
+        # Get current selection
+        template_key = f"template_source_{idx}"
+        current_selection = st.session_state.get(template_key, template_options[1] if len(template_options) > 1 else template_options[0])
+
+        # Selectbox
+        selected_template = st.selectbox(
+            "Select Template Source",
+            options=template_options,
+            index=template_options.index(current_selection) if current_selection in template_options else 0,
+            key=f"template_sel_{idx}",
+            help="Choose which ad to copy text/headlines/CTA from, or select 빈칸 for empty values"
+        )
+
+        st.session_state[template_key] = selected_template
+
+        # ====================================================================
+        # LOAD TEMPLATE DATA
+        # ====================================================================
+        defaults = {}
+
+        if selected_template == "빈칸 (Empty)":
+            # Empty template - no defaults but keep store URL from AdSet
+            st.info("ℹ️ Using empty template (no text/headlines/CTA will be copied)")
+            
+            # ✅ Fetch store URL from AdSet's promoted_object
+            adset_store_url = ""
+            try:
+                adset = AdSet(sel_a_id)
+                adset_data = adset.api_get(fields=["promoted_object"])
+                promoted_obj = adset_data.get("promoted_object", {})
+                adset_store_url = promoted_obj.get("object_store_url", "")
+            except Exception as e:
+                logger.warning(f"Could not fetch AdSet store URL: {e}")
+            
+            defaults = {
+                "primary_texts": [],
+                "headlines": [],
+                "call_to_action": "INSTALL_MOBILE_APP",
+                "store_url": adset_store_url,  # ✅ AdSet URL 유지
+                "source_ad_name": "Empty Template"
+            }
+            
+        elif selected_template.startswith("🏆"):
+            # Auto mode - highest number
+            defaults_flag = f"defaults_fetched_auto_{idx}"
+            
+            if not st.session_state.get(defaults_flag, False):
+                with st.spinner("Loading template from highest ad..."):
+                    defaults = fetch_latest_ad_creative_defaults(sel_a_id)
+                    st.session_state[f"mimic_data_auto_{idx}"] = defaults
+                    st.session_state[defaults_flag] = True
+            else:
+                defaults = st.session_state.get(f"mimic_data_auto_{idx}", {})
+                
+        elif selected_template.startswith("📄"):
+            # Specific ad selected
+            ad_name = selected_template.replace("📄 ", "")
+            selected_ad = next((a for a in ads_in_adset if a["name"] == ad_name), None)
+            
+            if selected_ad:
+                defaults_flag = f"defaults_fetched_{selected_ad['id']}_{idx}"
+                
+                if not st.session_state.get(defaults_flag, False):
+                    with st.spinner(f"Loading template from {ad_name}..."):
+                        defaults = fetch_ad_creative_by_ad_id(selected_ad['id'])
+                        st.session_state[f"mimic_data_{selected_ad['id']}_{idx}"] = defaults
+                        st.session_state[defaults_flag] = True
+                else:
+                    defaults = st.session_state.get(f"mimic_data_{selected_ad['id']}_{idx}", {})
+
+        # ====================================================================
+        # PREPARE DEFAULT VALUES (rest stays the same)
+        # ====================================================================
         val_text = ""
         val_headline = ""
         val_cta_idx = 0
@@ -1169,10 +1364,8 @@ def upload_videos_to_library_and_create_single_ads(
                     # Primary Texts
                     if default_primary_texts:
                         final_primary_texts = [t.strip() for t in default_primary_texts if t.strip()]
-                        if not final_primary_texts:
-                            final_primary_texts = ["Play now!"]  # 기본값
                     else:
-                        final_primary_texts = ["Play now!"]  # 기본값
+                        final_primary_texts = []  # 기본값
                     
                     # Headlines - 비어있으면 빈 값 유지
                     if default_headlines:
@@ -1195,14 +1388,24 @@ def upload_videos_to_library_and_create_single_ads(
                     video_data = {
                         "video_id": vid_id,
                     }
-                    
-                    # Title 추가 (있을 때만)
-                    if final_title:
-                        video_data["title"] = final_title
-                    
-                    # Message 추가 (있을 때만)
-                    if final_message:
-                        video_data["message"] = final_message
+
+                    # Title 추가 (비어있지 않을 때만!)
+                    if final_headlines:
+                        final_title = final_headlines[0]
+                        if final_title.strip():  # 공백이 아닌지 재확인
+                            video_data["title"] = final_title
+                            logger.info(f"    - ✅ Title: {final_title[:30]}...")
+
+                    # Message 추가 (비어있지 않을 때만!)
+                    if final_primary_texts:
+                        final_message = "\n\n".join(final_primary_texts)
+                        if final_message.strip():  # 공백이 아닌지 재확인
+                            video_data["message"] = final_message
+                            logger.info(f"    - ✅ Message: {final_message[:30]}...")
+
+                    # 둘 다 없으면 경고
+                    if not final_headlines and not final_primary_texts:
+                        logger.warning(f"    - ⚠️ Headline과 Primary Text가 모두 비어있습니다!")
                     
                     # Store URL 확인
                     if not final_store_url:
