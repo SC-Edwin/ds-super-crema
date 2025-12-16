@@ -728,6 +728,9 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         )
 
         # Final Save
+        # ✅ UI에서 관리하는 "리스트"를 그대로 저장 (빈값 포함 허용)
+        _clean_keep_empty = lambda xs: [x if x is not None else "" for x in (xs or [])]
+
         st.session_state.settings[game] = {
             "campaign_id": sel_c_id,
             "adset_id": sel_a_id,
@@ -735,9 +738,20 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "dco_aspect_ratio": dco_aspect_ratio,
             "dco_creative_name": ad_name_input,
             "single_creative_name": None,
-            "primary_text": primary_text,
-            "headline": headline,
+
+            # ✅ backward compatibility (기존 로직용 문자열도 유지)
+            "primary_text": primary_text,     # "\n\n" join된 문자열
+            "headline": headline,             # "\n" join된 문자열
+
+            # ✅ NEW: 업로드 로직에서는 이 리스트를 우선 사용
+            "primary_texts": _clean_keep_empty(primary_texts_list),   # 빈칸 포함
+            "headlines": _clean_keep_empty(headlines_list),           # 빈칸 포함
+
             "call_to_action": call_to_action,
+
+            # ✅ NEW: template에서 가져온 store_url을 settings에도 저장 (Marketer mode에서 그대로 쓰기 좋음)
+            "store_url": defaults.get("store_url", "") if defaults else (st.session_state.get("store_url") or ""),
+
             "use_prefix": use_prefix,
             "prefix_text": prefix_text.strip() if use_prefix else "",
             "use_suffix": use_suffix,
@@ -783,6 +797,10 @@ def upload_to_facebook(
         st.session_state["ig_actor_id_from_page"] = ig_actor_id_from_page
 
     settings = dict(settings or {})
+    
+    # ✅ 업로드 함수들에서 Identity에 IG Account 붙일 수 있도록 settings에 주입
+    if st.session_state.get("ig_actor_id_from_page"):
+        settings["instagram_actor_id"] = st.session_state["ig_actor_id_from_page"]
     
     # ✅ Marketer Mode: 선택된 AdSet 확인
     selected_adset_id = settings.get("adset_id")
@@ -1858,45 +1876,32 @@ def _upload_dynamic_single_video_ads(
     st.info("📋 AdSet에서 템플릿 정보 가져오는 중...")
     template = fetch_latest_ad_creative_defaults(adset_id)
     
-    # Primary Texts
+    # Primary Texts - settings의 primary_texts 리스트 우선 사용
     default_primary_texts = []
-    if template.get("primary_texts"):
-        default_primary_texts = [pt.strip() for pt in template["primary_texts"] if pt.strip()]
+    if settings.get("primary_texts"):
+        default_primary_texts = settings["primary_texts"]
+    elif template.get("primary_texts"):
+        default_primary_texts = template["primary_texts"]
     elif settings.get("primary_text"):
         text = settings["primary_text"].strip()
         default_primary_texts = [t.strip() for t in text.split('\n\n') if t.strip()]
-    
 
-    # Headlines
+    # Headlines - settings의 headlines 리스트 우선 사용
     default_headlines = []
-    if template.get("headlines"):
-        # "New Game" 제외하고 유효한 headline만 수집
-        for h in template["headlines"]:
-            cleaned = h.strip()
-            if cleaned and cleaned.lower() != "new game":
-                default_headlines.append(cleaned)
+    if settings.get("headlines"):
+        default_headlines = settings["headlines"]
+    elif template.get("headlines"):
+        default_headlines = template["headlines"]
     elif settings.get("headline"):
         headline = settings["headline"].strip()
         default_headlines = [h.strip() for h in headline.split('\n') if h.strip()]
 
-    # ✅ 검증 전에 디버그 출력
-    st.write(f"🔍 DEBUG: Template headlines: {template.get('headlines', [])}")
-    st.write(f"🔍 DEBUG: Filtered headlines: {default_headlines}")
-    st.write(f"🔍 DEBUG: Settings headline: {settings.get('headline', 'N/A')}")
-
-    # 검증
-    if not default_primary_texts:
-        raise RuntimeError("❌ 최소 하나의 Primary Text를 입력하세요")
-
-    if not default_headlines:
-        # ✅ Settings에서 가져오기 시도 (fallback)
-        if settings.get("headline"):
-            headline = settings["headline"].strip()
-            default_headlines = [h.strip() for h in headline.split('\n') if h.strip()]
-        
-        # 여전히 없으면 에러
-        if not default_headlines:
-            raise RuntimeError("❌ 최소 하나의 Headline을 입력하세요")
+    # ✅ 텍스트는 "없어도" 진행 (빈칸 업로드 허용)
+    # - 단, 실제 API에는 빈 문자열은 넣지 않도록 아래에서 필터링함
+    if default_primary_texts is None:
+        default_primary_texts = []
+    if default_headlines is None:
+        default_headlines = []
         
     # CTA
     default_cta = template.get("call_to_action", "INSTALL_MOBILE_APP")
@@ -2070,6 +2075,7 @@ def _upload_dynamic_single_video_ads(
     
     # 모든 비디오 업로드
     all_video_ids = {}
+    thumb_urls = {}  # ✅ video_num -> thumbnail url
     total_uploads = len(valid_groups) * 3
     done = 0
     prog = st.progress(0, text="📤 비디오 업로드 중...")
@@ -2082,6 +2088,22 @@ def _upload_dynamic_single_video_ads(
             fname = getattr(f_obj, "name", None) or f_obj.get("name", "")
             
             file_data = _save_tmp(f_obj)
+            
+            # ✅ 대표 썸네일은 video_num당 1번만 (보통 1080x1080 파일에서 뽑는 걸 추천)
+            if video_num not in thumb_urls and size == "1080x1080":
+                try:
+                    from facebook_ads import extract_thumbnail_from_video, upload_thumbnail_image
+                    thumb_path = extract_thumbnail_from_video(file_data["path"])
+                    thumb_urls[video_num] = upload_thumbnail_image(account, thumb_path)
+                    try:
+                        os.unlink(thumb_path)
+                    except:
+                        pass
+                    st.info(f"🖼️ {video_num} 썸네일 준비 완료")
+                except Exception as e:
+                    thumb_urls[video_num] = None
+                    st.warning(f"⚠️ {video_num} 썸네일 생성 실패: {e}")
+            
             vid_id = _upload_video_with_title(file_data["path"], fname)
             all_video_ids[video_num][size] = vid_id
             
@@ -2097,143 +2119,98 @@ def _upload_dynamic_single_video_ads(
     time.sleep(30)
     
     # ====================================================================
-    # STEP 3: 하나의 Flexible Ad 생성 (Flexible Ad Format)
+    # STEP 3: 그룹별로 Flexible Ad 생성 (video166은 1개, video167도 1개 ...)
     # ====================================================================
-    # ====================================================================
-    # STEP 3: 하나의 Flexible Ad 생성 (Flexible Ad Format)
-    # ====================================================================
-    try:
-        # Videos (모든 비디오)
-        videos = []
-        for video_num in sorted(all_video_ids.keys()):
-            for size in REQUIRED_SIZES:
-                videos.append({"video_id": all_video_ids[video_num][size]})
-                        # ✅ 대표 비디오 썸네일 준비 (inline creative의 video_data에 필요)
-        rep_video_id = videos[0]["video_id"]
-        rep_thumb_url = None
+    ads_created = []
+    errors = []
 
+    # ✅ IG actor id (있으면 Identity에 Instagram Account가 붙음)
+    ig_actor_id = (settings.get("instagram_actor_id") or st.session_state.get("ig_actor_id_from_page") or "").strip()
+
+    for video_num in sorted(all_video_ids.keys()):
         try:
-            st.info("🖼️ 대표 비디오 썸네일 생성/업로드 중...")
-            # Graph에 올라간 비디오에서 썸네일 URL을 직접 얻는 게 가장 간단/안전
-            rep_video_obj = AdVideo(rep_video_id).api_get(fields=["thumbnails"])
-            thumbs = rep_video_obj.get("thumbnails", {}).get("data", []) if rep_video_obj else []
-            if thumbs:
-                # 보통 첫 번째가 기본 썸네일
-                rep_thumb_url = thumbs[0].get("uri") or thumbs[0].get("url")
-        except Exception as e:
-            logger.warning(f"대표 비디오 썸네일 조회 실패: {e}")
+            # 3사이즈 video_id만 이 그룹에 포함
+            videos = [{"video_id": all_video_ids[video_num][size]} for size in REQUIRED_SIZES]
 
-        if not rep_thumb_url:
-            st.warning("⚠️ 대표 비디오 썸네일 URL을 못 가져왔습니다. (image_url 필요)")
+            # Ad 이름: video166 기준 (prefix/suffix 적용)
+            ad_name = _build_ad_name(video_num)
 
+            # ✅ 텍스트: "빈 문자열"은 API에 안 올리도록 필터링
+            texts = []
+            for pt in (default_primary_texts or []):
+                pt = (pt or "").strip()
+                if pt:
+                    texts.append({"text": pt, "text_type": "primary_text"})
+            for hl in (default_headlines or []):
+                hl = (hl or "").strip()
+                if hl and hl.lower() != "new game":
+                    texts.append({"text": hl, "text_type": "headline"})
 
-        st.info(f"🎬 총 {len(videos)}개 비디오를 포함하는 Flexible Ad 생성 중...")
-
-        # Ad 이름
-        video_nums = sorted(all_video_ids.keys())
-        if len(video_nums) > 3:
-            ad_name = f"{_build_ad_name(video_nums[0])}_to_{video_nums[-1]}"
-        else:
-            ad_name = "_".join([_build_ad_name(vn) for vn in video_nums])
-
-        # Texts 배열 구성 (최대 5개 제한 고려)
-               # Texts 구성: 빈값 제거 + 타입별 최대 5개 제한
-        def _clean_text_pool(texts_list: list[str], *, max_items: int, drop_words=None) -> list[str]:
-            """Remove empty/whitespace entries and optionally drop specific words, then cap length."""
-            drop_words = set(w.lower() for w in (drop_words or []))
-            cleaned: list[str] = []
-            for t in (texts_list or []):
-                if t is None:
-                    continue
-                t = str(t).strip()
-                if not t:
-                    continue
-                if t.lower() in drop_words:
-                    continue
-                cleaned.append(t)
-            return cleaned[:max_items]
-
-        primary_pool = _clean_text_pool(default_primary_texts, max_items=5)
-        headline_pool = _clean_text_pool(default_headlines, max_items=5, drop_words=["new game"])
-
-        if not primary_pool:
-            raise RuntimeError("❌ Flexible Ad에는 최소 1개의 Primary Text가 필요합니다.")
-
-        texts = (
-            [{"text": t, "text_type": "primary_text"} for t in primary_pool] +
-            [{"text": t, "text_type": "headline"} for t in headline_pool]
-        )
-
-
-        # ✅ Flexible Ad는 /ads 생성 시점에 creative_asset_groups_spec를 "직접" 포함해야 함
-        ad_params = {
-            "name": ad_name,
-            "adset_id": adset_id,
-
-            # creative는 inline creative로 넣어야 함 (standalone creative_id attach 방식 ❌)
-                        # ✅ Flexible 요구사항: groups[0]의 첫 media(비디오/이미지)가
-            # creative.object_story_spec의 media와 반드시 일치해야 함
-                       "creative": {
-                "name": ad_name,
-                "object_story_spec": {
-                    "page_id": page_id,
-                    "video_data": {
-                        # ✅ groups[0].videos[0]과 동일해야 함
-                        "video_id": rep_video_id,
-
-                        # ✅ 필수: 썸네일 지정 (없으면 1443226 발생)
-                        **({"image_url": rep_thumb_url} if rep_thumb_url else {}),
-
-                        "call_to_action": {
-                            "type": default_cta,
-                            "value": {"link": final_store_url}
-                        },
-                    }
+            # ✅ group payload (texts가 비면 아예 키를 빼서 보냄)
+            group_payload = {
+                "videos": videos,
+                "call_to_action": {
+                    "type": default_cta,
+                    "value": {"link": final_store_url}
                 }
-            },
+            }
+            if texts:
+                group_payload["texts"] = texts
 
+            # ✅ inline creative: 첫 그룹의 첫 video_id와 동일하게 맞춤
+            inline_video_data = {
+                "video_id": videos[0]["video_id"],
+                "call_to_action": {
+                    "type": default_cta,
+                    "value": {"link": final_store_url}
+                },
+            }
 
-            # 🔥 핵심
-            "creative_asset_groups_spec": {
-                "groups": [{
-                    "videos": videos,
-                    "texts": texts,
-                    "call_to_action": {
-                        "type": default_cta,
-                        "value": {"link": final_store_url}
-                    }
-                }]
-            },
+            # ✅ 핵심: 썸네일 제공 (1443226 해결)
+            thumb_url = thumb_urls.get(video_num)
+            if thumb_url:
+                inline_video_data["image_url"] = thumb_url
+            else:
+                # thumb가 없으면 여기서 바로 실패시키는 게 오히려 디버깅 쉬움
+                raise RuntimeError("썸네일(image_url) 생성 실패: object_story_spec.video_data에 필요함")
 
-            "status": Ad.Status.active,
-        }
+            inline_object_story_spec = {"page_id": page_id, "video_data": inline_video_data}
+            if ig_actor_id:
+                inline_object_story_spec["instagram_actor_id"] = ig_actor_id
 
-        ad_response = account.create_ad(fields=[], params=ad_params)
-        ad_id = ad_response.get("id")
-        if not ad_id:
-            raise RuntimeError(f"Ad 생성 응답에 id가 없습니다: {ad_response}")
+            ad_params = {
+                "name": ad_name,
+                "adset_id": adset_id,
+                "creative": {
+                    "name": ad_name,
+                    "object_story_spec": inline_object_story_spec
+                },
+                "creative_asset_groups_spec": {
+                    "groups": [group_payload]
+                },
+                "status": Ad.Status.active,
+            }
 
-        st.success(f"✅ Flexible Ad 생성 완료: {ad_id}")
+            ad_response = account.create_ad(fields=[], params=ad_params)
+            ad_id = ad_response.get("id")
+            if not ad_id:
+                raise RuntimeError(f"Ad 생성 응답에 id가 없습니다: {ad_response}")
 
-        return {
-            "ads": [{
+            st.success(f"✅ Flexible Ad 생성 완료: {ad_name} / {ad_id}")
+            ads_created.append({
                 "name": ad_name,
                 "ad_id": ad_id,
-                # ✅ Flexible는 creative_id를 따로 보장 못 함 (원하면 read로 조회 가능)
                 "creative_id": None,
-                "video_groups": list(all_video_ids.keys()),
+                "video_groups": [video_num],
                 "total_videos": len(videos)
-            }],
-            "errors": [],
-            "total_created": 1
-        }
+            })
 
-    except Exception as e:
-        logger.error(f"❌ Flexible Ad 생성 실패: {e}")
-        import traceback
-        st.error(traceback.format_exc())
-        return {
-            "ads": [],
-            "errors": [str(e)],
-            "total_created": 0
-        }
+        except Exception as e:
+            errors.append(f"{video_num}: {e}")
+            st.error(f"❌ {video_num} Flexible Ad 생성 실패: {e}")
+
+    return {
+        "ads": ads_created,
+        "errors": errors,
+        "total_created": len(ads_created)
+    }
