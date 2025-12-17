@@ -155,52 +155,6 @@ def fetch_active_adsets_cached(account_id: str, campaign_id: str) -> list[dict]:
         logger.error(f"Error fetching adsets: {e}")
         return []
 
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_instagram_identity_options_cached(account_id: str) -> list[dict]:
-    """
-    Returns Instagram identity options that appear in Ads Manager Identity dropdown
-    for the given Ad Account (act_XXXX).
-
-    Output example:
-      [{"label": "Use Facebook Page", "instagram_actor_id": ""}, 
-       {"label": "@myig (123)", "instagram_actor_id": "123"}]
-    """
-    try:
-        # Access token (same pattern you used elsewhere)
-        if "facebook" in st.secrets:
-            token = st.secrets["facebook"].get("access_token", "").strip()
-        else:
-            token = st.secrets.get("access_token", "").strip()
-
-        act = f"act_{account_id}" if not str(account_id).startswith("act_") else str(account_id)
-
-        # Marketing API: list IG accounts available to this ad account
-        url = f"https://graph.facebook.com/v24.0/{act}/instagram_accounts"
-        params = {
-            "fields": "id,username",
-            "limit": 200,
-            "access_token": token,
-        }
-        r = requests.get(url, params=params, timeout=60)
-        j = r.json()
-
-        data = j.get("data", []) if isinstance(j, dict) else []
-        opts = [{"label": "Use Facebook Page", "instagram_actor_id": ""}]
-
-        for row in data:
-            ig_id = str(row.get("id", "")).strip()
-            username = (row.get("username") or "").strip()
-            if not ig_id:
-                continue
-            label = f"@{username} ({ig_id})" if username else f"{ig_id}"
-            opts.append({"label": label, "instagram_actor_id": ig_id})
-
-        return opts
-    except Exception as e:
-        logger.warning(f"Could not fetch instagram identity options: {e}")
-        # 최소한 Use Facebook Page는 노출
-        return [{"label": "Use Facebook Page", "instagram_actor_id": ""}]
-
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_latest_ad_creative_defaults(adset_id: str) -> dict:
     """
@@ -832,37 +786,6 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             key=f"cta_{idx}"
         )
 
-        # =========================================================
-        # Identity (Instagram account dropdown like Ads Manager)
-        # =========================================================
-        st.markdown("**Identity**")
-
-        ig_opts = fetch_instagram_identity_options_cached(account_id)
-        ig_labels = [o["label"] for o in ig_opts]
-
-        ig_sel_key = f"ig_identity_sel_{idx}"
-
-        # selectbox는 key가 있으면 session_state 값을 자동 사용하므로,
-        # "값이 없을 때만" 기본값을 주입하는 방식이 제일 안전함
-        if ig_sel_key not in st.session_state:
-            st.session_state[ig_sel_key] = "Use Facebook Page"
-
-        # 혹시 옵션이 바뀌어서 기존 값이 사라졌다면 fallback
-        if st.session_state[ig_sel_key] not in ig_labels:
-            st.session_state[ig_sel_key] = "Use Facebook Page"
-
-        selected_ig_label = st.selectbox(
-            "Instagram account",
-            options=ig_labels,
-            key=ig_sel_key,
-            help="Ads Manager > Identity 드롭다운(삼각형) 선택지와 동일 개념"
-        )
-
-        selected_ig_actor_id = next(
-            (o["instagram_actor_id"] for o in ig_opts if o["label"] == selected_ig_label),
-            ""
-        )
-
         # ✅ 처음 렌더링될 때만 default ON 주입 (이후엔 유저 선택 유지)
         _multi_key = f"multi_ads_optin_{idx}"
         if _multi_key not in st.session_state:
@@ -903,7 +826,6 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "use_suffix": use_suffix,
             "suffix_text": suffix_text.strip() if use_suffix else "",
             "multi_advertiser_ads_opt_in": bool(multi_advertiser_ads_opt_in),
-            "instagram_actor_id": selected_ig_actor_id,  # ✅ Identity dropdown 선택 결과
         }
 
 
