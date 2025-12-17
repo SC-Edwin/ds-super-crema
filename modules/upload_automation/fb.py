@@ -105,6 +105,52 @@ def fetch_active_adsets_cached(account_id: str, campaign_id: str) -> list[dict]:
         logger.error(f"Error fetching adsets: {e}")
         return []
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_instagram_identity_options_cached(account_id: str) -> list[dict]:
+    """
+    Returns Instagram identity options that appear in Ads Manager Identity dropdown
+    for the given Ad Account (act_XXXX).
+
+    Output example:
+      [{"label": "Use Facebook Page", "instagram_actor_id": ""}, 
+       {"label": "@myig (123)", "instagram_actor_id": "123"}]
+    """
+    try:
+        # Access token (same pattern you used elsewhere)
+        if "facebook" in st.secrets:
+            token = st.secrets["facebook"].get("access_token", "").strip()
+        else:
+            token = st.secrets.get("access_token", "").strip()
+
+        act = f"act_{account_id}" if not str(account_id).startswith("act_") else str(account_id)
+
+        # Marketing API: list IG accounts available to this ad account
+        url = f"https://graph.facebook.com/v24.0/{act}/instagram_accounts"
+        params = {
+            "fields": "id,username",
+            "limit": 200,
+            "access_token": token,
+        }
+        r = requests.get(url, params=params, timeout=60)
+        j = r.json()
+
+        data = j.get("data", []) if isinstance(j, dict) else []
+        opts = [{"label": "Use Facebook Page", "instagram_actor_id": ""}]
+
+        for row in data:
+            ig_id = str(row.get("id", "")).strip()
+            username = (row.get("username") or "").strip()
+            if not ig_id:
+                continue
+            label = f"@{username} ({ig_id})" if username else f"{ig_id}"
+            opts.append({"label": label, "instagram_actor_id": ig_id})
+
+        return opts
+    except Exception as e:
+        logger.warning(f"Could not fetch instagram identity options: {e}")
+        # 최소한 Use Facebook Page는 노출
+        return [{"label": "Use Facebook Page", "instagram_actor_id": ""}]
+
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_latest_ad_creative_defaults(adset_id: str) -> dict:
     """
@@ -736,6 +782,37 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             key=f"cta_{idx}"
         )
 
+        # =========================================================
+        # Identity (Instagram account dropdown like Ads Manager)
+        # =========================================================
+        st.markdown("**Identity**")
+
+        ig_opts = fetch_instagram_identity_options_cached(account_id)
+        ig_labels = [o["label"] for o in ig_opts]
+
+        ig_sel_key = f"ig_identity_sel_{idx}"
+
+        # selectbox는 key가 있으면 session_state 값을 자동 사용하므로,
+        # "값이 없을 때만" 기본값을 주입하는 방식이 제일 안전함
+        if ig_sel_key not in st.session_state:
+            st.session_state[ig_sel_key] = "Use Facebook Page"
+
+        # 혹시 옵션이 바뀌어서 기존 값이 사라졌다면 fallback
+        if st.session_state[ig_sel_key] not in ig_labels:
+            st.session_state[ig_sel_key] = "Use Facebook Page"
+
+        selected_ig_label = st.selectbox(
+            "Instagram account",
+            options=ig_labels,
+            key=ig_sel_key,
+            help="Ads Manager > Identity 드롭다운(삼각형) 선택지와 동일 개념"
+        )
+
+        selected_ig_actor_id = next(
+            (o["instagram_actor_id"] for o in ig_opts if o["label"] == selected_ig_label),
+            ""
+        )
+
         # ✅ 처음 렌더링될 때만 default ON 주입 (이후엔 유저 선택 유지)
         _multi_key = f"multi_ads_optin_{idx}"
         if _multi_key not in st.session_state:
@@ -776,6 +853,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "use_suffix": use_suffix,
             "suffix_text": suffix_text.strip() if use_suffix else "",
             "multi_advertiser_ads_opt_in": bool(multi_advertiser_ads_opt_in),
+            "instagram_actor_id": selected_ig_actor_id,  # ✅ Identity dropdown 선택 결과
         }
 
 
@@ -815,6 +893,9 @@ def upload_to_facebook(
         st.session_state["ig_actor_id_from_page"] = ig_actor_id_from_page
 
     settings = dict(settings or {})
+    
+    # ✅ UI 선택값이 최우선: settings["instagram_actor_id"]가 있으면 그걸 사용
+    # (validate_page_binding 결과로 자동 override 하지 않음)
     
     # ✅ Marketer Mode: 선택된 AdSet 확인
     selected_adset_id = settings.get("adset_id")
@@ -1527,34 +1608,32 @@ def upload_videos_to_library_and_create_single_ads(
                     multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", True))
                     multi_enroll_status = "OPT_IN" if multi_opt_in else "OPT_OUT"
 
-                    # ✅ IG actor id 가져오기
-                    ig_actor_id = (settings.get("instagram_actor_id") or 
-                                st.session_state.get("ig_actor_id_from_page") or "").strip()
+                    # ✅ IG actor id: Streamlit에서 선택된 값 사용
+                    ig_actor_id = (settings.get("instagram_actor_id") or "").strip()
 
-                    # ✅ Object Story Spec 구성 (Instagram 연결 포함)
+                    # ✅ Object Story Spec 구성
                     object_story_spec = {
-                        "page_id": page_id,
-                        "video_data": video_data
+                        "page_id": str(page_id),
+                        "video_data": video_data,
                     }
-                    
-                    # ✅ Instagram account 연결 (Use Facebook Page)
+
+                    # ✅ IG를 선택한 경우에만 instagram_actor_id를 넣는다
                     if ig_actor_id:
                         object_story_spec["instagram_actor_id"] = ig_actor_id
-                        logger.info(f"    - ✅ Instagram account 연결: {ig_actor_id}")
 
                     creative_params = {
-                    "name": ad_name,
-                    "actor_id": str(page_id),  # ✅ Facebook Page identity
-                    "object_story_spec": object_story_spec,
-                    "contextual_multi_ads": {
-                        "enroll_status": multi_enroll_status
+                        "name": ad_name,
+                        "actor_id": str(page_id),  # Facebook Page identity
+                        "object_story_spec": object_story_spec,
+                        "contextual_multi_ads": {"enroll_status": multi_enroll_status},
                     }
-                }
-                    
-                    # ✅ Instagram account를 Creative 레벨에 추가
+
+                    # ✅ Creative 레벨에서도 IG를 선택한 경우에만 추가
                     if ig_actor_id:
                         creative_params["instagram_actor_id"] = ig_actor_id
-                        logger.info(f"    - ✅ Creative에 Instagram 연결: {ig_actor_id}")
+                        logger.info(f"    - ✅ Creative IG identity: {ig_actor_id}")
+                    else:
+                        logger.info("    - ℹ️ IG identity not set -> Use Facebook Page")
                     
                     # Creative 생성
                     logger.info(f"    - 🔨 Creative 생성 API 호출 중...")
@@ -2186,14 +2265,13 @@ def _upload_dynamic_single_video_ads(
     ads_created = []
     errors = []
 
-    # ✅ IG actor id 가져오기 (for 루프 밖에서 한 번만)
-    ig_actor_id = (settings.get("instagram_actor_id") or 
-                  st.session_state.get("ig_actor_id_from_page") or "").strip()
+    # ✅ IG actor id: Streamlit에서 선택된 값 사용
+    ig_actor_id = (settings.get("instagram_actor_id") or "").strip()
     
     if ig_actor_id:
         st.info(f"✅ Instagram account 연결됨: {ig_actor_id}")
     else:
-        st.warning("⚠️ Instagram account 없음 - Facebook Page만 사용")
+        st.info("ℹ️ IG identity not set -> Use Facebook Page")
 
     for video_num in sorted(all_video_ids.keys()):
         try:
