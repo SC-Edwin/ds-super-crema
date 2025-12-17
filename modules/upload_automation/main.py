@@ -197,24 +197,6 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
     """
     st.title(title)
     
-    # --- [MARKETER ONLY] Unity Config Debug (removed Add New Game sidebar) ---
-    if is_marketer:
-        with st.expander("🔍 Unity Config Debug (XP HERO)", expanded=False):
-            try:
-                st.write("**unity_cfg.game_ids:**")
-                st.json(dict(uni_ops.unity_cfg.get("game_ids", {})))
-                
-                st.write("**Test get_unity_app_id('XP HERO', 'aos'):**")
-                app_id = uni_ops.get_unity_app_id("XP HERO", "aos")
-                st.success(f"✅ App ID: {app_id}")
-                
-                st.write("**Test get_unity_campaign_set_id('XP HERO', 'aos'):**")
-                cs_id = uni_ops.get_unity_campaign_set_id("XP HERO", "aos")
-                st.success(f"✅ Campaign Set ID: {cs_id}")
-                
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
-
     # --- LOAD GAMES FROM DB ---
     GAMES = game_manager.get_all_game_names(include_custom=is_marketer)
 
