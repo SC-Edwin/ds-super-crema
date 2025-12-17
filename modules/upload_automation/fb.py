@@ -566,70 +566,70 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
                 else:
                     defaults = st.session_state.get(f"mimic_data_{selected_ad['id']}_{idx}", {})
 
-    # ====================================================================
-    # PREPARE DEFAULT VALUES (rest stays the same)
-    # ====================================================================
-    val_text = ""
-    val_headline = ""
-    val_cta_idx = 0
-    source_msg = ""
-    h_lines = []
-    p_texts = []
+        # ====================================================================
+        # PREPARE DEFAULT VALUES (rest stays the same)
+        # ====================================================================
+        val_text = ""
+        val_headline = ""
+        val_cta_idx = 0
+        source_msg = ""
+        h_lines = []
+        p_texts = []
 
-    if defaults:
-        p_texts = defaults.get("primary_texts", [])
-        val_text = "\n\n".join(p_texts) if p_texts else ""
-        
-        h_lines = defaults.get("headlines", [])
-        val_headline = h_lines[0] if h_lines else ""
-        
-        # [NEW] Get Store URL
-        val_store_url = defaults.get("store_url", "")
-        
-        fetched_cta = defaults.get("call_to_action", "INSTALL_MOBILE_APP")
-        if fetched_cta in FB_CTA_OPTIONS:
-            val_cta_idx = FB_CTA_OPTIONS.index(fetched_cta)
-        
-        source_msg = f"✨ Loaded from: **{defaults.get('source_ad_name')}**"
-        
-        # Display ad_formats if available
-        ad_formats = defaults.get('ad_formats', [])
-        if ad_formats:
-            source_msg += f"\n\n📋 **ad_formats**: `{ad_formats}`"
+        if defaults:
+            p_texts = defaults.get("primary_texts", [])
+            val_text = "\n\n".join(p_texts) if p_texts else ""
             
-            # Display full asset_feed_spec in expander for debugging
-            # if defaults.get('full_asset_feed_spec'):
-            #     with st.expander("🔍 View Full asset_feed_spec (Debug)", expanded=False):
-            #         spec = defaults.get('full_asset_feed_spec')
-            #         # Ensure it's a dict before passing to st.json
-            #         if isinstance(spec, dict):
-            #             st.json(spec)
-            #         else:
-            #             st.code(str(spec), language='text')
+            h_lines = defaults.get("headlines", [])
+            val_headline = h_lines[0] if h_lines else ""
+            
+            # [NEW] Get Store URL
+            val_store_url = defaults.get("store_url", "")
+            
+            fetched_cta = defaults.get("call_to_action", "INSTALL_MOBILE_APP")
+            if fetched_cta in FB_CTA_OPTIONS:
+                val_cta_idx = FB_CTA_OPTIONS.index(fetched_cta)
+            
+            source_msg = f"✨ Loaded from: **{defaults.get('source_ad_name')}**"
+            
+            # Display ad_formats if available
+            ad_formats = defaults.get('ad_formats', [])
+            if ad_formats:
+                source_msg += f"\n\n📋 **ad_formats**: `{ad_formats}`"
+                
+                # Display full asset_feed_spec in expander for debugging
+                # if defaults.get('full_asset_feed_spec'):
+                #     with st.expander("🔍 View Full asset_feed_spec (Debug)", expanded=False):
+                #         spec = defaults.get('full_asset_feed_spec')
+                #         # Ensure it's a dict before passing to st.json
+                #         if isinstance(spec, dict):
+                #             st.json(spec)
+                #         else:
+                #             st.code(str(spec), language='text')
 
-    # 2. Ad Setup
-    st.caption("Ad Setup")
-    
-    # Ad Format & Ad Name
-    col_d1, col_d2 = st.columns(2)
-    dco_aspect_ratio = col_d1.selectbox(
-        "Ad Format", 
-        ["단일 영상", "다이내믹-single video", "다이내믹-1x1", "다이내믹-9x16", "다이내믹-16:9"], 
-        key=f"dco_r_{idx}"
-    )
-    
-    # Ad Name은 다이내믹일 때만 표시
-    if dco_aspect_ratio.startswith("다이내믹"):
-        ad_name_input = col_d2.text_input("Ad Name", key=f"dco_n_{idx}")
-    else:
-        # 단일 영상일 때는 Ad Name 숨김 (기본값 사용)
-        ad_name_input = ""
-        col_d2.empty()  # 빈 공간 유지
-    st.markdown("**Ad Name Customization** (Optional)")
-    
-    col_pre, col_suf = st.columns(2)
-    
-    with col_pre:
+        # 2. Ad Setup
+        st.caption("Ad Setup")
+        
+        # Ad Format & Ad Name
+        col_d1, col_d2 = st.columns(2)
+        dco_aspect_ratio = col_d1.selectbox(
+            "Ad Format", 
+            ["단일 영상", "다이내믹-single video", "다이내믹-1x1", "다이내믹-9x16", "다이내믹-16:9"], 
+            key=f"dco_r_{idx}"
+        )
+        
+        # Ad Name은 다이내믹일 때만 표시
+        if dco_aspect_ratio.startswith("다이내믹"):
+            ad_name_input = col_d2.text_input("Ad Name", key=f"dco_n_{idx}")
+        else:
+            # 단일 영상일 때는 Ad Name 숨김 (기본값 사용)
+            ad_name_input = ""
+            col_d2.empty()  # 빈 공간 유지
+        st.markdown("**Ad Name Customization** (Optional)")
+        
+        col_pre, col_suf = st.columns(2)
+        
+        with col_pre:
             use_prefix = st.checkbox("Add Prefix", key=f"use_prefix_{idx}")
             if use_prefix:
                 prefix_text = st.text_input(
@@ -640,166 +640,166 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
                 )
             else:
                 prefix_text = ""
-    
-    with col_suf:
-        use_suffix = st.checkbox("Add Suffix", key=f"use_suffix_{idx}")
-        if use_suffix:
-            suffix_text = st.text_input(
-                "Suffix", 
-                key=f"suffix_text_{idx}",
-                placeholder="e.g., a",
-                help="Result: video164_a"
-            )
-        else:
-            suffix_text = ""
-    
-    # Preview
-    if use_prefix or use_suffix:
-        preview_name = ""
-        if use_prefix and prefix_text:
-            preview_name = f"{prefix_text}_"
-        preview_name += "videoxxx"
-        if use_suffix and suffix_text:
-            preview_name += f"_{suffix_text}"
-        st.caption(f"📝 Preview: `{preview_name}`")
+        
+        with col_suf:
+            use_suffix = st.checkbox("Add Suffix", key=f"use_suffix_{idx}")
+            if use_suffix:
+                suffix_text = st.text_input(
+                    "Suffix", 
+                    key=f"suffix_text_{idx}",
+                    placeholder="e.g., a",
+                    help="Result: video164_a"
+                )
+            else:
+                suffix_text = ""
+        
+        # Preview
+        if use_prefix or use_suffix:
+            preview_name = ""
+            if use_prefix and prefix_text:
+                preview_name = f"{prefix_text}_"
+            preview_name += "videoxxx"
+            if use_suffix and suffix_text:
+                preview_name += f"_{suffix_text}"
+            st.caption(f"📝 Preview: `{preview_name}`")
 
-    st.divider()
+        st.divider()
 
-    # 3. Ad Creative Inputs
-    col_head, col_info = st.columns([1, 2])
-    col_head.caption("Creative Elements")
-    if source_msg:
-        col_info.info(source_msg, icon="🤖")
+        # 3. Ad Creative Inputs
+        col_head, col_info = st.columns([1, 2])
+        col_head.caption("Creative Elements")
+        if source_msg:
+            col_info.info(source_msg, icon="🤖")
 
-    # ✅ Primary Text - 태그 형태로 개별 관리
-    st.markdown("**Primary Text**")
-    
-    # Initialize session state for primary texts
-    primary_texts_key = f"primary_texts_{idx}"
-    if primary_texts_key not in st.session_state:
-        # Load from defaults or existing settings
-        if p_texts:
-            st.session_state[primary_texts_key] = p_texts.copy()
-        elif defaults:
-            # Try to split existing text
-            existing = defaults.get("primary_texts", [])
-            if existing:
-                st.session_state[primary_texts_key] = existing.copy()
+        # ✅ Primary Text - 태그 형태로 개별 관리
+        st.markdown("**Primary Text**")
+        
+        # Initialize session state for primary texts
+        primary_texts_key = f"primary_texts_{idx}"
+        if primary_texts_key not in st.session_state:
+            # Load from defaults or existing settings
+            if p_texts:
+                st.session_state[primary_texts_key] = p_texts.copy()
+            elif defaults:
+                # Try to split existing text
+                existing = defaults.get("primary_texts", [])
+                if existing:
+                    st.session_state[primary_texts_key] = existing.copy()
+                else:
+                    st.session_state[primary_texts_key] = [""]
             else:
                 st.session_state[primary_texts_key] = [""]
+        
+        primary_texts_list = st.session_state[primary_texts_key]
+        
+        # Display each primary text as editable tag
+        for i, text in enumerate(primary_texts_list):
+            col_text, col_del = st.columns([10, 1])
+            with col_text:
+                updated_text = st.text_input(
+                    f"Primary Text {i+1}",
+                    value=text,
+                    key=f"pt_{idx}_{i}",
+                    label_visibility="collapsed",
+                    placeholder="Tell people what your ad is about" if not text else None
+                )
+                primary_texts_list[i] = updated_text
+            with col_del:
+                if st.button("❌", key=f"pt_del_{idx}_{i}", help="Delete this text"):
+                    primary_texts_list.pop(i)
+                    st.session_state[primary_texts_key] = primary_texts_list.copy()
+                    st.rerun()
+        
+        # Add new primary text button
+        if st.button("➕ Add Primary Text", key=f"pt_add_{idx}"):
+            primary_texts_list.append("")
+            st.session_state[primary_texts_key] = primary_texts_list.copy()
+            st.rerun()
+        
+        # Join primary texts with double newline for backward compatibility
+        primary_text = "\n\n".join([t.strip() for t in primary_texts_list if t.strip()])
+
+        # ✅ Headlines - 태그 형태로 개별 관리
+        st.markdown("**Headlines**")
+        
+        headlines_key = f"headlines_{idx}"
+
+        # 템플릿이 바뀌었을 때만 defaults로 리셋 (Add/Del/수정 중에는 덮어쓰지 않음)
+        template_sig_key = f"headline_template_sig_{idx}"
+        current_template_sig = (
+            st.session_state.get(f"template_source_{idx}", ""),
+            tuple(h_lines or []),
+            defaults.get("source_ad_name") if defaults else None,
+        )
+
+        if st.session_state.get(template_sig_key) != current_template_sig:
+            # 템플릿 변경 -> 템플릿 헤드라인으로 초기화
+            if h_lines:
+                st.session_state[headlines_key] = h_lines.copy()
+            elif defaults and defaults.get("headlines"):
+                st.session_state[headlines_key] = defaults["headlines"].copy()
+            else:
+                st.session_state[headlines_key] = [""]
+            st.session_state[template_sig_key] = current_template_sig
         else:
-            st.session_state[primary_texts_key] = [""]
-    
-    primary_texts_list = st.session_state[primary_texts_key]
-    
-    # Display each primary text as editable tag
-    for i, text in enumerate(primary_texts_list):
-        col_text, col_del = st.columns([10, 1])
-        with col_text:
-            updated_text = st.text_input(
-                f"Primary Text {i+1}",
-                value=text,
-                key=f"pt_{idx}_{i}",
-                label_visibility="collapsed",
-                placeholder="Tell people what your ad is about" if not text else None
-            )
-            primary_texts_list[i] = updated_text
-        with col_del:
-            if st.button("❌", key=f"pt_del_{idx}_{i}", help="Delete this text"):
-                primary_texts_list.pop(i)
-                st.session_state[primary_texts_key] = primary_texts_list.copy()
-                st.rerun()
-    
-    # Add new primary text button
-    if st.button("➕ Add Primary Text", key=f"pt_add_{idx}"):
-        primary_texts_list.append("")
-        st.session_state[primary_texts_key] = primary_texts_list.copy()
-        st.rerun()
-    
-    # Join primary texts with double newline for backward compatibility
-    primary_text = "\n\n".join([t.strip() for t in primary_texts_list if t.strip()])
+            # 일반 리런에서는 기존값 유지
+            if headlines_key not in st.session_state:
+                st.session_state[headlines_key] = [""]
+        
+        headlines_list = st.session_state[headlines_key]
+        
+        # Display each headline as editable tag
+        for i, headline_text in enumerate(headlines_list):
+            col_head, col_del = st.columns([10, 1])
+            with col_head:
+                updated_headline = st.text_input(
+                    f"Headline {i+1}",
+                    value=headline_text,
+                    key=f"hl_{idx}_{i}",
+                    label_visibility="collapsed",
+                    placeholder="Write a short headline" if not headline_text else None
+                )
+                headlines_list[i] = updated_headline
+            with col_del:
+                if st.button("❌", key=f"hl_del_{idx}_{i}", help="Delete this headline"):
+                    headlines_list.pop(i)
+                    st.session_state[headlines_key] = headlines_list.copy()
+                    st.rerun()
+        
+        # Add new headline button
+        if st.button("➕ Add Headline", key=f"hl_add_{idx}"):
+            st.session_state[headlines_key].append("")
+            st.rerun()
+        
+        # ✅ 루프 후 최신 값으로 업데이트
+        st.session_state[headlines_key] = headlines_list
+        
+        # Join headlines with newline for backward compatibility
+        headline = "\n".join([h.strip() for h in headlines_list if h.strip()])
 
-    # ✅ Headlines - 태그 형태로 개별 관리
-    st.markdown("**Headlines**")
-    
-    headlines_key = f"headlines_{idx}"
+        # CTA
+        call_to_action = st.selectbox(
+            "Call to Action", 
+            FB_CTA_OPTIONS, 
+            index=val_cta_idx,
+            key=f"cta_{idx}"
+        )
 
-    # 템플릿이 바뀌었을 때만 defaults로 리셋 (Add/Del/수정 중에는 덮어쓰지 않음)
-    template_sig_key = f"headline_template_sig_{idx}"
-    current_template_sig = (
-        st.session_state.get(f"template_source_{idx}", ""),
-        tuple(h_lines or []),
-        defaults.get("source_ad_name") if defaults else None,
-    )
+        # ✅ 처음 렌더링될 때만 default ON 주입 (이후엔 유저 선택 유지)
+        _multi_key = f"multi_ads_optin_{idx}"
+        if _multi_key not in st.session_state:
+            st.session_state[_multi_key] = True  # default = ON
 
-    if st.session_state.get(template_sig_key) != current_template_sig:
-        # 템플릿 변경 -> 템플릿 헤드라인으로 초기화
-        if h_lines:
-            st.session_state[headlines_key] = h_lines.copy()
-        elif defaults and defaults.get("headlines"):
-            st.session_state[headlines_key] = defaults["headlines"].copy()
-        else:
-            st.session_state[headlines_key] = [""]
-        st.session_state[template_sig_key] = current_template_sig
-    else:
-        # 일반 리런에서는 기존값 유지
-        if headlines_key not in st.session_state:
-            st.session_state[headlines_key] = [""]
-    
-    headlines_list = st.session_state[headlines_key]
-    
-    # Display each headline as editable tag
-    for i, headline_text in enumerate(headlines_list):
-        col_head, col_del = st.columns([10, 1])
-        with col_head:
-            updated_headline = st.text_input(
-                f"Headline {i+1}",
-                value=headline_text,
-                key=f"hl_{idx}_{i}",
-                label_visibility="collapsed",
-                placeholder="Write a short headline" if not headline_text else None
-            )
-            headlines_list[i] = updated_headline
-        with col_del:
-            if st.button("❌", key=f"hl_del_{idx}_{i}", help="Delete this headline"):
-                headlines_list.pop(i)
-                st.session_state[headlines_key] = headlines_list.copy()
-                st.rerun()
-    
-    # Add new headline button
-    if st.button("➕ Add Headline", key=f"hl_add_{idx}"):
-        st.session_state[headlines_key].append("")
-        st.rerun()
-    
-    # ✅ 루프 후 최신 값으로 업데이트
-    st.session_state[headlines_key] = headlines_list
-    
-    # Join headlines with newline for backward compatibility
-    headline = "\n".join([h.strip() for h in headlines_list if h.strip()])
+        multi_advertiser_ads_opt_in = st.checkbox(
+            "Multi-advertiser ads 사용하기 (같은 유닛에 다른 광고와 함께 노출될 수 있음)",
+            key=_multi_key,
+        )
 
-    # CTA
-    call_to_action = st.selectbox(
-        "Call to Action", 
-        FB_CTA_OPTIONS, 
-        index=val_cta_idx,
-        key=f"cta_{idx}"
-    )
+        # Final Save
+        # ✅ UI에서 관리하는 "리스트"를 그대로 저장 (빈값 포함 허용)
+        _clean_keep_empty = lambda xs: [x if x is not None else "" for x in (xs or [])]
 
-    # ✅ 처음 렌더링될 때만 default ON 주입 (이후엔 유저 선택 유지)
-    _multi_key = f"multi_ads_optin_{idx}"
-    if _multi_key not in st.session_state:
-        st.session_state[_multi_key] = True  # default = ON
-
-    multi_advertiser_ads_opt_in = st.checkbox(
-        "Multi-advertiser ads 사용하기 (같은 유닛에 다른 광고와 함께 노출될 수 있음)",
-        key=_multi_key,
-    )
-
-    # Final Save
-    # ✅ UI에서 관리하는 "리스트"를 그대로 저장 (빈값 포함 허용)
-    _clean_keep_empty = lambda xs: [x if x is not None else "" for x in (xs or [])]
-
-    st.session_state.settings[game] = {
+        st.session_state.settings[game] = {
             "campaign_id": sel_c_id,
             "adset_id": sel_a_id,
             "creative_type": "Dynamic Creative",
