@@ -670,26 +670,33 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         # Join primary texts with double newline for backward compatibility
         primary_text = "\n\n".join([t.strip() for t in primary_texts_list if t.strip()])
 
-        # ✅ Headlines - 태그 형태로 개별 관리
+       # ✅ Headlines - 태그 형태로 개별 관리
         st.markdown("**Headlines**")
-        
-        # Initialize session state for headlines
+
         headlines_key = f"headlines_{idx}"
 
-        # ✅ Force reload if template changed or if current values don't match defaults
-        force_reload = False
-        if h_lines != st.session_state.get(headlines_key, []):
-            force_reload = True
+        # 템플릿이 바뀌었을 때만 defaults로 리셋 (Add/Del/수정 중에는 덮어쓰지 않음)
+        template_sig_key = f"headline_template_sig_{idx}"
+        current_template_sig = (
+            st.session_state.get(f"template_source_{idx}", ""),
+            tuple(h_lines or []),
+            defaults.get("source_ad_name") if defaults else None,
+        )
 
-        if headlines_key not in st.session_state or force_reload:
-            # Load from defaults
+        if st.session_state.get(template_sig_key) != current_template_sig:
+            # 템플릿 변경 -> 템플릿 헤드라인으로 초기화
             if h_lines:
                 st.session_state[headlines_key] = h_lines.copy()
             elif defaults and defaults.get("headlines"):
                 st.session_state[headlines_key] = defaults["headlines"].copy()
             else:
-                st.session_state[headlines_key] = [""]  # Empty default
-        
+                st.session_state[headlines_key] = [""]
+            st.session_state[template_sig_key] = current_template_sig
+        else:           
+            # 일반 리런에서는 기존값 유지
+            if headlines_key not in st.session_state:
+                st.session_state[headlines_key] = [""]
+
         headlines_list = st.session_state[headlines_key]
         
         # Display each headline as editable tag
@@ -707,26 +714,37 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             with col_del:
                 if st.button("❌", key=f"hl_del_{idx}_{i}", help="Delete this headline"):
                     headlines_list.pop(i)
-                    st.session_state[headlines_key] = headlines_list
+                    st.session_state[headlines_key] = headlines_list.copy()
                     st.rerun()
         
         # Add new headline button
         if st.button("➕ Add Headline", key=f"hl_add_{idx}"):
-            headlines_list.append("")
-            st.session_state[headlines_key] = headlines_list
+            st.session_state[headlines_key].append("")
             st.rerun()
         
+        # ✅ 루프 후 최신 값으로 업데이트
+        st.session_state[headlines_key] = headlines_list
+
         # Join headlines with newline for backward compatibility
         headline = "\n".join([h.strip() for h in headlines_list if h.strip()])
 
         # CTA
         call_to_action = st.selectbox(
-            "Call to Action", 
-            FB_CTA_OPTIONS, 
+            "Call to Action",
+            FB_CTA_OPTIONS,
             index=val_cta_idx,
             key=f"cta_{idx}"
         )
 
+        # Multi-advertiser ads (contextual_multi_ads)
+        # - ON  => OPT_IN
+        # - OFF => OPT_OUT
+        multi_adv_ads_opt_in = st.checkbox(
+            "Enable Multi-advertiser ads (contextual_multi_ads)",
+            value=False,
+            key=f"multi_adv_ads_{idx}",
+            help="This is NOT Advantage+ Creative. It allows your ad to appear with others in the same ad unit."
+)
         # Final Save
         # ✅ UI에서 관리하는 "리스트"를 그대로 저장 (빈값 포함 허용)
         _clean_keep_empty = lambda xs: [x if x is not None else "" for x in (xs or [])]
@@ -756,6 +774,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "prefix_text": prefix_text.strip() if use_prefix else "",
             "use_suffix": use_suffix,
             "suffix_text": suffix_text.strip() if use_suffix else "",
+            "multi_advertiser_ads_opt_in": bool(multi_adv_ads_opt_in),
         }
 
 
@@ -797,10 +816,6 @@ def upload_to_facebook(
         st.session_state["ig_actor_id_from_page"] = ig_actor_id_from_page
 
     settings = dict(settings or {})
-    
-    # ✅ 업로드 함수들에서 Identity에 IG Account 붙일 수 있도록 settings에 주입
-    if st.session_state.get("ig_actor_id_from_page"):
-        settings["instagram_actor_id"] = st.session_state["ig_actor_id_from_page"]
     
     # ✅ Marketer Mode: 선택된 AdSet 확인
     selected_adset_id = settings.get("adset_id")
@@ -1876,25 +1891,31 @@ def _upload_dynamic_single_video_ads(
     st.info("📋 AdSet에서 템플릿 정보 가져오는 중...")
     template = fetch_latest_ad_creative_defaults(adset_id)
     
-    # Primary Texts - settings의 primary_texts 리스트 우선 사용
+    # Primary Texts
     default_primary_texts = []
-    if settings.get("primary_texts"):
-        default_primary_texts = settings["primary_texts"]
-    elif template.get("primary_texts"):
-        default_primary_texts = template["primary_texts"]
+    if template.get("primary_texts"):
+        default_primary_texts = [pt.strip() for pt in template["primary_texts"] if pt.strip()]
     elif settings.get("primary_text"):
         text = settings["primary_text"].strip()
         default_primary_texts = [t.strip() for t in text.split('\n\n') if t.strip()]
+    
 
-    # Headlines - settings의 headlines 리스트 우선 사용
+    # Headlines
     default_headlines = []
-    if settings.get("headlines"):
-        default_headlines = settings["headlines"]
-    elif template.get("headlines"):
-        default_headlines = template["headlines"]
+    if template.get("headlines"):
+        # "New Game" 제외하고 유효한 headline만 수집
+        for h in template["headlines"]:
+            cleaned = h.strip()
+            if cleaned and cleaned.lower() != "new game":
+                default_headlines.append(cleaned)
     elif settings.get("headline"):
         headline = settings["headline"].strip()
         default_headlines = [h.strip() for h in headline.split('\n') if h.strip()]
+
+    # ✅ 검증 전에 디버그 출력
+    st.write(f"🔍 DEBUG: Template headlines: {template.get('headlines', [])}")
+    st.write(f"🔍 DEBUG: Filtered headlines: {default_headlines}")
+    st.write(f"🔍 DEBUG: Settings headline: {settings.get('headline', 'N/A')}")
 
     # ✅ 텍스트는 "없어도" 진행 (빈칸 업로드 허용)
     # - 단, 실제 API에는 빈 문자열은 넣지 않도록 아래에서 필터링함
@@ -1973,6 +1994,8 @@ def _upload_dynamic_single_video_ads(
         return None
     
     video_groups = {}
+    unrecognized_files = []  # ✅ 인식되지 않은 파일 추적
+    
     for u in uploaded_files:
         fname = getattr(u, "name", None) or u.get("name", "")
         if not fname: 
@@ -1981,12 +2004,30 @@ def _upload_dynamic_single_video_ads(
         video_num = _extract_video_number(fname)
         resolution = _extract_resolution(fname)
         
-        if not video_num or not resolution:
+        if not video_num:
+            continue  # video 번호가 없으면 스킵
+        
+        if not resolution:
+            # ✅ 인식되지 않은 해상도 경고
+            unrecognized_files.append(fname)
             continue
         
         if video_num not in video_groups:
             video_groups[video_num] = {}
+        
+        # ✅ 중복 해상도 체크
+        if resolution in video_groups[video_num]:
+            st.warning(f"⚠️ {video_num}: {resolution} 해상도가 중복됩니다. 마지막 파일만 사용됩니다.")
+            st.caption(f"   - 기존: {getattr(video_groups[video_num][resolution], 'name', 'N/A')}")
+            st.caption(f"   - 새 파일: {fname}")
+        
         video_groups[video_num][resolution] = u
+    
+    # ✅ 인식되지 않은 파일 경고
+    if unrecognized_files:
+        st.warning(f"⚠️ 인식되지 않은 해상도 파일 {len(unrecognized_files)}개:")
+        for fname in unrecognized_files:
+            st.caption(f"   - {fname} (1080x1080, 1920x1080, 1080x1920만 지원)")
     
     # 3개 사이즈 검증
     valid_groups = {}
@@ -1996,6 +2037,7 @@ def _upload_dynamic_single_video_ads(
         missing = [size for size in REQUIRED_SIZES if size not in files]
         if missing:
             st.error(f"❌ {video_num}: 필수 해상도 누락 - {', '.join(missing)}")
+            st.caption(f"   현재 있는 해상도: {', '.join(files.keys())}")
         else:
             valid_groups[video_num] = files
             st.success(f"✅ {video_num}: 3개 사이즈 모두 확인")
@@ -2075,7 +2117,7 @@ def _upload_dynamic_single_video_ads(
     
     # 모든 비디오 업로드
     all_video_ids = {}
-    thumb_urls = {}  # ✅ video_num -> thumbnail url
+    thumb_urls={}
     total_uploads = len(valid_groups) * 3
     done = 0
     prog = st.progress(0, text="📤 비디오 업로드 중...")
@@ -2088,7 +2130,7 @@ def _upload_dynamic_single_video_ads(
             fname = getattr(f_obj, "name", None) or f_obj.get("name", "")
             
             file_data = _save_tmp(f_obj)
-            
+
             # ✅ 대표 썸네일은 video_num당 1번만 (보통 1080x1080 파일에서 뽑는 걸 추천)
             if video_num not in thumb_urls and size == "1080x1080":
                 try:
@@ -2103,7 +2145,7 @@ def _upload_dynamic_single_video_ads(
                 except Exception as e:
                     thumb_urls[video_num] = None
                     st.warning(f"⚠️ {video_num} 썸네일 생성 실패: {e}")
-            
+
             vid_id = _upload_video_with_title(file_data["path"], fname)
             all_video_ids[video_num][size] = vid_id
             
@@ -2167,7 +2209,7 @@ def _upload_dynamic_single_video_ads(
             }
 
             # ✅ 핵심: 썸네일 제공 (1443226 해결)
-            thumb_url = thumb_urls.get(video_num)
+            thumb_url = (thumb_urls.get(video_num) if "thumb_urls" in locals() else None)
             if thumb_url:
                 inline_video_data["image_url"] = thumb_url
             else:
@@ -2177,17 +2219,41 @@ def _upload_dynamic_single_video_ads(
             inline_object_story_spec = {"page_id": page_id, "video_data": inline_video_data}
             if ig_actor_id:
                 inline_object_story_spec["instagram_actor_id"] = ig_actor_id
+            
+            if ig_actor_id:
+                inline_object_story_spec["instagram_actor_id"] = ig_actor_id
+
+            multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", False))
+            enroll_status = "OPT_IN" if multi_opt_in else "OPT_OUT"
 
             ad_params = {
                 "name": ad_name,
                 "adset_id": adset_id,
+
+                # ✅ Creative = Identity + Story
                 "creative": {
                     "name": ad_name,
-                    "object_story_spec": inline_object_story_spec
+
+                    # ✅ Use Facebook Page 강제
+                    "actor_id": str(page_id),
+
+                    # ✅ Instagram Account (있을 때만)
+                    **({"instagram_actor_id": ig_actor_id} if ig_actor_id else {}),
+
+                    # ✅ Inline OSS (Flexible Ad 필수)
+                    "object_story_spec": inline_object_story_spec,
                 },
+
+                # ✅ Flexible Ad 핵심
                 "creative_asset_groups_spec": {
                     "groups": [group_payload]
                 },
+
+                # ✅ Multi-advertiser ads 토글 (Ad 레벨)
+                "contextual_multi_ads": {
+                    "enroll_status": enroll_status
+                },
+
                 "status": Ad.Status.active,
             }
 
