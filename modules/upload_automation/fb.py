@@ -736,15 +736,16 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             key=f"cta_{idx}"
         )
 
-        # Multi-advertiser ads (contextual_multi_ads)
-        # - ON  => OPT_IN
-        # - OFF => OPT_OUT
-        multi_adv_ads_opt_in = st.checkbox(
-            "Enable Multi-advertiser ads (contextual_multi_ads)",
-            value=False,
-            key=f"multi_adv_ads_{idx}",
-            help="This is NOT Advantage+ Creative. It allows your ad to appear with others in the same ad unit."
-)
+        # ✅ 처음 렌더링될 때만 default ON 주입 (이후엔 유저 선택 유지)
+        _multi_key = f"multi_ads_optin_{idx}"
+        if _multi_key not in st.session_state:
+            st.session_state[_multi_key] = True  # default = ON
+
+        multi_advertiser_ads_opt_in = st.checkbox(
+            "Multi-advertiser ads 사용하기 (같은 유닛에 다른 광고와 함께 노출될 수 있음)",
+            key=_multi_key,
+        )
+
         # Final Save
         # ✅ UI에서 관리하는 "리스트"를 그대로 저장 (빈값 포함 허용)
         _clean_keep_empty = lambda xs: [x if x is not None else "" for x in (xs or [])]
@@ -774,7 +775,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "prefix_text": prefix_text.strip() if use_prefix else "",
             "use_suffix": use_suffix,
             "suffix_text": suffix_text.strip() if use_suffix else "",
-            "multi_advertiser_ads_opt_in": bool(multi_adv_ads_opt_in),
+            "multi_advertiser_ads_opt_in": bool(multi_advertiser_ads_opt_in),
         }
 
 
@@ -786,8 +787,6 @@ def upload_to_facebook(
     game_name: str,
     uploaded_files: list,
     settings: dict,
-    *,
-    simulate: bool = False,
 ) -> dict:
     """
     Marketer Mode: 선택된 AdSet에 바로 업로드
@@ -898,8 +897,6 @@ def upload_to_facebook(
         uploaded_files=uploaded_files,
         settings=settings,
     )
-    if simulate:
-        return plan
 
     # 3. Create the Ad Set (Targeting & Optimization)
     
@@ -1139,12 +1136,12 @@ def upload_videos_to_library_and_create_single_ads(
         headline = settings["headline"].strip()
         default_headlines = ["" if h.strip().lower() == "new game" else h.strip() for h in headline.split('\n') if h.strip()] if headline else []
 
-    # ✅ CTA 복사 (템플릿 우선, 없으면 세팅, 없으면 기본값)
-    default_cta = "INSTALL_MOBILE_APP"
-    if template.get("call_to_action"):
-        default_cta = template["call_to_action"]
-    elif settings.get("call_to_action"):
-        default_cta = settings["call_to_action"]
+    # ✅ CTA 우선순위: UI(settings) > template > default
+    default_cta = (settings.get("call_to_action") or "").strip()
+    if not default_cta:
+        default_cta = (template.get("call_to_action") or "").strip()
+    if not default_cta:
+        default_cta = "INSTALL_MOBILE_APP"
 
     # ✅ Store URL 결정 순서:
     # AdSet의 promoted_object URL이 있으면 무조건 사용 (일치 보장 필수)
@@ -1526,17 +1523,38 @@ def upload_videos_to_library_and_create_single_ads(
 
                     logger.info(f"    - Store URL: {final_store_url[:50]}...")
                     
-                    # ✅ Creative Params - Standard Object Story
-                    creative_params = {
-                        "name": ad_name,
-                        "object_story_spec": {
-                            "page_id": page_id,
-                            "video_data": video_data
-                        },
-                        "contextual_multi_ads": {
-                            "enroll_status": "OPT_OUT"
-                        }
+                    # ✅ Multi-advertiser ads 토글 (default ON)
+                    multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", True))
+                    multi_enroll_status = "OPT_IN" if multi_opt_in else "OPT_OUT"
+
+                    # ✅ IG actor id 가져오기
+                    ig_actor_id = (settings.get("instagram_actor_id") or 
+                                st.session_state.get("ig_actor_id_from_page") or "").strip()
+
+                    # ✅ Object Story Spec 구성 (Instagram 연결 포함)
+                    object_story_spec = {
+                        "page_id": page_id,
+                        "video_data": video_data
                     }
+                    
+                    # ✅ Instagram account 연결 (Use Facebook Page)
+                    if ig_actor_id:
+                        object_story_spec["instagram_actor_id"] = ig_actor_id
+                        logger.info(f"    - ✅ Instagram account 연결: {ig_actor_id}")
+
+                    creative_params = {
+                    "name": ad_name,
+                    "actor_id": str(page_id),  # ✅ Facebook Page identity
+                    "object_story_spec": object_story_spec,
+                    "contextual_multi_ads": {
+                        "enroll_status": multi_enroll_status
+                    }
+                }
+                    
+                    # ✅ Instagram account를 Creative 레벨에 추가
+                    if ig_actor_id:
+                        creative_params["instagram_actor_id"] = ig_actor_id
+                        logger.info(f"    - ✅ Creative에 Instagram 연결: {ig_actor_id}")
                     
                     # Creative 생성
                     logger.info(f"    - 🔨 Creative 생성 API 호출 중...")
@@ -1924,10 +1942,12 @@ def _upload_dynamic_single_video_ads(
     if default_headlines is None:
         default_headlines = []
         
-    # CTA
-    default_cta = template.get("call_to_action", "INSTALL_MOBILE_APP")
-    if not default_cta and settings.get("call_to_action"):
-        default_cta = settings["call_to_action"]
+    # ✅ CTA 우선순위: UI(settings) > template > default
+    default_cta = (settings.get("call_to_action") or "").strip()
+    if not default_cta:
+        default_cta = (template.get("call_to_action") or "").strip()
+    if not default_cta:
+        default_cta = "INSTALL_MOBILE_APP"
     
     # Store URL
     final_store_url = ""
@@ -2166,8 +2186,14 @@ def _upload_dynamic_single_video_ads(
     ads_created = []
     errors = []
 
-    # ✅ IG actor id (있으면 Identity에 Instagram Account가 붙음)
-    ig_actor_id = (settings.get("instagram_actor_id") or st.session_state.get("ig_actor_id_from_page") or "").strip()
+    # ✅ IG actor id 가져오기 (for 루프 밖에서 한 번만)
+    ig_actor_id = (settings.get("instagram_actor_id") or 
+                  st.session_state.get("ig_actor_id_from_page") or "").strip()
+    
+    if ig_actor_id:
+        st.info(f"✅ Instagram account 연결됨: {ig_actor_id}")
+    else:
+        st.warning("⚠️ Instagram account 없음 - Facebook Page만 사용")
 
     for video_num in sorted(all_video_ids.keys()):
         try:
@@ -2208,52 +2234,47 @@ def _upload_dynamic_single_video_ads(
                 },
             }
 
-            # ✅ 핵심: 썸네일 제공 (1443226 해결)
-            thumb_url = (thumb_urls.get(video_num) if "thumb_urls" in locals() else None)
+            # ✅ 썸네일 제공
+            thumb_url = thumb_urls.get(video_num)
             if thumb_url:
                 inline_video_data["image_url"] = thumb_url
             else:
-                # thumb가 없으면 여기서 바로 실패시키는 게 오히려 디버깅 쉬움
                 raise RuntimeError("썸네일(image_url) 생성 실패: object_story_spec.video_data에 필요함")
 
-            inline_object_story_spec = {"page_id": page_id, "video_data": inline_video_data}
-            if ig_actor_id:
-                inline_object_story_spec["instagram_actor_id"] = ig_actor_id
+            # ✅ Object Story Spec 구성 (Instagram 연결 포함)
+            inline_object_story_spec = {
+                "page_id": str(page_id),
+                "video_data": inline_video_data
+            }
             
+            # ✅ Instagram account 연결 (Use Facebook Page)
             if ig_actor_id:
                 inline_object_story_spec["instagram_actor_id"] = ig_actor_id
 
-            multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", False))
-            enroll_status = "OPT_IN" if multi_opt_in else "OPT_OUT"
+            # ✅ Multi-advertiser ads 토글
+            multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", True))
+            multi_enroll_status = "OPT_IN" if multi_opt_in else "OPT_OUT"
+
+            # ✅ Creative 구성 (Instagram 포함)
+            creative_config = {
+                "name": ad_name,
+                "actor_id": str(page_id),  # Facebook Page identity
+                "object_story_spec": inline_object_story_spec,
+                "contextual_multi_ads": {"enroll_status": multi_enroll_status},
+            }
+            
+            # ✅ Instagram account를 Creative 레벨에 추가
+            if ig_actor_id:
+                creative_config["instagram_actor_id"] = ig_actor_id
+                st.info(f"    - ✅ {ad_name}: Instagram 연결됨 ({ig_actor_id})")
 
             ad_params = {
                 "name": ad_name,
                 "adset_id": adset_id,
-
-                # ✅ Creative = Identity + Story
-                "creative": {
-                    "name": ad_name,
-
-                    # ✅ Use Facebook Page 강제
-                    "actor_id": str(page_id),
-
-                    # ✅ Instagram Account (있을 때만)
-                    **({"instagram_actor_id": ig_actor_id} if ig_actor_id else {}),
-
-                    # ✅ Inline OSS (Flexible Ad 필수)
-                    "object_story_spec": inline_object_story_spec,
-                },
-
-                # ✅ Flexible Ad 핵심
+                "creative": creative_config,
                 "creative_asset_groups_spec": {
                     "groups": [group_payload]
                 },
-
-                # ✅ Multi-advertiser ads 토글 (Ad 레벨)
-                "contextual_multi_ads": {
-                    "enroll_status": enroll_status
-                },
-
                 "status": Ad.Status.active,
             }
 

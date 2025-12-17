@@ -343,9 +343,6 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                 help="Drive에서 가져온 모든 비디오를 Account Media Library에 원본 파일명으로 저장합니다."
                             )
                             st.write("")
-                            # Marketer mode: Add dry run button
-                            dry_run_fb = st.button("🔍 Dry Run (Preview)", key=f"dry_run_fb_{game}", use_container_width=True)
-                            st.write("")
             
                         btn_label = "Creative 업로드하기" if is_marketer else "Creative Test 업로드하기"
                         cont = st.button(btn_label, key=f"continue_{game}", use_container_width=True)
@@ -358,10 +355,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         # Unity 버튼들도 동일하게 적용
                         st.write("")
                         if is_marketer:
-                            # Marketer mode: Add dry run button for Unity (all games)
-                            dry_run_unity = st.button("🔍 Dry Run (Preview)", key=f"dry_run_unity_{game}", use_container_width=True)
-                            st.write("")
-                        cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{game}", use_container_width=True)
+                            cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{game}", use_container_width=True)
                         cont_unity_apply = st.button("캠페인에 적용", key=f"unity_apply_{game}", use_container_width=True)
                         # Store current tab in query params when Unity buttons are clicked
                         if cont_unity_create or cont_unity_apply:
@@ -446,164 +440,165 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         st.error("❌ Media Library Upload Error")
                         st.code(traceback.format_exc())
                         
+            # ✅ FACEBOOK DRY RUN 섹션 전체 제거 (449-540줄 정도)
             # --- FACEBOOK DRY RUN ---
-            if platform == "Facebook" and is_marketer and "dry_run_fb" in locals() and dry_run_fb:
-                remote_list = st.session_state.remote_videos.get(game, [])
-                ok, msg = validate_count(remote_list)
-                if not ok:
-                    ok_msg_placeholder.error(msg)
-                else:
-                    try:
-                        settings = st.session_state.settings.get(game, {})
-                        preview = fb_module.preview_facebook_upload(game, remote_list, settings)
+            # if platform == "Facebook" and is_marketer and "dry_run_fb" in locals() and dry_run_fb:
+            #     remote_list = st.session_state.remote_videos.get(game, [])
+            #     ok, msg = validate_count(remote_list)
+            #     if not ok:
+            #         ok_msg_placeholder.error(msg)
+            #     else:
+            #         try:
+            #             settings = st.session_state.settings.get(game, {})
+            #             preview = fb_module.preview_facebook_upload(game, remote_list, settings)
                         
-                        with st.expander("📋 Facebook Upload Preview", expanded=True):
-                            # Show error if present
-                            if preview.get('error'):
-                                st.error(f"❌ **Validation Error:**\n{preview['error']}")
-                                st.markdown("---")
+            #             with st.expander("📋 Facebook Upload Preview", expanded=True):
+            #                 # Show error if present
+            #                 if preview.get('error'):
+            #                     st.error(f"❌ **Validation Error:**\n{preview['error']}")
+            #                     st.markdown("---")
                             
-                            st.markdown("### Campaign & Ad Set")
-                            st.write(f"**Campaign ID:** {preview['campaign_id']}")
-                            st.write(f"**Ad Set ID:** {preview['adset_id']}")
-                            st.write(f"**Current Active Ads:** {preview['current_ad_count']}")
-                            st.write(f"**New Videos to Upload:** {preview['n_videos']}")
-                            st.write(f"**Creative Type:** {preview['creative_type']}")
+            #                 st.markdown("### Campaign & Ad Set")
+            #                 st.write(f"**Campaign ID:** {preview['campaign_id']}")
+            #                 st.write(f"**Ad Set ID:** {preview['adset_id']}")
+            #                 st.write(f"**Current Active Ads:** {preview['current_ad_count']}")
+            #                 st.write(f"**New Videos to Upload:** {preview['n_videos']}")
+            #                 st.write(f"**Creative Type:** {preview['creative_type']}")
                             
-                            # Capacity Information
-                            capacity = preview.get('capacity_info', {})
-                            st.markdown("### Ad Set Capacity")
-                            st.write(f"**Current Creatives:** {capacity.get('current_count', 0)}")
-                            st.write(f"**Creative Limit:** {capacity.get('limit', 50)}")
-                            st.write(f"**Available Slots:** {capacity.get('available_slots', 0)}")
-                            st.write(f"**New Creatives to Upload:** {capacity.get('new_creatives_count', 0)}")
+            #                 # Capacity Information
+            #                 capacity = preview.get('capacity_info', {})
+            #                 st.markdown("### Ad Set Capacity")
+            #                 st.write(f"**Current Creatives:** {capacity.get('current_count', 0)}")
+            #                 st.write(f"**Creative Limit:** {capacity.get('limit', 50)}")
+            #                 st.write(f"**Available Slots:** {capacity.get('available_slots', 0)}")
+            #                 st.write(f"**New Creatives to Upload:** {capacity.get('new_creatives_count', 0)}")
                             
-                            if capacity.get('will_exceed', False):
-                                st.warning(f"⚠️ 업로드 후 제한을 초과합니다! ({capacity.get('current_count', 0)} + {capacity.get('new_creatives_count', 0)} > {capacity.get('limit', 50)})")
+            #                 if capacity.get('will_exceed', False):
+            #                     st.warning(f"⚠️ 업로드 후 제한을 초과합니다! ({capacity.get('current_count', 0)} + {capacity.get('new_creatives_count', 0)} > {capacity.get('limit', 50)})")
                                 
-                                ads_to_delete = capacity.get('ads_to_delete', [])
-                                if ads_to_delete:
-                                    st.markdown("#### 🗑️ 삭제될 Creative 목록")
-                                    st.write(f"**삭제 예정 Creative 수:** {len(ads_to_delete)}")
+            #                     ads_to_delete = capacity.get('ads_to_delete', [])
+            #                     if ads_to_delete:
+            #                         st.markdown("#### ��️ 삭제될 Creative 목록")
+            #                         st.write(f"**삭제 예정 Creative 수:** {len(ads_to_delete)}")
                                     
-                                    for idx, ad_info in enumerate(ads_to_delete, 1):
-                                        st.markdown(f"**{idx}. {ad_info.get('name', 'N/A')}** (ID: `{ad_info.get('id', 'N/A')}`)")
-                                        st.write(f"   - 14일 누적 Spend: ${ad_info.get('spend_14d', 0):.2f}")
-                                        st.write(f"   - 7일 누적 Spend: ${ad_info.get('spend_7d', 0):.2f}")
-                                        if ad_info.get('spend_14d', 0) < 1.0:
-                                            st.write(f"   - 삭제 이유: 14일 누적 Spend < $1")
-                                        elif ad_info.get('spend_7d', 0) < 1.0:
-                                            st.write(f"   - 삭제 이유: 7일 누적 Spend < $1")
-                            else:
-                                remaining = capacity.get('available_slots', 0) - capacity.get('new_creatives_count', 0)
-                                if remaining >= 0:
-                                    st.success(f"✅ 충분한 공간이 있습니다. 업로드 후 남은 슬롯: {remaining}")
-                                else:
-                                    st.warning(f"⚠️ 공간이 부족합니다. 추가로 {abs(remaining)}개의 슬롯이 필요합니다.")
+            #                         for idx, ad_info in enumerate(ads_to_delete, 1):
+            #                             st.markdown(f"**{idx}. {ad_info.get('name', 'N/A')}** (ID: `{ad_info.get('id', 'N/A')}`)")
+            #                             st.write(f"   - 14일 누적 Spend: ${ad_info.get('spend_14d', 0):.2f}")
+            #                             st.write(f"   - 7일 누적 Spend: ${ad_info.get('spend_7d', 0):.2f}")
+            #                             if ad_info.get('spend_14d', 0) < 1.0:
+            #                                 st.write(f"   - 삭제 이유: 14일 누적 Spend < $1")
+            #                             elif ad_info.get('spend_7d', 0) < 1.0:
+            #                                 st.write(f"   - 삭제 이유: 7일 누적 Spend < $1")
+            #                 else:
+            #                     remaining = capacity.get('available_slots', 0) - capacity.get('new_creatives_count', 0)
+            #                     if remaining >= 0:
+            #                         st.success(f"✅ 충분한 공간이 있습니다. 업로드 후 남은 슬롯: {remaining}")
+            #                     else:
+            #                         st.warning(f"⚠️ 공간이 부족합니다. 추가로 {abs(remaining)}개의 슬롯이 필요합니다.")
                             
-                            st.divider()
+            #                 st.divider()
                             
-                            st.markdown("### Template Settings (from existing ads)")
-                            template = preview['template_source']
-                            st.write(f"**Headlines Found:** {template['headlines_found']}")
-                            if template['headline_example']:
-                                st.write(f"**Example Headline:** `{template['headline_example']}`")
-                            st.write(f"**Messages Found:** {template['messages_found']}")
-                            if template['message_example']:
-                                st.write(f"**Example Message:** `{template['message_example']}`")
-                            if template['cta']:
-                                # Handle both dict and string CTA formats
-                                if isinstance(template['cta'], dict):
-                                    cta_type = template['cta'].get('type', 'N/A')
-                                    st.write(f"**CTA:** `{cta_type}`")
-                                else:
-                                    st.write(f"**CTA:** `{template['cta']}`")
-                            if preview['store_url']:
-                                st.write(f"**Store URL:** {preview['store_url']}")
+            #                 st.markdown("### Template Settings (from existing ads)")
+            #                 template = preview['template_source']
+            #                 st.write(f"**Headlines Found:** {template['headlines_found']}")
+            #                 if template['headline_example']:
+            #                     st.write(f"**Example Headline:** `{template['headline_example']}`")
+            #                 st.write(f"**Messages Found:** {template['messages_found']}")
+            #                 if template['message_example']:
+            #                     st.write(f"**Example Message:** `{template['message_example']}`")
+            #                 if template['cta']:
+            #                     # Handle both dict and string CTA formats
+            #                     if isinstance(template['cta'], dict):
+            #                         cta_type = template['cta'].get('type', 'N/A')
+            #                         st.write(f"**CTA:** `{cta_type}`")
+            #                     else:
+            #                         st.write(f"**CTA:** `{template['cta']}`")
+            #                 if preview['store_url']:
+            #                     st.write(f"**Store URL:** {preview['store_url']}")
                             
-                            st.markdown("### Creatives That Would Be Created")
-                            for idx, creative in enumerate(preview['preview_creatives'], 1):
-                                st.markdown(f"#### Creative {idx}: {creative['name']}")
-                                st.write(f"**Type:** {creative['type']}")
+            #                 st.markdown("### Creatives That Would Be Created")
+            #                 for idx, creative in enumerate(preview['preview_creatives'], 1):
+            #                     st.markdown(f"#### Creative {idx}: {creative['name']}")
+            #                     st.write(f"**Type:** {creative['type']}")
                                 
-                                # For single video mode, show detailed video size and placement info
-                                if creative.get('type') == 'Single Video (3 sizes)' and creative.get('videos'):
-                                    videos = creative['videos']
-                                    placements = creative.get('placements', {})
-                                    placements_kr = creative.get('placements_kr', {})
+            #                     # For single video mode, show detailed video size and placement info
+            #                     if creative.get('type') == 'Single Video (3 sizes)' and creative.get('videos'):
+            #                         videos = creative['videos']
+            #                         placements = creative.get('placements', {})
+            #                         placements_kr = creative.get('placements_kr', {})
                                     
-                                    for size in ['1080x1080', '1920x1080', '1080x1920']:
-                                        if size in videos:
-                                            st.markdown(f"**{size}:**")
-                                            st.write(f"  - Video: `{videos[size]}`")
-                                            if size in placements:
-                                                st.write(f"  - Placements: {', '.join(placements[size])}")
-                                            if size in placements_kr:
-                                                st.write(f"  - Placements (KR): {', '.join(placements_kr[size])}")
-                                elif creative.get('videos'):
-                                    # For dynamic mode or other types
-                                    if isinstance(creative['videos'], list):
-                                        st.write(f"**Videos:** {', '.join(creative['videos'])}")
-                                    elif isinstance(creative['videos'], dict):
-                                        st.write(f"**Videos:** {', '.join(creative['videos'].values())}")
+            #                         for size in ['1080x1080', '1920x1080', '1080x1920']:
+            #                             if size in videos:
+            #                                 st.markdown(f"**{size}:**")
+            #                                 st.write(f"  - Video: `{videos[size]}`")
+            #                                 if size in placements:
+            #                                     st.write(f"  - Placements: {', '.join(placements[size])}")
+            #                                 if size in placements_kr:
+            #                                     st.write(f"  - Placements (KR): {', '.join(placements_kr[size])}")
+            #                     elif creative.get('videos'):
+            #                         # For dynamic mode or other types
+            #                         if isinstance(creative['videos'], list):
+            #                             st.write(f"**Videos:** {', '.join(creative['videos'])}")
+            #                         elif isinstance(creative['videos'], dict):
+            #                             st.write(f"**Videos:** {', '.join(creative['videos'].values())}")
                                 
-                                # Show ALL Headlines
-                                if creative.get('headline'):
-                                    headlines = creative['headline'] if isinstance(creative['headline'], list) else [creative['headline']]
-                                    st.markdown(f"**Headlines ({len(headlines)} total):**")
-                                    for idx, h in enumerate(headlines, 1):
-                                        st.write(f"  {idx}. `{h}`")
+            #                     # Show ALL Headlines
+            #                     if creative.get('headline'):
+            #                         headlines = creative['headline'] if isinstance(creative['headline'], list) else [creative['headline']]
+            #                         st.markdown(f"**Headlines ({len(headlines)} total):**")
+            #                         for idx, h in enumerate(headlines, 1):
+            #                             st.write(f"  {idx}. `{h}`")
                                 
-                                # Show ALL Messages (Primary Text)
-                                if creative.get('message'):
-                                    messages = creative['message'] if isinstance(creative['message'], list) else [creative['message']]
-                                    st.markdown(f"**Primary Text / Messages ({len(messages)} total):**")
-                                    for idx, m in enumerate(messages, 1):
-                                        st.write(f"  {idx}. `{m}`")
+            #                     # Show ALL Messages (Primary Text)
+            #                     if creative.get('message'):
+            #                         messages = creative['message'] if isinstance(creative['message'], list) else [creative['message']]
+            #                         st.markdown(f"**Primary Text / Messages ({len(messages)} total):**")
+            #                         for idx, m in enumerate(messages, 1):
+            #                             st.write(f"  {idx}. `{m}`")
                                 
-                                # Show CTA details
-                                if creative.get('cta'):
-                                    cta = creative['cta']
-                                    st.markdown("**Call-to-Action (CTA):**")
-                                    if isinstance(cta, dict):
-                                        cta_type = cta.get('type', 'N/A')
-                                        st.write(f"  - Type: `{cta_type}`")
-                                        if 'value' in cta:
-                                            value = cta['value']
-                                            if isinstance(value, dict):
-                                                if 'link' in value:
-                                                    st.write(f"  - Link: `{value['link']}`")
-                                                for k, v in value.items():
-                                                    if k != 'link':
-                                                        st.write(f"  - {k}: `{v}`")
-                                            else:
-                                                st.write(f"  - Value: `{value}`")
-                                        # Show all CTA fields
-                                        for k, v in cta.items():
-                                            if k not in ['type', 'value']:
-                                                st.write(f"  - {k}: `{v}`")
-                                    else:
-                                        st.write(f"  - `{cta}`")
+            #                     # Show CTA details
+            #                     if creative.get('cta'):
+            #                         cta = creative['cta']
+            #                         st.markdown("**Call-to-Action (CTA):**")
+            #                         if isinstance(cta, dict):
+            #                             cta_type = cta.get('type', 'N/A')
+            #                             st.write(f"  - Type: `{cta_type}`")
+            #                             if 'value' in cta:
+            #                                 value = cta['value']
+            #                                 if isinstance(value, dict):
+            #                                     if 'link' in value:
+            #                                         st.write(f"  - Link: `{value['link']}`")
+            #                                     for k, v in value.items():
+            #                                         if k != 'link':
+            #                                             st.write(f"  - {k}: `{v}`")
+            #                                 else:
+            #                                     st.write(f"  - Value: `{value}`")
+            #                             # Show all CTA fields
+            #                             for k, v in cta.items():
+            #                                 if k not in ['type', 'value']:
+            #                                     st.write(f"  - {k}: `{v}`")
+            #                         else:
+            #                             st.write(f"  - `{cta}`")
                                 
-                                # Show Store URL if available
-                                if preview.get('store_url'):
-                                    st.write(f"**Store URL:** `{preview['store_url']}`")
+            #                     # Show Store URL if available
+            #                     if preview.get('store_url'):
+            #                         st.write(f"**Store URL:** `{preview['store_url']}`")
                                 
-                                # Show Aspect Ratio for dynamic creatives
-                                if creative.get('aspect_ratio'):
-                                    st.write(f"**Aspect Ratio:** {creative['aspect_ratio']}")
-                                if creative.get('aspect_ratio'):
-                                    st.write(f"**Aspect Ratio:** {creative['aspect_ratio']}")
-                                st.divider()
+            #                     # Show Aspect Ratio for dynamic creatives
+            #                     if creative.get('aspect_ratio'):
+            #                         st.write(f"**Aspect Ratio:** {creative['aspect_ratio']}")
+            #                     if creative.get('aspect_ratio'):
+            #                         st.write(f"**Aspect Ratio:** {creative['aspect_ratio']}")
+            #                     st.divider()
                             
-                            st.info("💡 This is a preview. No actual uploads or changes have been made.")
-                    except Exception as e:
-                        import traceback
-                        st.error(f"Preview failed: {e}")
-                        st.code(traceback.format_exc())
+            #                 st.info("�� This is a preview. No actual uploads or changes have been made.")
+            # except Exception as e:
+            #     import traceback
+            #     st.error(f"Preview failed: {e}")
+            #     st.code(traceback.format_exc())
 
 
-            # 📍 EXECUTION LOGIC 섹션에 추가
+            # �� EXECUTION LOGIC 섹션에 추가
 
             
             if platform == "Facebook" and cont:
@@ -650,74 +645,75 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 st.query_params["tab"] = game  # Preserve current tab
                 st.rerun()
 
+            # ✅ UNITY DRY RUN 섹션 전체 제거
             # --- UNITY DRY RUN ---
-            if platform == "Unity Ads" and is_marketer and "dry_run_unity" in locals() and dry_run_unity:
-                remote_list = st.session_state.remote_videos.get(game, [])
-                ok, msg = validate_count(remote_list)
-                if not ok:
-                    unity_ok_placeholder.error(msg)
-                else:
-                    try:
-                        unity_settings = unity_module.get_unity_settings(game)
-                        preview = unity_module.preview_unity_upload(
-                            game=game,
-                            videos=remote_list,
-                            settings=unity_settings,
-                            is_marketer=True  # All games in marketer mode
-                        )
+            # if platform == "Unity Ads" and is_marketer and "dry_run_unity" in locals() and dry_run_unity:
+            #     remote_list = st.session_state.remote_videos.get(game, [])
+            #     ok, msg = validate_count(remote_list)
+            #     if not ok:
+            #         unity_ok_placeholder.error(msg)
+            #     else:
+            #         try:
+            #             unity_settings = unity_module.get_unity_settings(game)
+            #             preview = unity_module.preview_unity_upload(
+            #                 game=game,
+            #                 videos=remote_list,
+            #                 settings=unity_settings,
+            #                 is_marketer=True  # All games in marketer mode
+            #             )
                         
-                        with st.expander("📋 Unity Ads Upload Preview", expanded=True):
-                            st.markdown("### Campaign Settings")
-                            st.write(f"**Game:** {preview['game']}")
-                            st.write(f"**Org ID:** {preview['org_id']}")
-                            st.write(f"**Title ID:** {preview['title_id']}")
-                            st.write(f"**Campaign ID:** {preview['campaign_id']}")
+            #             with st.expander("📋 Unity Ads Upload Preview", expanded=True):
+            #                 st.markdown("### Campaign Settings")
+            #                 st.write(f"**Game:** {preview['game']}")
+            #                 st.write(f"**Org ID:** {preview['org_id']}")
+            #                 st.write(f"**Title ID:** {preview['title_id']}")
+            #                 st.write(f"**Campaign ID:** {preview['campaign_id']}")
                             
-                            st.markdown("### Playable Info")
-                            playable_info = preview['playable_info']
-                            if playable_info['selected_playable']:
-                                st.write(f"**Selected Playable:** {playable_info['selected_playable']}")
-                            elif playable_info['existing_playable_label']:
-                                st.write(f"**Existing Playable:** {playable_info['existing_playable_label']}")
-                            else:
-                                st.warning("⚠️ No playable selected")
+            #                 st.markdown("### Playable Info")
+            #                 playable_info = preview['playable_info']
+            #                 if playable_info['selected_playable']:
+            #                     st.write(f"**Selected Playable:** {playable_info['selected_playable']}")
+            #                 elif playable_info['existing_playable_label']:
+            #                     st.write(f"**Existing Playable:** {playable_info['existing_playable_label']}")
+            #                 else:
+            #                     st.warning("⚠️ No playable selected")
                             
-                            st.markdown("### Creative Packs That Would Be Created")
-                            st.write(f"**Total Packs:** {preview['total_packs_to_create']}")
-                            for idx, pack in enumerate(preview['preview_packs'], 1):
-                                st.markdown(f"#### Pack {idx}: `{pack['pack_name']}`")
-                                st.write(f"**Portrait Video:** {pack['portrait_video']}")
-                                st.write(f"**Landscape Video:** {pack['landscape_video']}")
-                                st.write(f"**Playable:** {pack['playable']}")
-                                st.divider()
+            #                 st.markdown("### Creative Packs That Would Be Created")
+            #                 st.write(f"**Total Packs:** {preview['total_packs_to_create']}")
+            #                 for idx, pack in enumerate(preview['preview_packs'], 1):
+            #                     st.markdown(f"#### Pack {idx}: `{pack['pack_name']}`")
+            #                     st.write(f"**Portrait Video:** {pack['portrait_video']}")
+            #                     st.write(f"**Landscape Video:** {pack['landscape_video']}")
+            #                     st.write(f"**Playable:** {pack['playable']}")
+            #                     st.divider()
                             
-                            st.markdown("### Current Assignment Status")
-                            current = preview['current_assigned_packs']
-                            if current:
-                                st.write(f"**Currently Assigned Packs:** {len(current)}")
-                                for pack in current:
-                                    st.write(f"- `{pack['name']}` (ID: {pack['id']})")
-                            else:
-                                st.info("No packs currently assigned to this campaign")
+            #                 st.markdown("### Current Assignment Status")
+            #                 current = preview['current_assigned_packs']
+            #                 if current:
+            #                     st.write(f"**Currently Assigned Packs:** {len(current)}")
+            #                     for pack in current:
+            #                         st.write(f"- `{pack['name']}` (ID: {pack['id']})")
+            #                 else:
+            #                     st.info("No packs currently assigned to this campaign")
                             
-                            st.markdown("### Action Summary")
-                            summary = preview['action_summary']
-                            st.write(f"**Will Create:** {summary['will_create_packs']} new creative pack(s)")
+            #                 st.markdown("### Action Summary")
+            #                 summary = preview['action_summary']
+            #                 st.write(f"**Will Create:** {summary['will_create_packs']} new creative pack(s)")
                             
-                            if summary['is_marketer_mode']:
-                                st.write(f"**Will Assign:** {summary['will_assign_new']} new pack(s)")
-                                st.info("ℹ️ Marketer Mode: Existing packs will remain assigned. New packs will be added.")
-                            else:
-                                st.write(f"**Will Unassign:** {summary['will_unassign_existing']} existing pack(s)")
-                                st.write(f"**Will Assign:** {summary['will_assign_new']} new pack(s)")
-                                if summary['will_unassign_existing'] > 0:
-                                    st.warning("⚠️ Test Mode: Existing creative packs will be unassigned before assigning new ones.")
+            #                 if summary['is_marketer_mode']:
+            #                     st.write(f"**Will Assign:** {summary['will_assign_new']} new pack(s)")
+            #                     st.info("ℹ️ Marketer Mode: Existing packs will remain assigned. New packs will be added.")
+            #                 else:
+            #                     st.write(f"**Will Unassign:** {summary['will_unassign_existing']} existing pack(s)")
+            #                     st.write(f"**Will Assign:** {summary['will_assign_new']} new pack(s)")
+            #                     if summary['will_unassign_existing'] > 0:
+            #                         st.warning("⚠️ Test Mode: Existing creative packs will be unassigned before assigning new ones.")
                             
-                            st.info("💡 This is a preview. No actual uploads or changes have been made.")
-                    except Exception as e:
-                        import traceback
-                        st.error(f"Preview failed: {e}")
-                        st.code(traceback.format_exc())
+            #                 st.info("�� This is a preview. No actual uploads or changes have been made.")
+            # except Exception as e:
+            #     import traceback
+            #     st.error(f"Preview failed: {e}")
+            #     st.code(traceback.format_exc())
             
             # --- UNITY ACTIONS ---
             if platform == "Unity Ads":
