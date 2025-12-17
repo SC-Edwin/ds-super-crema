@@ -2593,8 +2593,19 @@ def _upload_dynamic_1x1_ads(
         tasks.append((video_num, f_obj, fname))
     
     total_uploads = len(tasks)
-    prog = st.progress(0, text=f"📤 비디오 업로드 중... 0/{total_uploads}")
-    done = 0
+    
+    # 통합 프로그래스바 생성
+    overall_prog = st.progress(0, text="🚀 전체 진행 중... 0%")
+    status_text = st.empty()
+    
+    def _update_progress(stage: str, current: int, total: int, stage_pct: int, base_pct: int = 0):
+        """전체 진행 상황 업데이트"""
+        # stage_pct: 이 단계가 전체에서 차지하는 비율 (0-100)
+        # base_pct: 이전 단계까지의 진행률
+        stage_progress = int((current / total) * stage_pct) if total > 0 else 0
+        overall_pct = base_pct + stage_progress
+        overall_prog.progress(overall_pct / 100, text=f"🚀 {stage}... {current}/{total} ({overall_pct}%)")
+        status_text.text(f"📊 현재 단계: {stage} | 진행률: {overall_pct}%")
     
     def _upload_one(video_num: str, f_obj, fname: str):
         """Uploads one video; also prepares one thumbnail."""
@@ -2615,6 +2626,9 @@ def _upload_dynamic_1x1_ads(
         vid_id = _upload_video_with_title(file_data["path"], fname)
         return (video_num, vid_id)
     
+    # ====================================================================
+    # STEP 2-1: 비디오 업로드 (0-40%)
+    # ====================================================================
     upload_workers = min(4, max(2, total_uploads))
     upload_errors = []
     
@@ -2624,9 +2638,10 @@ def _upload_dynamic_1x1_ads(
             for (vn, fo, fname) in tasks
         }
         
+        done = 0
         for fut in as_completed(futs):
             done += 1
-            prog.progress(int(done / total_uploads * 100), text=f"📤 비디오 업로드 중... {done}/{total_uploads}")
+            _update_progress("📤 비디오 업로드", done, total_uploads, 40, 0)
             try:
                 video_num, vid_id = fut.result()
                 all_video_ids[video_num] = vid_id
@@ -2635,21 +2650,22 @@ def _upload_dynamic_1x1_ads(
                 upload_errors.append(f"{fname}: {e}")
                 st.error(f"❌ {fname} 업로드 실패: {e}")
     
-    prog.empty()
-    
     if upload_errors:
+        overall_prog.empty()
+        status_text.empty()
         raise RuntimeError("Upload failed for some videos:\n" + "\n".join(upload_errors))
     
-    st.success(f"✅ {total_uploads}개 비디오 업로드 완료")
-    
-    # 비디오 처리 완료 대기
-    st.info("⏳ 업로드된 비디오 처리 완료 대기 중...")
-    
+    # ====================================================================
+    # STEP 2-2: 비디오 처리 완료 대기 (40-80%)
+    # ====================================================================
     all_vids = list(all_video_ids.values())
     errs = []
+    done = 0
     with ThreadPoolExecutor(max_workers=min(6, max(2, len(all_vids)))) as ex:
         futs = {ex.submit(wait_video_ready, vid, 300, 1.0): vid for vid in all_vids}
         for fut in as_completed(futs):
+            done += 1
+            _update_progress("⏳ 비디오 처리 대기", done, len(all_vids), 40, 40)
             vid = futs[fut]
             try:
                 fut.result()
@@ -2657,6 +2673,8 @@ def _upload_dynamic_1x1_ads(
                 errs.append(f"{vid}: {e}")
     
     if errs:
+        overall_prog.empty()
+        status_text.empty()
         raise RuntimeError("Some videos did not become ready:\n" + "\n".join(errs))
     
     # ====================================================================
@@ -2749,8 +2767,9 @@ def _upload_dynamic_1x1_ads(
         ad_name = f"{ad_name}_{suffix_text}"
     
     # ====================================================================
-    # STEP 4: 하나의 Flexible Ad 생성
+    # STEP 4: 하나의 Flexible Ad 생성 (80-100%)
     # ====================================================================
+    _update_progress("🎨 Flexible Ad 생성", 0, 1, 20, 80)
     try:
         # 모든 비디오를 하나의 그룹으로
         videos = [{"video_id": vid_id} for vid_id in all_video_ids.values()]
@@ -2835,6 +2854,11 @@ def _upload_dynamic_1x1_ads(
         if not ad_id:
             raise RuntimeError(f"Ad 생성 응답에 id가 없습니다: {ad_response}")
         
+        # 완료
+        _update_progress("✅ 완료", 1, 1, 20, 80)
+        overall_prog.progress(1.0, text="✅ 모든 작업 완료!")
+        status_text.empty()
+        
         st.success(f"✅ Flexible Ad 생성 완료: {ad_name} / {ad_id}")
         
         return {
@@ -2850,6 +2874,8 @@ def _upload_dynamic_1x1_ads(
         }
         
     except Exception as e:
+        overall_prog.empty()
+        status_text.empty()
         error_msg = f"Flexible Ad 생성 실패: {e}"
         st.error(f"❌ {error_msg}")
         return {
