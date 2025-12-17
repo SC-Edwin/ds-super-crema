@@ -28,7 +28,7 @@ from facebook_business.adobjects.adset import AdSet
 from facebook_business.adobjects.advideo import AdVideo
 from facebook_business.adobjects.campaign import Campaign
 from facebook_business.exceptions import FacebookRequestError
-
+    
 # Local imports
 from facebook_ads import (
     FB_GAME_MAPPING,
@@ -546,7 +546,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
                 with st.spinner("Loading template from highest ad..."):
                     defaults = fetch_latest_ad_creative_defaults(sel_a_id)
                     st.session_state[f"mimic_data_auto_{idx}"] = defaults
-                    st.session_state[defaults_flag] = True
+                st.session_state[defaults_flag] = True
             else:
                 defaults = st.session_state.get(f"mimic_data_auto_{idx}", {})
                 
@@ -566,36 +566,36 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
                 else:
                     defaults = st.session_state.get(f"mimic_data_{selected_ad['id']}_{idx}", {})
 
-        # ====================================================================
-        # PREPARE DEFAULT VALUES (rest stays the same)
-        # ====================================================================
-        val_text = ""
-        val_headline = ""
-        val_cta_idx = 0
-        source_msg = ""
-        h_lines = []
-        p_texts = []
+    # ====================================================================
+    # PREPARE DEFAULT VALUES (rest stays the same)
+    # ====================================================================
+    val_text = ""
+    val_headline = ""
+    val_cta_idx = 0
+    source_msg = ""
+    h_lines = []
+    p_texts = []
 
-        if defaults:
-            p_texts = defaults.get("primary_texts", [])
-            val_text = "\n\n".join(p_texts) if p_texts else ""
-            
-            h_lines = defaults.get("headlines", [])
-            val_headline = h_lines[0] if h_lines else ""
-            
-            # [NEW] Get Store URL
-            val_store_url = defaults.get("store_url", "")
-            
-            fetched_cta = defaults.get("call_to_action", "INSTALL_MOBILE_APP")
-            if fetched_cta in FB_CTA_OPTIONS:
-                val_cta_idx = FB_CTA_OPTIONS.index(fetched_cta)
-            
-            source_msg = f"✨ Loaded from: **{defaults.get('source_ad_name')}**"
-            
-            # Display ad_formats if available
-            ad_formats = defaults.get('ad_formats', [])
-            if ad_formats:
-                source_msg += f"\n\n📋 **ad_formats**: `{ad_formats}`"
+    if defaults:
+        p_texts = defaults.get("primary_texts", [])
+        val_text = "\n\n".join(p_texts) if p_texts else ""
+        
+        h_lines = defaults.get("headlines", [])
+        val_headline = h_lines[0] if h_lines else ""
+        
+        # [NEW] Get Store URL
+        val_store_url = defaults.get("store_url", "")
+        
+        fetched_cta = defaults.get("call_to_action", "INSTALL_MOBILE_APP")
+        if fetched_cta in FB_CTA_OPTIONS:
+            val_cta_idx = FB_CTA_OPTIONS.index(fetched_cta)
+        
+        source_msg = f"✨ Loaded from: **{defaults.get('source_ad_name')}**"
+        
+        # Display ad_formats if available
+        ad_formats = defaults.get('ad_formats', [])
+        if ad_formats:
+            source_msg += f"\n\n📋 **ad_formats**: `{ad_formats}`"
             
             # Display full asset_feed_spec in expander for debugging
             # if defaults.get('full_asset_feed_spec'):
@@ -607,29 +607,29 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             #         else:
             #             st.code(str(spec), language='text')
 
-        # 2. Ad Setup
-        st.caption("Ad Setup")
-        
-        # Ad Format & Ad Name
-        col_d1, col_d2 = st.columns(2)
-        dco_aspect_ratio = col_d1.selectbox(
-            "Ad Format", 
-            ["단일 영상", "다이내믹-single video", "다이내믹-1x1", "다이내믹-9x16", "다이내믹-16:9"], 
-            key=f"dco_r_{idx}"
-        )
-        
-        # Ad Name은 다이내믹일 때만 표시
-        if dco_aspect_ratio.startswith("다이내믹"):
-            ad_name_input = col_d2.text_input("Ad Name", key=f"dco_n_{idx}")
-        else:
-            # 단일 영상일 때는 Ad Name 숨김 (기본값 사용)
-            ad_name_input = ""
-            col_d2.empty()  # 빈 공간 유지
-        st.markdown("**Ad Name Customization** (Optional)")
-        
-        col_pre, col_suf = st.columns(2)
-        
-        with col_pre:
+    # 2. Ad Setup
+    st.caption("Ad Setup")
+    
+    # Ad Format & Ad Name
+    col_d1, col_d2 = st.columns(2)
+    dco_aspect_ratio = col_d1.selectbox(
+        "Ad Format", 
+        ["단일 영상", "다이내믹-single video", "다이내믹-1x1", "다이내믹-9x16", "다이내믹-16:9"], 
+        key=f"dco_r_{idx}"
+    )
+    
+    # Ad Name은 다이내믹일 때만 표시
+    if dco_aspect_ratio.startswith("다이내믹"):
+        ad_name_input = col_d2.text_input("Ad Name", key=f"dco_n_{idx}")
+    else:
+        # 단일 영상일 때는 Ad Name 숨김 (기본값 사용)
+        ad_name_input = ""
+        col_d2.empty()  # 빈 공간 유지
+    st.markdown("**Ad Name Customization** (Optional)")
+    
+    col_pre, col_suf = st.columns(2)
+    
+    with col_pre:
             use_prefix = st.checkbox("Add Prefix", key=f"use_prefix_{idx}")
             if use_prefix:
                 prefix_text = st.text_input(
@@ -640,167 +640,166 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
                 )
             else:
                 prefix_text = ""
-        
-        with col_suf:
-            use_suffix = st.checkbox("Add Suffix", key=f"use_suffix_{idx}")
-            if use_suffix:
-                suffix_text = st.text_input(
-                    "Suffix", 
-                    key=f"suffix_text_{idx}",
-                    placeholder="e.g., a",
-                    help="Result: video164_a"
-                )
-            else:
-                suffix_text = ""
-        
-        # Preview
-        if use_prefix or use_suffix:
-            preview_name = ""
-            if use_prefix and prefix_text:
-                preview_name = f"{prefix_text}_"
-            preview_name += "videoxxx"
-            if use_suffix and suffix_text:
-                preview_name += f"_{suffix_text}"
-            st.caption(f"📝 Preview: `{preview_name}`")
+    
+    with col_suf:
+        use_suffix = st.checkbox("Add Suffix", key=f"use_suffix_{idx}")
+        if use_suffix:
+            suffix_text = st.text_input(
+                "Suffix", 
+                key=f"suffix_text_{idx}",
+                placeholder="e.g., a",
+                help="Result: video164_a"
+            )
+        else:
+            suffix_text = ""
+    
+    # Preview
+    if use_prefix or use_suffix:
+        preview_name = ""
+        if use_prefix and prefix_text:
+            preview_name = f"{prefix_text}_"
+        preview_name += "videoxxx"
+        if use_suffix and suffix_text:
+            preview_name += f"_{suffix_text}"
+        st.caption(f"📝 Preview: `{preview_name}`")
 
-        st.divider()
+    st.divider()
 
+    # 3. Ad Creative Inputs
+    col_head, col_info = st.columns([1, 2])
+    col_head.caption("Creative Elements")
+    if source_msg:
+        col_info.info(source_msg, icon="🤖")
 
-        # 3. Ad Creative Inputs
-        col_head, col_info = st.columns([1, 2])
-        col_head.caption("Creative Elements")
-        if source_msg:
-            col_info.info(source_msg, icon="🤖")
-
-        # ✅ Primary Text - 태그 형태로 개별 관리
-        st.markdown("**Primary Text**")
-        
-        # Initialize session state for primary texts
-        primary_texts_key = f"primary_texts_{idx}"
-        if primary_texts_key not in st.session_state:
-            # Load from defaults or existing settings
-            if p_texts:
-                st.session_state[primary_texts_key] = p_texts.copy()
-            elif defaults:
-                # Try to split existing text
-                existing = defaults.get("primary_texts", [])
-                if existing:
-                    st.session_state[primary_texts_key] = existing.copy()
-                else:
-                    st.session_state[primary_texts_key] = [""]
+    # ✅ Primary Text - 태그 형태로 개별 관리
+    st.markdown("**Primary Text**")
+    
+    # Initialize session state for primary texts
+    primary_texts_key = f"primary_texts_{idx}"
+    if primary_texts_key not in st.session_state:
+        # Load from defaults or existing settings
+        if p_texts:
+            st.session_state[primary_texts_key] = p_texts.copy()
+        elif defaults:
+            # Try to split existing text
+            existing = defaults.get("primary_texts", [])
+            if existing:
+                st.session_state[primary_texts_key] = existing.copy()
             else:
                 st.session_state[primary_texts_key] = [""]
-        
-        primary_texts_list = st.session_state[primary_texts_key]
-        
-        # Display each primary text as editable tag
-        for i, text in enumerate(primary_texts_list):
-            col_text, col_del = st.columns([10, 1])
-            with col_text:
-                updated_text = st.text_input(
-                    f"Primary Text {i+1}",
-                    value=text,
-                    key=f"pt_{idx}_{i}",
-                    label_visibility="collapsed",
-                    placeholder="Tell people what your ad is about" if not text else None
-                )
-                primary_texts_list[i] = updated_text
-            with col_del:
-                if st.button("❌", key=f"pt_del_{idx}_{i}", help="Delete this text"):
-                    primary_texts_list.pop(i)
-                    st.session_state[primary_texts_key] = primary_texts_list
-                    st.rerun()
-        
-        # Add new primary text button
-        if st.button("➕ Add Primary Text", key=f"pt_add_{idx}"):
-            primary_texts_list.append("")
-            st.session_state[primary_texts_key] = primary_texts_list
-            st.rerun()
-        
-        # Join primary texts with double newline for backward compatibility
-        primary_text = "\n\n".join([t.strip() for t in primary_texts_list if t.strip()])
+        else:
+            st.session_state[primary_texts_key] = [""]
+    
+    primary_texts_list = st.session_state[primary_texts_key]
+    
+    # Display each primary text as editable tag
+    for i, text in enumerate(primary_texts_list):
+        col_text, col_del = st.columns([10, 1])
+        with col_text:
+            updated_text = st.text_input(
+                f"Primary Text {i+1}",
+                value=text,
+                key=f"pt_{idx}_{i}",
+                label_visibility="collapsed",
+                placeholder="Tell people what your ad is about" if not text else None
+            )
+            primary_texts_list[i] = updated_text
+        with col_del:
+            if st.button("❌", key=f"pt_del_{idx}_{i}", help="Delete this text"):
+                primary_texts_list.pop(i)
+                st.session_state[primary_texts_key] = primary_texts_list.copy()
+                st.rerun()
+    
+    # Add new primary text button
+    if st.button("➕ Add Primary Text", key=f"pt_add_{idx}"):
+        primary_texts_list.append("")
+        st.session_state[primary_texts_key] = primary_texts_list.copy()
+        st.rerun()
+    
+    # Join primary texts with double newline for backward compatibility
+    primary_text = "\n\n".join([t.strip() for t in primary_texts_list if t.strip()])
 
-       # ✅ Headlines - 태그 형태로 개별 관리
-        st.markdown("**Headlines**")
+    # ✅ Headlines - 태그 형태로 개별 관리
+    st.markdown("**Headlines**")
+    
+    headlines_key = f"headlines_{idx}"
 
-        headlines_key = f"headlines_{idx}"
+    # 템플릿이 바뀌었을 때만 defaults로 리셋 (Add/Del/수정 중에는 덮어쓰지 않음)
+    template_sig_key = f"headline_template_sig_{idx}"
+    current_template_sig = (
+        st.session_state.get(f"template_source_{idx}", ""),
+        tuple(h_lines or []),
+        defaults.get("source_ad_name") if defaults else None,
+    )
 
-        # 템플릿이 바뀌었을 때만 defaults로 리셋 (Add/Del/수정 중에는 덮어쓰지 않음)
-        template_sig_key = f"headline_template_sig_{idx}"
-        current_template_sig = (
-            st.session_state.get(f"template_source_{idx}", ""),
-            tuple(h_lines or []),
-            defaults.get("source_ad_name") if defaults else None,
-        )
+    if st.session_state.get(template_sig_key) != current_template_sig:
+        # 템플릿 변경 -> 템플릿 헤드라인으로 초기화
+        if h_lines:
+            st.session_state[headlines_key] = h_lines.copy()
+        elif defaults and defaults.get("headlines"):
+            st.session_state[headlines_key] = defaults["headlines"].copy()
+        else:
+            st.session_state[headlines_key] = [""]
+        st.session_state[template_sig_key] = current_template_sig
+    else:
+        # 일반 리런에서는 기존값 유지
+        if headlines_key not in st.session_state:
+            st.session_state[headlines_key] = [""]
+    
+    headlines_list = st.session_state[headlines_key]
+    
+    # Display each headline as editable tag
+    for i, headline_text in enumerate(headlines_list):
+        col_head, col_del = st.columns([10, 1])
+        with col_head:
+            updated_headline = st.text_input(
+                f"Headline {i+1}",
+                value=headline_text,
+                key=f"hl_{idx}_{i}",
+                label_visibility="collapsed",
+                placeholder="Write a short headline" if not headline_text else None
+            )
+            headlines_list[i] = updated_headline
+        with col_del:
+            if st.button("❌", key=f"hl_del_{idx}_{i}", help="Delete this headline"):
+                headlines_list.pop(i)
+                st.session_state[headlines_key] = headlines_list.copy()
+                st.rerun()
+    
+    # Add new headline button
+    if st.button("➕ Add Headline", key=f"hl_add_{idx}"):
+        st.session_state[headlines_key].append("")
+        st.rerun()
+    
+    # ✅ 루프 후 최신 값으로 업데이트
+    st.session_state[headlines_key] = headlines_list
+    
+    # Join headlines with newline for backward compatibility
+    headline = "\n".join([h.strip() for h in headlines_list if h.strip()])
 
-        if st.session_state.get(template_sig_key) != current_template_sig:
-            # 템플릿 변경 -> 템플릿 헤드라인으로 초기화
-            if h_lines:
-                st.session_state[headlines_key] = h_lines.copy()
-            elif defaults and defaults.get("headlines"):
-                st.session_state[headlines_key] = defaults["headlines"].copy()
-            else:
-                st.session_state[headlines_key] = [""]
-            st.session_state[template_sig_key] = current_template_sig
-        else:           
-            # 일반 리런에서는 기존값 유지
-            if headlines_key not in st.session_state:
-                st.session_state[headlines_key] = [""]
+    # CTA
+    call_to_action = st.selectbox(
+        "Call to Action", 
+        FB_CTA_OPTIONS, 
+        index=val_cta_idx,
+        key=f"cta_{idx}"
+    )
 
-        headlines_list = st.session_state[headlines_key]
-        
-        # Display each headline as editable tag
-        for i, headline_text in enumerate(headlines_list):
-            col_head, col_del = st.columns([10, 1])
-            with col_head:
-                updated_headline = st.text_input(
-                    f"Headline {i+1}",
-                    value=headline_text,
-                    key=f"hl_{idx}_{i}",
-                    label_visibility="collapsed",
-                    placeholder="Write a short headline" if not headline_text else None
-                )
-                headlines_list[i] = updated_headline
-            with col_del:
-                if st.button("❌", key=f"hl_del_{idx}_{i}", help="Delete this headline"):
-                    headlines_list.pop(i)
-                    st.session_state[headlines_key] = headlines_list.copy()
-                    st.rerun()
-        
-        # Add new headline button
-        if st.button("➕ Add Headline", key=f"hl_add_{idx}"):
-            st.session_state[headlines_key].append("")
-            st.rerun()
-        
-        # ✅ 루프 후 최신 값으로 업데이트
-        st.session_state[headlines_key] = headlines_list
+    # ✅ 처음 렌더링될 때만 default ON 주입 (이후엔 유저 선택 유지)
+    _multi_key = f"multi_ads_optin_{idx}"
+    if _multi_key not in st.session_state:
+        st.session_state[_multi_key] = True  # default = ON
 
-        # Join headlines with newline for backward compatibility
-        headline = "\n".join([h.strip() for h in headlines_list if h.strip()])
+    multi_advertiser_ads_opt_in = st.checkbox(
+        "Multi-advertiser ads 사용하기 (같은 유닛에 다른 광고와 함께 노출될 수 있음)",
+        key=_multi_key,
+    )
 
-        # CTA
-        call_to_action = st.selectbox(
-            "Call to Action",
-            FB_CTA_OPTIONS,
-            index=val_cta_idx,
-            key=f"cta_{idx}"
-        )
+    # Final Save
+    # ✅ UI에서 관리하는 "리스트"를 그대로 저장 (빈값 포함 허용)
+    _clean_keep_empty = lambda xs: [x if x is not None else "" for x in (xs or [])]
 
-        # ✅ 처음 렌더링될 때만 default ON 주입 (이후엔 유저 선택 유지)
-        _multi_key = f"multi_ads_optin_{idx}"
-        if _multi_key not in st.session_state:
-            st.session_state[_multi_key] = True  # default = ON
-
-        multi_advertiser_ads_opt_in = st.checkbox(
-            "Multi-advertiser ads 사용하기 (같은 유닛에 다른 광고와 함께 노출될 수 있음)",
-            key=_multi_key,
-        )
-
-        # Final Save
-        # ✅ UI에서 관리하는 "리스트"를 그대로 저장 (빈값 포함 허용)
-        _clean_keep_empty = lambda xs: [x if x is not None else "" for x in (xs or [])]
-
-        st.session_state.settings[game] = {
+    st.session_state.settings[game] = {
             "campaign_id": sel_c_id,
             "adset_id": sel_a_id,
             "creative_type": "Dynamic Creative",
@@ -860,14 +859,8 @@ def upload_to_facebook(
 
     # Validate Page
     page_check = validate_page_binding(account, page_id)
-    ig_actor_id_from_page = page_check.get("instagram_business_account_id")
-    if ig_actor_id_from_page:
-        st.session_state["ig_actor_id_from_page"] = ig_actor_id_from_page
 
     settings = dict(settings or {})
-    
-    # ✅ UI 선택값이 최우선: settings["instagram_actor_id"]가 있으면 그걸 사용
-    # (validate_page_binding 결과로 자동 override 하지 않음)
     
     # ✅ Marketer Mode: 선택된 AdSet 확인
     selected_adset_id = settings.get("adset_id")
@@ -899,12 +892,15 @@ def upload_to_facebook(
             store_url = sanitize_store_url(store_url)
         
         # ✅ 핵심: upload_videos_to_library_and_create_single_ads 사용
+        # game_name을 settings에 추가하여 전달
+        settings_with_game = dict(settings)
+        settings_with_game["game_name"] = game_name
         result = upload_videos_to_library_and_create_single_ads(
             account=account,
             page_id=str(page_id),
             adset_id=selected_adset_id,
             uploaded_files=uploaded_files,
-            settings=settings,
+            settings=settings_with_game,
             store_url=store_url,
             max_workers=6
         )
@@ -1082,12 +1078,23 @@ def upload_videos_to_library_and_create_single_ads(
     # Ad Format 확인
     dco_aspect_ratio = settings.get("dco_aspect_ratio", "단일 영상")
     is_dynamic_single_video = (dco_aspect_ratio == "다이내믹-single video")
+    is_dynamic_1x1 = (dco_aspect_ratio == "다이내믹-1x1")
     
     if is_dynamic_single_video:
-        # 다이내믹 모드로 처리
+        # 다이내믹-single video 모드로 처리
         return _upload_dynamic_single_video_ads(
             account, page_id, adset_id, uploaded_files,
             settings, store_url, max_workers
+        )
+    
+    if is_dynamic_1x1:
+        # 다이내믹-1x1 모드로 처리
+        game_name = settings.get("game_name", "")
+        if not game_name:
+            raise RuntimeError("❌ 게임 이름이 설정에 없습니다. 다이내믹-1x1 모드에는 게임 이름이 필요합니다.")
+        return _upload_dynamic_1x1_ads(
+            account, page_id, adset_id, uploaded_files,
+            settings, store_url, max_workers, game_name
         )
     
     # 기존 단일 영상 로직 그대로 실행 (아래 코드는 변경 없음)
@@ -1195,9 +1202,9 @@ def upload_videos_to_library_and_create_single_ads(
             final_store_url = settings["store_url"]
         elif not final_store_url and template.get("store_url"):
             final_store_url = template["store_url"]
-        
-        if final_store_url:
-            final_store_url = sanitize_store_url(final_store_url)
+
+    if final_store_url:
+        final_store_url = sanitize_store_url(final_store_url)
     
     # 결과 출력
     st.success(f"✅ 템플릿 로드 완료 (from: {template.get('source_ad_name', 'N/A')})")
@@ -1262,7 +1269,7 @@ def upload_videos_to_library_and_create_single_ads(
         return None
     
     video_groups = {}
-
+    
     for u in uploaded_files:
         fname = getattr(u, "name", None) or u.get("name", "")
         if not fname: 
@@ -1286,11 +1293,11 @@ def upload_videos_to_library_and_create_single_ads(
     st.write("📦 **그룹화 결과:**")
     for video_num, resolutions in video_groups.items():
         st.write(f"- {video_num}: {list(resolutions.keys())}")
-
+    
     # ✅ 해상도 우선순위에 따라 최적 비디오 선택
     valid_groups = {}
     RESOLUTION_PRIORITY = ["1080x1080", "1920x1080", "1080x1920"]
-
+    
     for video_num, files in video_groups.items():
         selected_resolution = None
         selected_file = None
@@ -1363,10 +1370,10 @@ def upload_videos_to_library_and_create_single_ads(
             sess = _get_session()
             def _do():
                 r = sess.post(base_url, data={**data, "access_token": token}, files=files, timeout=180)
-                j = r.json()
-                if "error" in j:
-                    raise RuntimeError(j["error"].get("message"))
-                return j
+            j = r.json()
+            if "error" in j: 
+                raise RuntimeError(j["error"].get("message"))
+            return j
             return with_retry(_do, tries=4, base_wait=1.0)
         
         # Start upload
@@ -1502,7 +1509,7 @@ def upload_videos_to_library_and_create_single_ads(
         match = re.search(r'(video\d+)', fname.lower())
         base_video_num = match.group(1) if match else video_num
         ad_name = _build_ad_name(base_video_num)
-
+            
         # save temp
         file_data = _save_tmp(f_obj)
         video_path = file_data["path"]
@@ -1566,7 +1573,7 @@ def upload_videos_to_library_and_create_single_ads(
         final_primary_texts = [t.strip() for t in (default_primary_texts or []) if (t or "").strip()]
         final_headlines = [h.strip() for h in (default_headlines or []) if (h or "").strip() and h.strip().lower() != "new game"]
         final_cta = default_cta if default_cta else "INSTALL_MOBILE_APP"
-
+                    
         # Build video_data safely (avoid sending empty fields)
         video_data = {"video_id": vid_id}
         if final_headlines:
@@ -1624,7 +1631,7 @@ def upload_videos_to_library_and_create_single_ads(
         def _create_ad():
             ad_params = {
                 "name": ad_name,
-                "adset_id": adset_id,
+                        "adset_id": adset_id,
                 "creative": {"creative_id": creative_id},
                 "status": Ad.Status.active,
             }
@@ -1635,7 +1642,7 @@ def upload_videos_to_library_and_create_single_ads(
             return ad_id
 
         ad_id = _with_retry(_create_ad, retries=3, base_sleep=2)
-
+        
         return {
             "ok": True,
             "result": {
@@ -1643,9 +1650,9 @@ def upload_videos_to_library_and_create_single_ads(
                 "ad_id": ad_id,
                 "creative_id": creative_id,
                 "resolution": resolution,
-                "used_values": {
-                    "primary_texts_count": len(final_primary_texts),
-                    "headlines_count": len(final_headlines),
+                            "used_values": {
+                                "primary_texts_count": len(final_primary_texts),
+                                "headlines_count": len(final_headlines),
                     "cta": final_cta,
                 },
             },
@@ -1835,7 +1842,7 @@ def upload_all_videos_to_media_library(
                     start_off = int(tr.get("start_offset", start_off))
                     end_off = int(tr.get("end_offset", end_off or file_size))
                     continue
-                
+                    
                 f.seek(start_off)
                 chunk = f.read(end_off - start_off)
                 tr = _post(
@@ -2257,11 +2264,6 @@ def _upload_dynamic_single_video_ads(
 
     # ✅ IG actor id: Streamlit에서 선택된 값 사용
     ig_actor_id = (settings.get("instagram_actor_id") or "").strip()
-    
-    if ig_actor_id:
-        st.info(f"✅ Instagram account 연결됨: {ig_actor_id}")
-    else:
-        st.info("ℹ️ IG identity not set -> Use Facebook Page")
 
     for video_num in sorted(all_video_ids.keys()):
         try:
@@ -2334,7 +2336,6 @@ def _upload_dynamic_single_video_ads(
             # ✅ Instagram account를 Creative 레벨에 추가
             if ig_actor_id:
                 creative_config["instagram_actor_id"] = ig_actor_id
-                st.info(f"    - ✅ {ad_name}: Instagram 연결됨 ({ig_actor_id})")
 
             ad_params = {
                 "name": ad_name,
@@ -2369,3 +2370,490 @@ def _upload_dynamic_single_video_ads(
         "errors": errors,
         "total_created": len(ads_created)
     }
+
+
+def _upload_dynamic_1x1_ads(
+    account, page_id: str, adset_id: str, uploaded_files: list,
+    settings: dict, store_url: str, max_workers: int, game_name: str
+) -> dict:
+    """
+    다이내믹-1x1 모드:
+    - 모든 비디오가 1080x1080 사이즈여야 함
+    - 모든 비디오가 같은 게임이어야 함
+    - 최대 10개 비디오
+    - 하나의 Flexible Ad 생성
+    """
+    logger = logging.getLogger(__name__)
+    
+    # ====================================================================
+    # STEP 0: 템플릿 로드
+    # ====================================================================
+    st.info("📋 AdSet에서 템플릿 정보 가져오는 중...")
+    template = fetch_latest_ad_creative_defaults(adset_id)
+    
+    # Primary Texts
+    default_primary_texts = []
+    if template.get("primary_texts"):
+        default_primary_texts = [pt.strip() for pt in template["primary_texts"] if pt.strip()]
+    elif settings.get("primary_text"):
+        text = settings["primary_text"].strip()
+        default_primary_texts = [t.strip() for t in text.split('\n\n') if t.strip()]
+
+    # Headlines
+    default_headlines = []
+    if template.get("headlines"):
+        for h in template["headlines"]:
+            cleaned = h.strip()
+            if cleaned and cleaned.lower() != "new game":
+                default_headlines.append(cleaned)
+    elif settings.get("headline"):
+        headline = settings["headline"].strip()
+        default_headlines = [h.strip() for h in headline.split('\n') if h.strip()]
+
+    if default_primary_texts is None:
+        default_primary_texts = []
+    if default_headlines is None:
+        default_headlines = []
+        
+    # CTA 우선순위: UI(settings) > template > default
+    default_cta = (settings.get("call_to_action") or "").strip()
+    if not default_cta:
+        default_cta = (template.get("call_to_action") or "").strip()
+    if not default_cta:
+        default_cta = "INSTALL_MOBILE_APP"
+    
+    # Store URL
+    final_store_url = ""
+    try:
+        adset = AdSet(adset_id)
+        adset_data = adset.api_get(fields=["promoted_object"])
+        promoted_obj = adset_data.get("promoted_object", {})
+        adset_store_url = promoted_obj.get("object_store_url", "")
+        
+        if adset_store_url:
+            final_store_url = sanitize_store_url(adset_store_url)
+            st.info(f"✅ AdSet의 Store URL 사용: {final_store_url[:60]}...")
+        else:
+            st.warning("⚠️ AdSet에 promoted_object가 없습니다")
+    except Exception as e:
+        st.warning(f"⚠️ AdSet 조회 실패: {e}")
+    
+    if not final_store_url:
+        if store_url:
+            final_store_url = sanitize_store_url(store_url)
+        elif settings.get("store_url"):
+            final_store_url = sanitize_store_url(settings["store_url"])
+    
+    if not final_store_url:
+        raise RuntimeError("❌ Store URL이 없습니다!")
+    if not final_store_url.startswith("http"):
+        raise RuntimeError(f"❌ 유효하지 않은 Store URL: {final_store_url}")
+    
+    st.success(f"✅ 템플릿 로드 완료")
+    st.caption(f"📝 Primary Texts: {len(default_primary_texts)}개")
+    st.caption(f"📰 Headlines: {len(default_headlines)}개")
+    st.caption(f"🎯 CTA: {default_cta}")
+    st.caption(f"🔗 Store URL: {final_store_url[:50]}...")
+    
+    # Prefix/Suffix
+    use_prefix = settings.get("use_prefix", False)
+    prefix_text = settings.get("prefix_text", "").strip()
+    use_suffix = settings.get("use_suffix", False)
+    suffix_text = settings.get("suffix_text", "").strip()
+    
+    # ====================================================================
+    # STEP 1: 비디오 검증 (1080x1080만, 개수 체크)
+    # ====================================================================
+    def _extract_video_number(fname):
+        match = re.search(r'video(\d+)', fname.lower())
+        return f"video{match.group(1)}" if match else None
+    
+    def _extract_resolution(fname):
+        if "1080x1080" in fname.lower():
+            return "1080x1080"
+        return None
+    
+    valid_videos = []
+    errors = []
+    
+    for u in uploaded_files:
+        fname = getattr(u, "name", None) or u.get("name", "")
+        if not fname:
+            continue
+        
+        video_num = _extract_video_number(fname)
+        resolution = _extract_resolution(fname)
+        
+        if not video_num:
+            errors.append(f"{fname}: video 번호를 찾을 수 없습니다")
+            continue
+        
+        # 1. 사이즈 체크 (1080x1080만 허용)
+        if not resolution or resolution != "1080x1080":
+            errors.append(f"{fname}: 비디오 사이즈 체크 바랍니다 (1080x1080만 허용)")
+            continue
+        
+        valid_videos.append({
+            "video_num": video_num,
+            "file": u,
+            "fname": fname
+        })
+    
+    # 3. 개수 체크 (10개 이하)
+    if len(valid_videos) > 10:
+        raise RuntimeError("❌ 다이내믹 광고는 10개이상의 동영상을 수용할 수 없습니다")
+    
+    if errors:
+        error_msg = "\n".join(errors)
+        raise RuntimeError(f"❌ 비디오 검증 실패:\n{error_msg}")
+    
+    if not valid_videos:
+        raise RuntimeError("❌ 유효한 비디오가 없습니다.")
+    
+    st.success(f"✅ {len(valid_videos)}개 비디오 검증 완료 (1080x1080)")
+    
+    # ====================================================================
+    # STEP 2: 모든 비디오 업로드
+    # ====================================================================
+    def _save_tmp(u):
+        if isinstance(u, dict) and "path" in u:
+            return {"name": u["name"], "path": u["path"]}
+        if hasattr(u, "getbuffer"):
+            suffix = pathlib.Path(u.name).suffix.lower() or ".mp4"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(u.getbuffer())
+                return {"name": u.name, "path": tmp.name}
+        raise ValueError("Unsupported video object")
+    
+    def _upload_video_with_title(path: str, title: str) -> str:
+        if "facebook" in st.secrets:
+            token = st.secrets["facebook"].get("access_token", "").strip()
+        else:
+            token = st.secrets.get("access_token", "").strip()
+        
+        act = account.get_id()
+        base_url = f"https://graph.facebook.com/v24.0/{act}/advideos"
+        file_size = os.path.getsize(path)
+        
+        def _post(data, files=None):
+            r = requests.post(base_url, data={**data, "access_token": token}, files=files, timeout=180)
+            j = r.json()
+            if "error" in j: 
+                raise RuntimeError(j["error"].get("message"))
+            return j
+        
+        start_resp = _post({
+            "upload_phase": "start",
+            "file_size": str(file_size),
+            "title": title,
+            "content_category": "VIDEO_GAMING"
+        })
+        
+        sess_id = start_resp["upload_session_id"]
+        vid_id = start_resp["video_id"]
+        start_off = int(start_resp.get("start_offset", 0))
+        end_off = int(start_resp.get("end_offset", 0))
+        
+        with open(path, "rb") as f:
+            while True:
+                if start_off == end_off == file_size: 
+                    break
+                if end_off <= start_off:
+                    tr = _post({"upload_phase": "transfer", "upload_session_id": sess_id, "start_offset": str(start_off)})
+                    start_off = int(tr.get("start_offset", start_off))
+                    end_off = int(tr.get("end_offset", end_off or file_size))
+                    continue
+                
+                f.seek(start_off)
+                chunk = f.read(end_off - start_off)
+                tr = _post(
+                    {"upload_phase": "transfer", "upload_session_id": sess_id, "start_offset": str(start_off)},
+                    files={"video_file_chunk": ("chunk.bin", chunk, "application/octet-stream")}
+                )
+                start_off = int(tr.get("start_offset", start_off + len(chunk)))
+                end_off = int(tr.get("end_offset", end_off))
+        
+        try: 
+            _post({"upload_phase": "finish", "upload_session_id": sess_id, "title": title})
+        except: 
+            pass
+        
+        return vid_id
+    
+    # 모든 비디오 업로드 (병렬 처리)
+    all_video_ids = {}
+    thumb_urls = {}
+    
+    tasks = []
+    for vid_data in valid_videos:
+        video_num = vid_data["video_num"]
+        f_obj = vid_data["file"]
+        fname = vid_data["fname"]
+        all_video_ids[video_num] = {}
+        tasks.append((video_num, f_obj, fname))
+    
+    total_uploads = len(tasks)
+    prog = st.progress(0, text=f"📤 비디오 업로드 중... 0/{total_uploads}")
+    done = 0
+    
+    def _upload_one(video_num: str, f_obj, fname: str):
+        """Uploads one video; also prepares one thumbnail."""
+        file_data = _save_tmp(f_obj)
+        
+        # 썸네일 생성
+        if video_num not in thumb_urls:
+            try:
+                thumb_path = extract_thumbnail_from_video(file_data["path"])
+                thumb_urls[video_num] = upload_thumbnail_image(account, thumb_path)
+                try:
+                    os.unlink(thumb_path)
+                except:
+                    pass
+            except Exception:
+                thumb_urls[video_num] = None
+        
+        vid_id = _upload_video_with_title(file_data["path"], fname)
+        return (video_num, vid_id)
+    
+    upload_workers = min(4, max(2, total_uploads))
+    upload_errors = []
+    
+    with ThreadPoolExecutor(max_workers=upload_workers) as ex:
+        futs = {
+            ex.submit(_upload_one, vn, fo, fname): (vn, fname)
+            for (vn, fo, fname) in tasks
+        }
+        
+        for fut in as_completed(futs):
+            done += 1
+            prog.progress(int(done / total_uploads * 100), text=f"📤 비디오 업로드 중... {done}/{total_uploads}")
+            try:
+                video_num, vid_id = fut.result()
+                all_video_ids[video_num] = vid_id
+            except Exception as e:
+                vn, fname = futs[fut]
+                upload_errors.append(f"{fname}: {e}")
+                st.error(f"❌ {fname} 업로드 실패: {e}")
+    
+    prog.empty()
+    
+    if upload_errors:
+        raise RuntimeError("Upload failed for some videos:\n" + "\n".join(upload_errors))
+    
+    st.success(f"✅ {total_uploads}개 비디오 업로드 완료")
+    
+    # 비디오 처리 완료 대기
+    st.info("⏳ 업로드된 비디오 처리 완료 대기 중...")
+    
+    all_vids = list(all_video_ids.values())
+    errs = []
+    with ThreadPoolExecutor(max_workers=min(6, max(2, len(all_vids)))) as ex:
+        futs = {ex.submit(wait_video_ready, vid, 300, 1.0): vid for vid in all_vids}
+        for fut in as_completed(futs):
+            vid = futs[fut]
+            try:
+                fut.result()
+            except Exception as e:
+                errs.append(f"{vid}: {e}")
+    
+    if errs:
+        raise RuntimeError("Some videos did not become ready:\n" + "\n".join(errs))
+    
+    # ====================================================================
+    # STEP 3: Ad 이름 생성
+    # ====================================================================
+    def _extract_game_name_from_filename(fname):
+        """
+        파일명에서 게임 이름 추출
+        예: video100_gamename_en_37s_1080x1080.mp4 -> gamename
+        """
+        # 패턴: video숫자_게임이름_언어코드_길이_해상도
+        # 예: video100_suzyrest_en_37s_1080x1080.mp4
+        match = re.search(r'video\d+_(.+?)_[a-z]{2}_\d+s_', fname.lower())
+        if match:
+            return match.group(1)
+        return None
+    
+    # 모든 비디오 파일명에서 게임 이름 추출
+    extracted_game_names = []
+    for vid_data in valid_videos:
+        fname = vid_data["fname"]
+        game_name_from_file = _extract_game_name_from_filename(fname)
+        if game_name_from_file:
+            extracted_game_names.append(game_name_from_file)
+    
+    # 가장 많이 나온 게임 이름 사용 (또는 첫 번째)
+    if extracted_game_names:
+        # 가장 많이 나온 것 사용
+        from collections import Counter
+        game_name_counter = Counter(extracted_game_names)
+        most_common_game_name = game_name_counter.most_common(1)[0][0]
+        game_name_clean = most_common_game_name
+        st.info(f"📝 파일명에서 추출한 게임 이름: {game_name_clean}")
+    else:
+        # 추출 실패 시 기존 로직 사용 (game_name 파라미터)
+        game_name_clean = re.sub(r'[^\w]', '', game_name.lower())
+        st.warning(f"⚠️ 파일명에서 게임 이름을 추출할 수 없어 기본값 사용: {game_name_clean}")
+    
+    video_numbers = []
+    for vid_data in valid_videos:
+        video_num = vid_data["video_num"]
+        match = re.search(r'video(\d+)', video_num.lower())
+        if match:
+            video_numbers.append(int(match.group(1)))
+    
+    if not video_numbers:
+        raise RuntimeError("❌ 비디오 번호를 추출할 수 없습니다.")
+    
+    video_numbers.sort()
+    min_num = video_numbers[0]
+    max_num = video_numbers[-1]
+    
+    # 범위 밖 비디오 찾기
+    range_videos = set(range(min_num, max_num + 1))
+    actual_videos = set(video_numbers)
+    out_of_range = sorted(actual_videos - range_videos)
+    
+    # Ad 이름 생성
+    ad_name_setting = settings.get("dco_creative_name", "").strip()
+    if ad_name_setting:
+        # 사용자가 Ad Name을 설정한 경우
+        ad_name = ad_name_setting
+    else:
+        # 기본 Ad 이름 생성
+        name_parts = []
+        
+        # 범위 밖 비디오가 있으면 앞에 추가
+        if out_of_range:
+            for num in out_of_range:
+                name_parts.append(f"video{num}")
+            name_parts.append(",")
+        
+        # 범위 비디오
+        if min_num == max_num:
+            name_parts.append(f"video{min_num}")
+        else:
+            name_parts.append(f"video{min_num}-{max_num}")
+        
+        # 게임 이름 및 접미사
+        name_parts.append(game_name_clean)
+        name_parts.append("flexible")
+        name_parts.append("정방")
+        
+        ad_name = "_".join(name_parts)
+    
+    # Prefix/Suffix 적용
+    if use_prefix and prefix_text:
+        ad_name = f"{prefix_text}_{ad_name}"
+    if use_suffix and suffix_text:
+        ad_name = f"{ad_name}_{suffix_text}"
+    
+    # ====================================================================
+    # STEP 4: 하나의 Flexible Ad 생성
+    # ====================================================================
+    try:
+        # 모든 비디오를 하나의 그룹으로
+        videos = [{"video_id": vid_id} for vid_id in all_video_ids.values()]
+        
+        # 텍스트 필터링
+        texts = []
+        for pt in (default_primary_texts or []):
+            pt = (pt or "").strip()
+            if pt:
+                texts.append({"text": pt, "text_type": "primary_text"})
+        for hl in (default_headlines or []):
+            hl = (hl or "").strip()
+            if hl and hl.lower() != "new game":
+                texts.append({"text": hl, "text_type": "headline"})
+        
+        # group payload
+        group_payload = {
+            "videos": videos,
+            "call_to_action": {
+                "type": default_cta,
+                "value": {"link": final_store_url}
+            }
+        }
+        if texts:
+            group_payload["texts"] = texts
+        
+        # inline creative: 첫 번째 video_id 사용
+        inline_video_data = {
+            "video_id": videos[0]["video_id"],
+            "call_to_action": {
+                "type": default_cta,
+                "value": {"link": final_store_url}
+            },
+        }
+        
+        # 썸네일 제공 (첫 번째 비디오의 썸네일 사용)
+        first_video_num = valid_videos[0]["video_num"]
+        thumb_url = thumb_urls.get(first_video_num)
+        if thumb_url:
+            inline_video_data["image_url"] = thumb_url
+        else:
+            raise RuntimeError("썸네일(image_url) 생성 실패: object_story_spec.video_data에 필요함")
+        
+        # Object Story Spec 구성
+        inline_object_story_spec = {
+            "page_id": str(page_id),
+            "video_data": inline_video_data
+        }
+        
+        # IG identity (optional)
+        ig_actor_id = (settings.get("instagram_actor_id") or "").strip()
+        if ig_actor_id:
+            inline_object_story_spec["instagram_actor_id"] = ig_actor_id
+        
+        # Multi-advertiser ads 토글
+        multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", True))
+        multi_enroll_status = "OPT_IN" if multi_opt_in else "OPT_OUT"
+        
+        # Creative 구성
+        creative_config = {
+            "name": ad_name,
+            "actor_id": str(page_id),
+            "object_story_spec": inline_object_story_spec,
+            "contextual_multi_ads": {"enroll_status": multi_enroll_status},
+        }
+        
+        if ig_actor_id:
+            creative_config["instagram_actor_id"] = ig_actor_id
+        
+        ad_params = {
+            "name": ad_name,
+            "adset_id": adset_id,
+            "creative": creative_config,
+            "creative_asset_groups_spec": {
+                "groups": [group_payload]
+            },
+            "status": Ad.Status.active,
+        }
+        
+        ad_response = account.create_ad(fields=[], params=ad_params)
+        ad_id = ad_response.get("id")
+        if not ad_id:
+            raise RuntimeError(f"Ad 생성 응답에 id가 없습니다: {ad_response}")
+        
+        st.success(f"✅ Flexible Ad 생성 완료: {ad_name} / {ad_id}")
+        
+        return {
+            "ads": [{
+                "name": ad_name,
+                "ad_id": ad_id,
+                "creative_id": None,
+                "video_groups": [vid_data["video_num"] for vid_data in valid_videos],
+                "total_videos": len(videos)
+            }],
+            "errors": [],
+            "total_created": 1
+        }
+        
+    except Exception as e:
+        error_msg = f"Flexible Ad 생성 실패: {e}"
+        st.error(f"❌ {error_msg}")
+        return {
+            "ads": [],
+            "errors": [error_msg],
+            "total_created": 0
+        }
