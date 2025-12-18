@@ -120,6 +120,42 @@ def _extract_number_from_name(name: str) -> int:
     # Return the largest number found to be safe, or just the first if preferred
     return max([int(m) for m in matches])
 
+
+def _build_video_ranges_label(nums: list[int]) -> str:
+    """
+    Build a label like:
+      - [481, 483, 484, 485, 486, 487, 488, 489] -> "video481, video483-489"
+      - [100, 101, 102, 103, 104, 123] -> "video123, video100-104"
+
+    Rule:
+    - Split into consecutive ranges.
+    - Choose the "main" range as the longest (ties -> smaller start wins).
+    - Put other ranges first (sorted by start desc), main range last.
+    """
+    nums = sorted(set(int(x) for x in (nums or []) if x is not None))
+    if not nums:
+        return ""
+
+    ranges: list[tuple[int, int, int]] = []
+    start = prev = nums[0]
+    for n in nums[1:]:
+        if n == prev + 1:
+            prev = n
+            continue
+        ranges.append((start, prev, prev - start + 1))
+        start = prev = n
+    ranges.append((start, prev, prev - start + 1))
+
+    main = max(ranges, key=lambda r: (r[2], -r[0]))
+    others = [r for r in ranges if r != main]
+    others.sort(key=lambda r: r[0], reverse=True)
+
+    def _fmt(a: int, b: int) -> str:
+        return f"video{a}" if a == b else f"video{a}-{b}"
+
+    parts = [_fmt(a, b) for (a, b, _) in others] + [_fmt(main[0], main[1])]
+    return ", ".join(parts)
+
 # --- Cached Data Fetchers ---
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -165,7 +201,8 @@ def fetch_latest_ad_creative_defaults(adset_id: str) -> dict:
         # Fetch ads
         ads = adset.get_ads(
             fields=[Ad.Field.name, Ad.Field.creative],
-            params={"limit": 100, "effective_status": ["ACTIVE", "PAUSED", "ARCHIVED"]}
+            # Template Source Auto (highest): active ads only
+            params={"limit": 100, "effective_status": ["ACTIVE"]}
         )
         
         if not ads: return {}
@@ -303,7 +340,8 @@ def fetch_ads_in_adset(adset_id: str) -> list[dict]:
         adset = AdSet(adset_id)
         ads = adset.get_ads(
             fields=[Ad.Field.name, Ad.Field.id],
-            params={"limit": 100, "effective_status": ["ACTIVE", "PAUSED", "ARCHIVED"]}
+            # Template Source: active ads only
+            params={"limit": 100, "effective_status": ["ACTIVE"]}
         )
         
         result = []
@@ -2282,16 +2320,25 @@ def _upload_dynamic_single_video_ads(
             # Ad 이름: video166 기준 (prefix/suffix 적용)
             ad_name = _build_ad_name(video_num)
 
-            # ✅ 텍스트: "빈 문자열"은 API에 안 올리도록 필터링
-            texts = []
+            # ✅ 텍스트: text_type당 최대 5개 제한(Flexible Ad Format 제한)
+            final_primary_texts = []
             for pt in (default_primary_texts or []):
                 pt = (pt or "").strip()
                 if pt:
-                    texts.append({"text": pt, "text_type": "primary_text"})
+                    final_primary_texts.append(pt)
+            final_primary_texts = final_primary_texts[:5]
+
+            final_headlines = []
             for hl in (default_headlines or []):
                 hl = (hl or "").strip()
                 if hl and hl.lower() != "new game":
-                    texts.append({"text": hl, "text_type": "headline"})
+                    final_headlines.append(hl)
+            final_headlines = final_headlines[:5]
+
+            texts = (
+                [{"text": t, "text_type": "primary_text"} for t in final_primary_texts]
+                + [{"text": t, "text_type": "headline"} for t in final_headlines]
+            )
 
             # ✅ group payload (texts가 비면 아예 키를 빼서 보냄)
             group_payload = {
@@ -2732,14 +2779,9 @@ def _upload_dynamic_1x1_ads(
     if not video_numbers:
         raise RuntimeError("❌ 비디오 번호를 추출할 수 없습니다.")
     
-    video_numbers.sort()
-    min_num = video_numbers[0]
-    max_num = video_numbers[-1]
-    
-    # 범위 밖 비디오 찾기
-    range_videos = set(range(min_num, max_num + 1))
-    actual_videos = set(video_numbers)
-    out_of_range = sorted(actual_videos - range_videos)
+    video_label = _build_video_ranges_label(video_numbers)
+    if not video_label:
+        raise RuntimeError("❌ 비디오 번호를 추출할 수 없습니다.")
     
     # Ad 이름 생성
     ad_name_setting = settings.get("dco_creative_name", "").strip()
@@ -2748,26 +2790,7 @@ def _upload_dynamic_1x1_ads(
         ad_name = ad_name_setting
     else:
         # 기본 Ad 이름 생성
-        name_parts = []
-        
-        # 범위 밖 비디오가 있으면 앞에 추가
-        if out_of_range:
-            for num in out_of_range:
-                name_parts.append(f"video{num}")
-            name_parts.append(",")
-        
-        # 범위 비디오
-        if min_num == max_num:
-            name_parts.append(f"video{min_num}")
-        else:
-            name_parts.append(f"video{min_num}-{max_num}")
-        
-        # 게임 이름 및 접미사
-        name_parts.append(game_name_clean)
-        name_parts.append("flexible")
-        name_parts.append("정방")
-        
-        ad_name = "_".join(name_parts)
+        ad_name = f"{video_label}_{game_name_clean}_flexible_정방"
     
     # Prefix/Suffix 적용
     if use_prefix and prefix_text:
@@ -2783,16 +2806,25 @@ def _upload_dynamic_1x1_ads(
         # 모든 비디오를 하나의 그룹으로
         videos = [{"video_id": vid_id} for vid_id in all_video_ids.values()]
         
-        # 텍스트 필터링
-        texts = []
+        # 텍스트 필터링 (Flexible Ad Format 제한: text_type당 최대 5개)
+        final_primary_texts = []
         for pt in (default_primary_texts or []):
             pt = (pt or "").strip()
             if pt:
-                texts.append({"text": pt, "text_type": "primary_text"})
+                final_primary_texts.append(pt)
+        final_primary_texts = final_primary_texts[:5]
+
+        final_headlines = []
         for hl in (default_headlines or []):
             hl = (hl or "").strip()
             if hl and hl.lower() != "new game":
-                texts.append({"text": hl, "text_type": "headline"})
+                final_headlines.append(hl)
+        final_headlines = final_headlines[:5]
+
+        texts = (
+            [{"text": t, "text_type": "primary_text"} for t in final_primary_texts]
+            + [{"text": t, "text_type": "headline"} for t in final_headlines]
+        )
         
         # group payload
         group_payload = {
@@ -3222,35 +3254,15 @@ def _upload_dynamic_16x9_ads(
     if not video_numbers:
         raise RuntimeError("❌ 비디오 번호를 추출할 수 없습니다.")
 
-    video_numbers.sort()
-    min_num = video_numbers[0]
-    max_num = video_numbers[-1]
-
-    range_videos = set(range(min_num, max_num + 1))
-    actual_videos = set(video_numbers)
-    out_of_range = sorted(actual_videos - range_videos)
+    video_label = _build_video_ranges_label(video_numbers)
+    if not video_label:
+        raise RuntimeError("❌ 비디오 번호를 추출할 수 없습니다.")
 
     ad_name_setting = settings.get("dco_creative_name", "").strip()
     if ad_name_setting:
         ad_name = ad_name_setting
     else:
-        name_parts = []
-
-        if out_of_range:
-            for num in out_of_range:
-                name_parts.append(f"video{num}")
-            name_parts.append(",")
-
-        if min_num == max_num:
-            name_parts.append(f"video{min_num}")
-        else:
-            name_parts.append(f"video{min_num}-{max_num}")
-
-        name_parts.append(game_name_clean)
-        name_parts.append("flexible")
-        name_parts.append("가로")
-
-        ad_name = "_".join(name_parts)
+        ad_name = f"{video_label}_{game_name_clean}_flexible_가로"
 
     if use_prefix and prefix_text:
         ad_name = f"{prefix_text}_{ad_name}"
@@ -3264,15 +3276,25 @@ def _upload_dynamic_16x9_ads(
     try:
         videos = [{"video_id": vid_id} for vid_id in all_video_ids.values()]
 
-        texts = []
+        # 텍스트 필터링 (Flexible Ad Format 제한: text_type당 최대 5개)
+        final_primary_texts = []
         for pt in (default_primary_texts or []):
             pt = (pt or "").strip()
             if pt:
-                texts.append({"text": pt, "text_type": "primary_text"})
+                final_primary_texts.append(pt)
+        final_primary_texts = final_primary_texts[:5]
+
+        final_headlines = []
         for hl in (default_headlines or []):
             hl = (hl or "").strip()
             if hl and hl.lower() != "new game":
-                texts.append({"text": hl, "text_type": "headline"})
+                final_headlines.append(hl)
+        final_headlines = final_headlines[:5]
+
+        texts = (
+            [{"text": t, "text_type": "primary_text"} for t in final_primary_texts]
+            + [{"text": t, "text_type": "headline"} for t in final_headlines]
+        )
 
         group_payload = {
             "videos": videos,
@@ -3679,35 +3701,15 @@ def _upload_dynamic_9x16_ads(
     if not video_numbers:
         raise RuntimeError("❌ 비디오 번호를 추출할 수 없습니다.")
 
-    video_numbers.sort()
-    min_num = video_numbers[0]
-    max_num = video_numbers[-1]
-
-    range_videos = set(range(min_num, max_num + 1))
-    actual_videos = set(video_numbers)
-    out_of_range = sorted(actual_videos - range_videos)
+    video_label = _build_video_ranges_label(video_numbers)
+    if not video_label:
+        raise RuntimeError("❌ 비디오 번호를 추출할 수 없습니다.")
 
     ad_name_setting = settings.get("dco_creative_name", "").strip()
     if ad_name_setting:
         ad_name = ad_name_setting
     else:
-        name_parts = []
-
-        if out_of_range:
-            for num in out_of_range:
-                name_parts.append(f"video{num}")
-            name_parts.append(",")
-
-        if min_num == max_num:
-            name_parts.append(f"video{min_num}")
-        else:
-            name_parts.append(f"video{min_num}-{max_num}")
-
-        name_parts.append(game_name_clean)
-        name_parts.append("flexible")
-        name_parts.append("세로")
-
-        ad_name = "_".join(name_parts)
+        ad_name = f"{video_label}_{game_name_clean}_flexible_세로"
 
     if use_prefix and prefix_text:
         ad_name = f"{prefix_text}_{ad_name}"
@@ -3721,15 +3723,25 @@ def _upload_dynamic_9x16_ads(
     try:
         videos = [{"video_id": vid_id} for vid_id in all_video_ids.values()]
 
-        texts = []
+        # 텍스트 필터링 (Flexible Ad Format 제한: text_type당 최대 5개)
+        final_primary_texts = []
         for pt in (default_primary_texts or []):
             pt = (pt or "").strip()
             if pt:
-                texts.append({"text": pt, "text_type": "primary_text"})
+                final_primary_texts.append(pt)
+        final_primary_texts = final_primary_texts[:5]
+
+        final_headlines = []
         for hl in (default_headlines or []):
             hl = (hl or "").strip()
             if hl and hl.lower() != "new game":
-                texts.append({"text": hl, "text_type": "headline"})
+                final_headlines.append(hl)
+        final_headlines = final_headlines[:5]
+
+        texts = (
+            [{"text": t, "text_type": "primary_text"} for t in final_primary_texts]
+            + [{"text": t, "text_type": "headline"} for t in final_headlines]
+        )
 
         group_payload = {
             "videos": videos,
