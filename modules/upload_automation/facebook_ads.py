@@ -1127,7 +1127,30 @@ def _plan_upload(
         except Exception:
             launch_date_suffix = ""
 
-    adset_name = f"{adset_prefix}{ai_suffix}_{suffix_str}{launch_date_suffix}"
+    # CRITICAL: Get countries as list (backward compatible)
+    countries = settings.get("countries", ["US"])
+    if isinstance(countries, str):
+        countries = [countries]  # Old format conversion
+
+    # Use selected countries to derive geo token for naming:
+    # - 1 country  => <cc> (lowercase), e.g. JP -> jp, KR -> kr
+    # - 2+ countries => ww
+    uniq = sorted({str(c).strip().upper() for c in (countries or []) if str(c).strip()})
+    geo_label = (uniq[0].lower() if len(uniq) == 1 else "ww")
+
+    # Replace token after "facebook" in prefix (e.g. ..._facebook_us_... -> ..._facebook_jp_...)
+    adset_prefix_for_name = adset_prefix
+    parts = str(adset_prefix or "").split("_")
+    try:
+        fb_idx = parts.index("facebook")
+        if fb_idx + 1 < len(parts):
+            parts[fb_idx + 1] = geo_label
+            adset_prefix_for_name = "_".join(parts)
+    except ValueError:
+        # If no "facebook" token exists, keep prefix as-is.
+        pass
+
+    adset_name = f"{adset_prefix_for_name}{ai_suffix}_{suffix_str}{launch_date_suffix}"
 
     allowed = {".mp4", ".mpeg4"}
     remote = st.session_state.remote_videos.get(settings.get("game_key", ""), []) or []
@@ -1147,11 +1170,6 @@ def _plan_upload(
         settings.get("ad_name_prefix") if settings.get("ad_name_mode") == "Prefix + filename" else None
     )
     ad_names = [make_ad_name(_name(u), ad_name_prefix) for u in vids_all]
-
-    # CRITICAL: Get countries as list (backward compatible)
-    countries = settings.get("countries", ["US"])
-    if isinstance(countries, str):
-        countries = [countries]  # Old format conversion
 
     return {
         "campaign_id": campaign_id,
