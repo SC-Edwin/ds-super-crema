@@ -30,6 +30,7 @@ from facebook_business.adobjects.campaign import Campaign
 from facebook_business.exceptions import FacebookRequestError
     
 # Local imports
+from modules.upload_automation import devtools
 from facebook_ads import (
     FB_GAME_MAPPING,
     GAME_DEFAULTS,
@@ -50,6 +51,34 @@ from facebook_ads import (
 
 
 logger = logging.getLogger(__name__)
+
+# =========================================================
+# Dev-only UI helpers (hide noisy status banners unless ?dev=1)
+# =========================================================
+def _dev_info(msg: str) -> None:
+    if devtools.dev_enabled():
+        st.info(msg)
+
+
+def _dev_success(msg: str) -> None:
+    if devtools.dev_enabled():
+        st.success(msg)
+
+
+def _dev_caption(msg: str) -> None:
+    if devtools.dev_enabled():
+        st.caption(msg)
+
+
+def _dev_warning(msg: str) -> None:
+    if devtools.dev_enabled():
+        st.warning(msg)
+
+
+def _dev_write(msg: str) -> None:
+    if devtools.dev_enabled():
+        st.write(msg)
+
 
 # --- Constants ---
 FB_CTA_OPTIONS = [
@@ -823,10 +852,10 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             key=f"cta_{idx}"
         )
 
-        # ✅ 처음 렌더링될 때만 default ON 주입 (이후엔 유저 선택 유지)
+        # ✅ 처음 렌더링될 때만 default OFF 주입 (이후엔 유저 선택 유지)
         _multi_key = f"multi_ads_optin_{idx}"
         if _multi_key not in st.session_state:
-            st.session_state[_multi_key] = True  # default = ON
+            st.session_state[_multi_key] = False  # default = OFF
 
         multi_advertiser_ads_opt_in = st.checkbox(
             "Multi-advertiser ads 사용하기 (같은 유닛에 다른 광고와 함께 노출될 수 있음)",
@@ -907,7 +936,7 @@ def upload_to_facebook(
         # ========================================
         # MARKETER MODE: 선택된 AdSet에 바로 업로드
         # ========================================
-        st.info("📌 Marketer Mode: 선택된 Ad Set에 업로드")
+        _dev_info("📌 Marketer Mode: 선택된 Ad Set에 업로드")
         
         # Store URL 가져오기
         game_defaults = GAME_DEFAULTS.get(game_name, {})
@@ -1175,19 +1204,20 @@ def upload_videos_to_library_and_create_single_ads(
         adset_store_url = promoted_obj.get("object_store_url", "")
         
         if adset_store_url:
-            st.info(f"📌 Ad Set의 Store URL: {adset_store_url[:60]}...")
+            _dev_info(f"📌 Ad Set의 Store URL: {adset_store_url[:60]}...")
             # ✅ Ad Set URL을 최우선으로 사용 (일치 보장)
             if not store_url:
                 store_url = adset_store_url
-                st.success("✅ Ad Set URL을 사용합니다 (일치 보장)")
+                _dev_success("✅ Ad Set URL을 사용합니다 (일치 보장)")
         else:
-            st.warning("⚠️ Ad Set에 promoted_object가 없습니다")
+            _dev_warning("⚠️ Ad Set에 promoted_object가 없습니다")
     except Exception as e:
-        st.warning(f"⚠️ Ad Set 조회 실패: {e}")
+        devtools.record_exception("Ad Set 조회 실패", e)
+        _dev_warning(f"⚠️ Ad Set 조회 실패: {e}")
     # ====================================================================
     # STEP 0: Get template from highest video in AdSet
     # ====================================================================
-    st.info("🔍 AdSet에서 템플릿 정보 가져오는 중...")
+    _dev_info("🔍 AdSet에서 템플릿 정보 가져오는 중...")
     template = fetch_latest_ad_creative_defaults(adset_id)
 
     # ✅ 디버그 출력
@@ -1209,7 +1239,7 @@ def upload_videos_to_library_and_create_single_ads(
         default_primary_texts = [t.strip() for t in text.split('\n\n') if t.strip()] if text else []
         # st.write(f"✅ Loaded {len(default_primary_texts)} primary texts from settings")
     else:
-        st.warning("⚠️ No primary texts found in template or settings!")
+        _dev_warning("⚠️ No primary texts found in template or settings!")
 
     # ✅ 모든 Primary Text 복사 (배열 그대로)
     default_primary_texts = []
@@ -1222,9 +1252,9 @@ def upload_videos_to_library_and_create_single_ads(
     
     # 디버그 출력은 선택적으로
     if default_primary_texts:
-        st.write(f"✅ Loaded {len(default_primary_texts)} primary texts")
+        _dev_write(f"✅ Loaded {len(default_primary_texts)} primary texts")
     else:
-        st.warning("⚠️ No primary texts found in template or settings!")
+        _dev_warning("⚠️ No primary texts found in template or settings!")
 
     # ✅ 모든 Headline 복사 (배열 그대로)
     default_headlines = []
@@ -1250,7 +1280,7 @@ def upload_videos_to_library_and_create_single_ads(
     if adset_store_url:
         # AdSet URL을 최우선으로 사용 (일치 보장)
         final_store_url = sanitize_store_url(adset_store_url)
-        st.info(f"✅ Ad Set의 Store URL 사용: {final_store_url[:50]}...")
+        _dev_info(f"✅ Ad Set의 Store URL 사용: {final_store_url[:50]}...")
     else:
         # AdSet URL이 없을 때만 다른 소스 사용
         final_store_url = store_url  # 인자로 받은 값
@@ -1264,29 +1294,31 @@ def upload_videos_to_library_and_create_single_ads(
         final_store_url = sanitize_store_url(final_store_url)
     
     # 결과 출력
-    st.success(f"✅ 템플릿 로드 완료 (from: {template.get('source_ad_name', 'N/A')})")
+    if devtools.dev_enabled():
+        st.success(f"✅ 템플릿 로드 완료 (from: {template.get('source_ad_name', 'N/A')})")
 
-    if default_primary_texts:
-        st.caption(f"📝 Primary Texts: {len(default_primary_texts)}개")
-        with st.expander("Primary Text 목록 보기", expanded=False):
-            for idx, text in enumerate(default_primary_texts, 1):
-                st.write(f"{idx}. {text[:80]}...")
-    else:
-        st.warning("⚠️ Primary Text 없음")
+        if default_primary_texts:
+            st.caption(f"📝 Primary Texts: {len(default_primary_texts)}개")
+            with st.expander("Primary Text 목록 보기", expanded=False):
+                for idx, text in enumerate(default_primary_texts, 1):
+                    st.write(f"{idx}. {text[:80]}...")
+        else:
+            _dev_warning("⚠️ Primary Text 없음")
 
-    if default_headlines:
-        st.caption(f"📰 Headlines: {len(default_headlines)}개")
-        with st.expander("Headline 목록 보기", expanded=False):
-            for idx, h in enumerate(default_headlines, 1):
-                st.write(f"{idx}. {h}")
-    else:
-        st.warning("⚠️ Headline 없음")
+        if default_headlines:
+            st.caption(f"📰 Headlines: {len(default_headlines)}개")
+            with st.expander("Headline 목록 보기", expanded=False):
+                for idx, h in enumerate(default_headlines, 1):
+                    st.write(f"{idx}. {h}")
+        else:
+            _dev_warning("⚠️ Headline 없음")
 
-    st.caption(f"🎯 CTA: {default_cta}")
+        st.caption(f"🎯 CTA: {default_cta}")
 
-    if final_store_url:
-        st.caption(f"�� Store URL: {final_store_url[:50]}...")
-    else:
+        if final_store_url:
+            st.caption(f"🔗 Store URL: {final_store_url[:50]}...")
+
+    if not final_store_url:
         st.error("❌ Store URL이 없습니다! 앱 설치 광고는 URL이 필수입니다.")
     
     use_prefix = settings.get("use_prefix", False)
@@ -1382,7 +1414,7 @@ def upload_videos_to_library_and_create_single_ads(
     for video_num, data in valid_groups.items():
         st.write(f"- {video_num}: {data['resolution']}")
 
-    st.success(f"✅ {len(valid_groups)}개 비디오 검증 완료")
+    _dev_success(f"✅ {len(valid_groups)}개 비디오 검증 완료")
 
     # 해상도별 통계 표시
     resolution_stats = {}
@@ -1397,7 +1429,7 @@ def upload_videos_to_library_and_create_single_ads(
     if not valid_groups:
         raise RuntimeError("❌ 유효한 비디오 그룹이 없습니다. 각 video는 1080x1080 해상도가 필요합니다.")
     
-    st.success(f"✅ {len(valid_groups)}개 비디오 검증 완료 (1080x1080만 사용)")
+    _dev_success(f"✅ {len(valid_groups)}개 비디오 검증 완료 (1080x1080만 사용)")
     
     # ====================================================================
     # STEP 2: Upload videos to Ad Library (with original filename)
@@ -1656,7 +1688,7 @@ def upload_videos_to_library_and_create_single_ads(
         }
 
         # Multi-ads opt-in
-        multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", True))
+        multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", False))
         multi_enroll_status = "OPT_IN" if multi_opt_in else "OPT_OUT"
 
         # IG identity (optional)
@@ -2060,11 +2092,11 @@ def _upload_dynamic_single_video_ads(
     if not final_store_url.startswith("http"):
         raise RuntimeError(f"❌ 유효하지 않은 Store URL: {final_store_url}")
     
-    st.success(f"✅ 템플릿 로드 완료")
-    st.caption(f"📝 Primary Texts: {len(default_primary_texts)}개")
-    st.caption(f"📰 Headlines: {len(default_headlines)}개")
-    st.caption(f"🎯 CTA: {default_cta}")
-    st.caption(f"🔗 Store URL: {final_store_url[:50]}...")
+    _dev_success("✅ 템플릿 로드 완료")
+    _dev_caption(f"📝 Primary Texts: {len(default_primary_texts)}개")
+    _dev_caption(f"📰 Headlines: {len(default_headlines)}개")
+    _dev_caption(f"🎯 CTA: {default_cta}")
+    _dev_caption(f"🔗 Store URL: {final_store_url[:50]}...")
     
     # Prefix/Suffix
     use_prefix = settings.get("use_prefix", False)
@@ -2378,7 +2410,7 @@ def _upload_dynamic_single_video_ads(
                 inline_object_story_spec["instagram_actor_id"] = ig_actor_id
 
             # ✅ Multi-advertiser ads 토글
-            multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", True))
+            multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", False))
             multi_enroll_status = "OPT_IN" if multi_opt_in else "OPT_OUT"
 
             # ✅ Creative 구성 (Instagram 포함)
@@ -2505,11 +2537,11 @@ def _upload_dynamic_1x1_ads(
     if not final_store_url.startswith("http"):
         raise RuntimeError(f"❌ 유효하지 않은 Store URL: {final_store_url}")
     
-    st.success(f"✅ 템플릿 로드 완료")
-    st.caption(f"📝 Primary Texts: {len(default_primary_texts)}개")
-    st.caption(f"📰 Headlines: {len(default_headlines)}개")
-    st.caption(f"🎯 CTA: {default_cta}")
-    st.caption(f"🔗 Store URL: {final_store_url[:50]}...")
+    _dev_success("✅ 템플릿 로드 완료")
+    _dev_caption(f"📝 Primary Texts: {len(default_primary_texts)}개")
+    _dev_caption(f"📰 Headlines: {len(default_headlines)}개")
+    _dev_caption(f"🎯 CTA: {default_cta}")
+    _dev_caption(f"🔗 Store URL: {final_store_url[:50]}...")
     
     # Prefix/Suffix
     use_prefix = settings.get("use_prefix", False)
@@ -2555,7 +2587,7 @@ def _upload_dynamic_1x1_ads(
     if not valid_videos:
         raise RuntimeError(user_msg)
     
-    st.success(f"✅ {len(valid_videos)}개 비디오 검증 완료 (1080x1080)")
+    _dev_success(f"✅ {len(valid_videos)}개 비디오 검증 완료 (1080x1080)")
     
     # ====================================================================
     # STEP 2: 모든 비디오 업로드
@@ -2855,7 +2887,7 @@ def _upload_dynamic_1x1_ads(
             inline_object_story_spec["instagram_actor_id"] = ig_actor_id
         
         # Multi-advertiser ads 토글
-        multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", True))
+        multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", False))
         multi_enroll_status = "OPT_IN" if multi_opt_in else "OPT_OUT"
         
         # Creative 구성
@@ -2992,11 +3024,11 @@ def _upload_dynamic_16x9_ads(
     if not final_store_url.startswith("http"):
         raise RuntimeError(f"❌ 유효하지 않은 Store URL: {final_store_url}")
 
-    st.success("✅ 템플릿 로드 완료")
-    st.caption(f"📝 Primary Texts: {len(default_primary_texts)}개")
-    st.caption(f"📰 Headlines: {len(default_headlines)}개")
-    st.caption(f"🎯 CTA: {default_cta}")
-    st.caption(f"🔗 Store URL: {final_store_url[:50]}...")
+    _dev_success("✅ 템플릿 로드 완료")
+    _dev_caption(f"📝 Primary Texts: {len(default_primary_texts)}개")
+    _dev_caption(f"📰 Headlines: {len(default_headlines)}개")
+    _dev_caption(f"🎯 CTA: {default_cta}")
+    _dev_caption(f"🔗 Store URL: {final_store_url[:50]}...")
 
     # Prefix/Suffix
     use_prefix = settings.get("use_prefix", False)
@@ -3041,7 +3073,7 @@ def _upload_dynamic_16x9_ads(
     if not valid_videos:
         raise RuntimeError(user_msg)
 
-    st.success(f"✅ {len(valid_videos)}개 비디오 검증 완료 (1920x1080)")
+    _dev_success(f"✅ {len(valid_videos)}개 비디오 검증 완료 (1920x1080)")
 
     # ====================================================================
     # STEP 2: 모든 비디오 업로드 (다이내믹-1x1과 동일)
@@ -3302,7 +3334,7 @@ def _upload_dynamic_16x9_ads(
         if ig_actor_id:
             inline_object_story_spec["instagram_actor_id"] = ig_actor_id
 
-        multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", True))
+        multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", False))
         multi_enroll_status = "OPT_IN" if multi_opt_in else "OPT_OUT"
 
         creative_config = {
@@ -3432,11 +3464,11 @@ def _upload_dynamic_9x16_ads(
     if not final_store_url.startswith("http"):
         raise RuntimeError(f"❌ 유효하지 않은 Store URL: {final_store_url}")
 
-    st.success("✅ 템플릿 로드 완료")
-    st.caption(f"📝 Primary Texts: {len(default_primary_texts)}개")
-    st.caption(f"📰 Headlines: {len(default_headlines)}개")
-    st.caption(f"🎯 CTA: {default_cta}")
-    st.caption(f"🔗 Store URL: {final_store_url[:50]}...")
+    _dev_success("✅ 템플릿 로드 완료")
+    _dev_caption(f"📝 Primary Texts: {len(default_primary_texts)}개")
+    _dev_caption(f"📰 Headlines: {len(default_headlines)}개")
+    _dev_caption(f"🎯 CTA: {default_cta}")
+    _dev_caption(f"🔗 Store URL: {final_store_url[:50]}...")
 
     # Prefix/Suffix
     use_prefix = settings.get("use_prefix", False)
@@ -3481,7 +3513,7 @@ def _upload_dynamic_9x16_ads(
     if not valid_videos:
         raise RuntimeError(user_msg)
 
-    st.success(f"✅ {len(valid_videos)}개 비디오 검증 완료 (1080x1920)")
+    _dev_success(f"✅ {len(valid_videos)}개 비디오 검증 완료 (1080x1920)")
 
     # ====================================================================
     # STEP 2: 모든 비디오 업로드 (다이내믹-1x1과 동일)
@@ -3741,7 +3773,7 @@ def _upload_dynamic_9x16_ads(
         if ig_actor_id:
             inline_object_story_spec["instagram_actor_id"] = ig_actor_id
 
-        multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", True))
+        multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", False))
         multi_enroll_status = "OPT_IN" if multi_opt_in else "OPT_OUT"
 
         creative_config = {

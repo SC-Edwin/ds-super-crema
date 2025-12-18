@@ -598,15 +598,16 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         settings = st.session_state.settings.get(game, {})
         
                         # ✅ 디버깅 메시지
-                        st.info(f"🔍 Mode: {'Marketer' if is_marketer else 'Test'}")
-                        st.info(f"🔍 Using module: {fb_module.__name__}")
-                        if 'creative_type' in settings:
-                            st.info(f"🔍 Creative Type: {settings['creative_type']}")
-                        
-                        # ✅ Marketer Mode인 경우 adset_id 확인
-                        if is_marketer:
-                            adset_id = settings.get("adset_id")
-                            st.info(f"🔍 Selected AdSet ID: {adset_id if adset_id else '❌ 없음'}")
+                        if devtools.dev_enabled():
+                            st.info(f"🔍 Mode: {'Marketer' if is_marketer else 'Test'}")
+                            st.info(f"🔍 Using module: {fb_module.__name__}")
+                            if "creative_type" in settings:
+                                st.info(f"🔍 Creative Type: {settings['creative_type']}")
+
+                            # ✅ Marketer Mode인 경우 adset_id 확인
+                            if is_marketer:
+                                adset_id = settings.get("adset_id")
+                                st.info(f"🔍 Selected AdSet ID: {adset_id if adset_id else '❌ 없음'}")
                         
                         plan = fb_module.upload_to_facebook(game, remote_list, settings)
                         
