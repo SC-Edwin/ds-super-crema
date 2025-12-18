@@ -1850,21 +1850,27 @@ def upload_videos_to_library_and_create_single_ads(
     prog.empty()
 
     # UI reporting (main thread)
-    st.write("---")
-    st.write("### 📊 최종 결과")
+    # - Normal mode: keep UI clean (no final report block). Show only a concise error if needed.
+    # - Dev mode: show full details (created ads + error list).
+    if errors and not devtools.dev_enabled():
+        st.error(str(errors[0]))
 
-    success_with_ad = [r for r in results if r.get("ad_id")]
-    if success_with_ad:
-        st.success(f"✅ Ad 생성 완료: {len(success_with_ad)}개")
-        with st.expander("생성된 Ad 목록 보기", expanded=True):
-            for r in success_with_ad:
-                st.write(f"- **{r['name']}**: Ad ID `{r['ad_id']}` ({r.get('resolution','N/A')})")
+    if devtools.dev_enabled():
+        st.write("---")
+        st.write("### 📊 최종 결과")
 
-    if errors:
-        st.error(f"❌ 실패: {len(errors)}개")
-        with st.expander("실패 항목 보기"):
-            for e in errors:
-                st.write(f"- {e}")
+        success_with_ad = [r for r in results if r.get("ad_id")]
+        if success_with_ad:
+            st.success(f"✅ Ad 생성 완료: {len(success_with_ad)}개")
+            with st.expander("생성된 Ad 목록 보기", expanded=True):
+                for r in success_with_ad:
+                    st.write(f"- **{r['name']}**: Ad ID `{r['ad_id']}` ({r.get('resolution','N/A')})")
+
+        if errors:
+            st.error(f"❌ 실패: {len(errors)}개")
+            with st.expander("실패 항목 보기"):
+                for e in errors:
+                    st.write(f"- {e}")
 
     return {
         "ads": results,
