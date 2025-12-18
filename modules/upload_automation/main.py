@@ -612,7 +612,17 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         plan = fb_module.upload_to_facebook(game, remote_list, settings)
                         
                         if isinstance(plan, dict) and plan.get("adset_id"):
-                            ok_msg_placeholder.success("✅ Uploaded successfully! Ad Set created.")
+                            # Marketer fb.py returns ads_created/errors; ops facebook_ads.py returns only adset_id.
+                            ads_created = plan.get("ads_created", None)
+                            errors = plan.get("errors") or []
+
+                            if ads_created is None:
+                                ok_msg_placeholder.success("✅ Uploaded successfully! Ad Set created.")
+                            elif int(ads_created) > 0:
+                                ok_msg_placeholder.success(f"✅ Uploaded successfully! Ads created: {int(ads_created)}")
+                            else:
+                                # Prefer a concise first error if available
+                                ok_msg_placeholder.error(errors[0] if errors else "❌ Upload failed.")
                         else:
                             ok_msg_placeholder.error("❌ Upload failed or no Ad Set ID returned.")
                     except Exception as e:

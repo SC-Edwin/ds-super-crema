@@ -1457,12 +1457,19 @@ def upload_videos_to_library_and_create_single_ads(
         
         def _post(data, files=None):
             sess = _get_session()
+
             def _do():
-                r = sess.post(base_url, data={**data, "access_token": token}, files=files, timeout=180)
-            j = r.json()
-            if "error" in j: 
-                raise RuntimeError(j["error"].get("message"))
-            return j
+                r = sess.post(
+                    base_url,
+                    data={**data, "access_token": token},
+                    files=files,
+                    timeout=180,
+                )
+                j = r.json()
+                if "error" in j:
+                    raise RuntimeError(j["error"].get("message") or "Facebook video upload failed")
+                return j
+
             return with_retry(_do, tries=4, base_wait=1.0)
         
         # Start upload
