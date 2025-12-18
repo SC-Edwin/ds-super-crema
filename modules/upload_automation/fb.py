@@ -1379,9 +1379,12 @@ def upload_videos_to_library_and_create_single_ads(
             video_groups[video_num] = {}
         
         video_groups[video_num][resolution] = u
-    st.write("📦 **그룹화 결과:**")
-    for video_num, resolutions in video_groups.items():
-        st.write(f"- {video_num}: {list(resolutions.keys())}")
+
+    # Dev-only: grouping debug
+    if devtools.dev_enabled():
+        st.write("📦 **그룹화 결과:**")
+        for video_num, resolutions in video_groups.items():
+            st.write(f"- {video_num}: {list(resolutions.keys())}")
     
     # ✅ 해상도 우선순위에 따라 최적 비디오 선택
     valid_groups = {}
@@ -1405,14 +1408,17 @@ def upload_videos_to_library_and_create_single_ads(
             }
             # 우선순위 정보 표시
             if selected_resolution != "1080x1080":
-                st.info(f"ℹ️ {video_num}: 1080x1080 없음, {selected_resolution} 사용")
+                _dev_info(f"ℹ️ {video_num}: 1080x1080 없음, {selected_resolution} 사용")
         else:
             st.error(f"❌ {video_num}: 사용 가능한 해상도 없음 (1080x1080, 1920x1080, 1080x1920 필요)")
     if not valid_groups:
         raise RuntimeError("❌ 유효한 비디오 그룹이 없습니다. 각 video는 1080x1080, 1920x1080, 또는 1080x1920 해상도가 필요합니다.")
-    st.write("✅ **최종 선택된 비디오:**")
-    for video_num, data in valid_groups.items():
-        st.write(f"- {video_num}: {data['resolution']}")
+
+    # Dev-only: selected-resolution debug
+    if devtools.dev_enabled():
+        st.write("✅ **최종 선택된 비디오:**")
+        for video_num, data in valid_groups.items():
+            st.write(f"- {video_num}: {data['resolution']}")
 
     _dev_success(f"✅ {len(valid_groups)}개 비디오 검증 완료")
 
@@ -1422,9 +1428,10 @@ def upload_videos_to_library_and_create_single_ads(
         res = vg["resolution"]
         resolution_stats[res] = resolution_stats.get(res, 0) + 1
 
-    st.caption("📊 사용된 해상도:")
-    for res, count in sorted(resolution_stats.items()):
-        st.caption(f"  - {res}: {count}개")
+    if devtools.dev_enabled():
+        st.caption("📊 사용된 해상도:")
+        for res, count in sorted(resolution_stats.items()):
+            st.caption(f"  - {res}: {count}개")
     
     if not valid_groups:
         raise RuntimeError("❌ 유효한 비디오 그룹이 없습니다. 각 video는 1080x1080 해상도가 필요합니다.")
