@@ -418,9 +418,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                     for err in result["errors"]:
                                         st.write(f"- {err}")
                     except Exception as e:
-                        import traceback
-                        st.error("❌ Media Library Upload Error")
-                        st.code(traceback.format_exc())
+                        # 유저에게는 핵심 메시지만 보여주고, traceback은 UI에 노출하지 않음
+                        st.error(str(e) if str(e) else "❌ Media Library Upload Error")
                         
             # ✅ FACEBOOK DRY RUN 섹션 전체 제거 (449-540줄 정도)
             # --- FACEBOOK DRY RUN ---
@@ -614,9 +613,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         else:
                             ok_msg_placeholder.error("❌ Upload failed or no Ad Set ID returned.")
                     except Exception as e:
-                        import traceback
-                        st.error("❌ Upload Error")
-                        st.code(traceback.format_exc())
+                        # 유저에게는 핵심 메시지만 보여주고, traceback은 UI에 노출하지 않음
+                        st.error(str(e) if str(e) else "❌ Upload Error")
                     finally:
                         # Ensure tab is preserved even after upload
                         st.query_params["tab"] = game

@@ -2530,41 +2530,30 @@ def _upload_dynamic_1x1_ads(
         return None
     
     valid_videos = []
-    errors = []
-    
+    user_msg = "비디오사이즈가 1x1(1080x1080)가 맞는지 체크해주세요"
+
     for u in uploaded_files:
         fname = getattr(u, "name", None) or u.get("name", "")
         if not fname:
             continue
-        
+
         video_num = _extract_video_number(fname)
-        resolution = _extract_resolution(fname)
-        
         if not video_num:
-            errors.append(f"{fname}: video 번호를 찾을 수 없습니다")
-            continue
-        
-        # 1. 사이즈 체크 (1080x1080만 허용)
+            # 파일명 디테일은 노출하지 않고 안내만
+            raise RuntimeError("파일명이 videoxxx 형식인지 확인해주세요")
+
+        resolution = _extract_resolution(fname)
         if not resolution or resolution != "1080x1080":
-            errors.append(f"{fname}: 비디오 사이즈 체크 바랍니다 (1080x1080만 허용)")
-            continue
-        
-        valid_videos.append({
-            "video_num": video_num,
-            "file": u,
-            "fname": fname
-        })
+            raise RuntimeError(user_msg)
+
+        valid_videos.append({"video_num": video_num, "file": u, "fname": fname})
     
     # 3. 개수 체크 (10개 이하)
     if len(valid_videos) > 10:
         raise RuntimeError("❌ 다이내믹 광고는 10개이상의 동영상을 수용할 수 없습니다")
     
-    if errors:
-        error_msg = "\n".join(errors)
-        raise RuntimeError(f"❌ 비디오 검증 실패:\n{error_msg}")
-    
     if not valid_videos:
-        raise RuntimeError("❌ 유효한 비디오가 없습니다.")
+        raise RuntimeError(user_msg)
     
     st.success(f"✅ {len(valid_videos)}개 비디오 검증 완료 (1080x1080)")
     
@@ -3028,7 +3017,7 @@ def _upload_dynamic_16x9_ads(
         return None
 
     valid_videos = []
-    errors = []
+    user_msg = "비디오사이즈가 16x9(1920x1080)가 맞는지 체크해주세요"
 
     for u in uploaded_files:
         fname = getattr(u, "name", None) or u.get("name", "")
@@ -3036,16 +3025,12 @@ def _upload_dynamic_16x9_ads(
             continue
 
         video_num = _extract_video_number(fname)
-        resolution = _extract_resolution(fname)
-
         if not video_num:
-            errors.append(f"{fname}: video 번호를 찾을 수 없습니다")
-            continue
+            raise RuntimeError("파일명이 videoxxx 형식인지 확인해주세요")
 
-        # 1. 사이즈 체크 (1920x1080만 허용)
+        resolution = _extract_resolution(fname)
         if not resolution or resolution != "1920x1080":
-            errors.append(f"{fname}: 비디오 사이즈 체크 바랍니다 (1920x1080만 허용)")
-            continue
+            raise RuntimeError(user_msg)
 
         valid_videos.append({"video_num": video_num, "file": u, "fname": fname})
 
@@ -3053,12 +3038,8 @@ def _upload_dynamic_16x9_ads(
     if len(valid_videos) > 10:
         raise RuntimeError("❌ 다이내믹 광고는 10개이상의 동영상을 수용할 수 없습니다")
 
-    if errors:
-        error_msg = "\n".join(errors)
-        raise RuntimeError(f"❌ 비디오 검증 실패:\n{error_msg}")
-
     if not valid_videos:
-        raise RuntimeError("❌ 유효한 비디오가 없습니다.")
+        raise RuntimeError(user_msg)
 
     st.success(f"✅ {len(valid_videos)}개 비디오 검증 완료 (1920x1080)")
 
@@ -3476,7 +3457,7 @@ def _upload_dynamic_9x16_ads(
         return None
 
     valid_videos = []
-    errors = []
+    user_msg = "비디오사이즈가 9x16(1080x1920)가 맞는지 체크해주세요"
 
     for u in uploaded_files:
         fname = getattr(u, "name", None) or u.get("name", "")
@@ -3484,16 +3465,12 @@ def _upload_dynamic_9x16_ads(
             continue
 
         video_num = _extract_video_number(fname)
-        resolution = _extract_resolution(fname)
-
         if not video_num:
-            errors.append(f"{fname}: video 번호를 찾을 수 없습니다")
-            continue
+            raise RuntimeError("파일명이 videoxxx 형식인지 확인해주세요")
 
-        # 1. 사이즈 체크 (1080x1920만 허용)
+        resolution = _extract_resolution(fname)
         if not resolution or resolution != "1080x1920":
-            errors.append(f"{fname}: 비디오 사이즈 체크 바랍니다 (1080x1920만 허용)")
-            continue
+            raise RuntimeError(user_msg)
 
         valid_videos.append({"video_num": video_num, "file": u, "fname": fname})
 
@@ -3501,12 +3478,8 @@ def _upload_dynamic_9x16_ads(
     if len(valid_videos) > 10:
         raise RuntimeError("❌ 다이내믹 광고는 10개이상의 동영상을 수용할 수 없습니다")
 
-    if errors:
-        error_msg = "\n".join(errors)
-        raise RuntimeError(f"❌ 비디오 검증 실패:\n{error_msg}")
-
     if not valid_videos:
-        raise RuntimeError("❌ 유효한 비디오가 없습니다.")
+        raise RuntimeError(user_msg)
 
     st.success(f"✅ {len(valid_videos)}개 비디오 검증 완료 (1080x1920)")
 
