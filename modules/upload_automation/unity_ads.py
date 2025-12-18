@@ -14,6 +14,7 @@ import hashlib
 import time
 import requests
 import streamlit as st
+from modules.upload_automation import devtools
 
 logger = logging.getLogger(__name__)
 
@@ -432,11 +433,8 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
                             st.info(f"ℹ️ Campaign Set ID `{campaign_set_id}`에서 playable을 찾지 못했습니다. Unity에 playable이 등록되어 있는지 확인하세요.")
                     except Exception as e:
                         logger.warning(f"Failed to get campaign set ID for {game}, error: {e}")
-                        import traceback
-                        logger.warning(traceback.format_exc())
-                        st.error(f"❌ Campaign Set ID 조회 실패: {e}")
-                        with st.expander("🔍 에러 상세 정보", expanded=False):
-                            st.code(traceback.format_exc())
+                        devtools.record_exception("Unity Campaign Set ID lookup failed", e)
+                        st.error("❌ Campaign Set ID 조회 실패")
                         # Fallback: 기존 title_id 사용 (있는 경우)
                         if title_for_list:
                             logger.info(f"Fallback: Using title_id: {title_for_list}")
@@ -466,11 +464,10 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
                 else:
                     logger.info(f"No playables found for game: {game}, org: {org_for_list}")
         except Exception as e:
-            import traceback
             error_msg = f"Unity playable 목록을 불러오지 못했습니다: {e}"
             logger.exception(error_msg)
-            st.error(f"❌ {error_msg}")
-            st.code(traceback.format_exc())
+            devtools.record_exception("Unity playable list load failed", e)
+            st.error("❌ Unity playable 목록을 불러오지 못했습니다.")
 
         try:
             existing_default_idx = existing_labels.index(prev_existing_label)

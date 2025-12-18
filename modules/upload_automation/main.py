@@ -21,6 +21,7 @@ if root_dir not in sys.path:
 # =========================================================
 import streamlit as st
 from streamlit.components.v1 import html as components_html 
+from modules.upload_automation import devtools
 
 # --- FIX: ADD CURRENT DIRECTORY TO PATH ---
 # This allows importing sibling files (drive_import, facebook_ads) 
@@ -191,6 +192,8 @@ fb_ops.init_fb_game_defaults()
 # MAIN RENDERER (Shared Logic)
 # ======================================================================
 def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = False) -> None:
+    # Dev-only log panel (enable via ?dev=1 or secrets developer_mode=true)
+    devtools.render_dev_panel()
     """
     Renders the main UI. 
     Dynamically loads games from BigQuery via game_manager.
@@ -366,9 +369,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             # Operation Mode: Use existing settings panel
                             uni_ops.render_unity_settings_panel(unity_card, game, i, is_marketer=False)
                     except Exception as e:
-                        st.error(f"Unity 설정 패널 로드 실패: {e}")
-                        import traceback
-                        st.code(traceback.format_exc())
+                        st.error(str(e) if str(e) else "Unity 설정 패널 로드 실패")
+                        devtools.record_exception("Unity settings panel load failed", e)
 
             # =========================
             # EXECUTION LOGIC
@@ -726,8 +728,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             if summary.get("errors"):
                                 st.error("\n".join(summary["errors"]))
                         except Exception as e:
-                            import traceback
-                            st.code(traceback.format_exc())
+                            st.error(str(e) if str(e) else "Unity upload failed")
+                            devtools.record_exception("Unity upload failed", e)
                         finally:
                             # Ensure tab is preserved even after upload
                             st.query_params["tab"] = game
@@ -752,8 +754,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             else:
                                 unity_ok_placeholder.warning("No packs assigned.")
                         except Exception as e:
-                            import traceback
-                            st.code(traceback.format_exc())
+                            st.error(str(e) if str(e) else "Unity apply failed")
+                            devtools.record_exception("Unity apply failed", e)
                         finally:
                             # Ensure tab is preserved even after apply
                             st.query_params["tab"] = game
