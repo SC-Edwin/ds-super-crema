@@ -64,81 +64,60 @@ def extract_thumbnail_from_video(video_path: str, output_path: str | None = None
 
 def upload_thumbnail_image(account: "AdAccount", image_path: str) -> str:
     """
-    Upload thumbnail image to Facebook using Graph API directly (like video upload).
-    Returns the image URL (required for video_data.image_url).
+    Upload a thumbnail image to Meta (adimages) and return the *image hash*.
+    This hash is the most reliable value to pass into video_data.image_hash.
     """
-    # Get access token
     if "facebook" in st.secrets:
         token = st.secrets["facebook"].get("access_token", "").strip()
     else:
         token = st.secrets.get("access_token", "").strip()
-    
+
     if not token:
         raise RuntimeError("Missing access_token in st.secrets (check [facebook] section)")
-    
+
     act_id = account.get_id()
     url = f"https://graph.facebook.com/v24.0/{act_id}/adimages"
-    
+
     try:
-        # Upload image using multipart/form-data (same approach as video upload)
-        with open(image_path, 'rb') as f:
-            files = {'file': (os.path.basename(image_path), f, 'image/jpeg')}
-            data = {'access_token': token}
-            
-            response = requests.post(url, files=files, data=data, timeout=60)
-            response.raise_for_status()
-            
-            result = response.json()
-            
-            # Log full response for debugging
-            logger.debug(f"AdImage API response: {result}")
-            
-            # Extract image URL from response (required for video_data.image_url)
-            # Response format: {"images": {"<hash>": {"hash": "<hash>", "url": "..."}}}
-            images = result.get("images", {})
-            if isinstance(images, dict):
-                # Get the first (and only) image from the response
-                for hash_key, image_data in images.items():
-                    if isinstance(image_data, dict):
-                        image_url = image_data.get("url")
-                        image_hash = image_data.get("hash") or hash_key
-                        if image_url:
-                            logger.info(f"Uploaded thumbnail image {image_path} to Facebook, url: {image_url}")
-                            return image_url
-                        # Fallback: construct URL from hash if URL not provided
-                        logger.warning(f"URL not found in response, constructing from hash: {image_hash}")
-                        # Try common Facebook CDN URL pattern
-                        image_url = f"https://scontent.xx.fbcdn.net/v/t45.5328-4/{image_hash}.jpg"
-                        return image_url
-                    else:
-                        # If image_data is just a string (the hash itself)
-                        image_hash = hash_key
-                        # Construct URL from hash
-                        image_url = f"https://scontent.xx.fbcdn.net/v/t45.5328-4/{image_hash}.jpg"
-                        logger.info(f"Uploaded thumbnail image {image_path} to Facebook, constructed url from hash: {image_url}")
-                        return image_url
-            
-            # Fallback: try to get hash directly and construct URL
-            image_hash = result.get("hash")
-            if image_hash:
-                image_url = f"https://scontent.xx.fbcdn.net/v/t45.5328-4/{image_hash}.jpg"
-                logger.info(f"Uploaded thumbnail image {image_path} to Facebook, constructed url from hash: {image_url}")
-                return image_url
-            
-            raise RuntimeError(f"Failed to get image URL from AdImage response: {result}")
+        with open(image_path, "rb") as f:
+            files = {"file": (os.path.basename(image_path), f, "image/jpeg")}
+            data = {"access_token": token}
+            resp = requests.post(url, files=files, data=data, timeout=60)
+            resp.raise_for_status()
+            result = resp.json()
+
+        logger.debug(f"AdImage API response: {result}")
+
+        images = result.get("images", {})
+        if isinstance(images, dict) and images:
+            hash_key, image_data = next(iter(images.items()))
+            if isinstance(image_data, dict):
+                image_hash = (image_data.get("hash") or hash_key or "").strip()
+            else:
+                image_hash = (hash_key or "").strip()
+
+            if not image_hash:
+                raise RuntimeError(f"Missing image hash in AdImage response: {result}")
+
+            logger.info(f"Uploaded thumbnail image {image_path} to Facebook, hash: {image_hash}")
+            return image_hash
+
+        image_hash = (result.get("hash") or "").strip()
+        if image_hash:
+            logger.info(f"Uploaded thumbnail image {image_path} to Facebook, hash: {image_hash}")
+            return image_hash
+
+        raise RuntimeError(f"Failed to parse AdImage response: {result}")
+
     except requests.exceptions.RequestException as e:
-        error_msg = str(e)
-        if hasattr(e, 'response') and e.response is not None:
+        msg = str(e)
+        if getattr(e, "response", None) is not None:
             try:
-                error_data = e.response.json()
-                error_msg = error_data.get("error", {}).get("message", error_msg)
-            except:
-                error_msg = e.response.text[:200] if e.response.text else error_msg
-        logger.error(f"Failed to upload thumbnail image {image_path}: {error_msg}")
-        raise RuntimeError(f"Failed to upload thumbnail image: {error_msg}") from e
-    except Exception as e:
-        logger.error(f"Failed to upload thumbnail image {image_path}: {e}")
-        raise
+                msg = e.response.json().get("error", {}).get("message", msg)
+            except Exception:
+                msg = (e.response.text or msg)[:200]
+        logger.error(f"Failed to upload thumbnail image {image_path}: {msg}")
+        raise RuntimeError(f"Failed to upload thumbnail image: {msg}") from e
 
 # --------------------------------------------------------------------
 # Meta SDK and account helpers
@@ -878,14 +857,27 @@ def upload_videos_create_ads(
     
     def _upload_task(item):
         path = item["path"]
-        thumb_url = None
+        thumb_hash = None
+        thumb_err = None
+
         try:
             t_path = extract_thumbnail_from_video(path)
-            thumb_url = upload_thumbnail_image(account, t_path)
-            try: os.unlink(t_path)
-            except: pass
-        except: pass
-        return {"name": item["name"], "video_id": upload_video_resumable(path), "thumbnail_url": thumb_url}
+            thumb_hash = upload_thumbnail_image(account, t_path)  # now returns hash
+            try:
+                os.unlink(t_path)
+            except Exception:
+                pass
+        except Exception as e:
+            thumb_err = str(e)
+
+        video_id = upload_video_resumable(path)
+
+        return {
+            "name": item["name"],
+            "video_id": video_id,
+            "thumbnail_hash": thumb_hash,
+            "thumbnail_error": thumb_err,
+        }
 
     done_up = 0
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -955,7 +947,7 @@ def upload_videos_create_ads(
             """Create ad like test mode, but with extracted headlines/primary text/CTA"""
             name = file_data["name"]
             vid_id = file_data["video_id"]
-            thumb = file_data.get("thumbnail_url")
+            thumb = file_data.get("thumbnail_hash")  # thumbnail_url -> thumbnail_hash로 변경
             
             try:
                 # Standard Object Story (Same as test mode)
@@ -964,8 +956,13 @@ def upload_videos_create_ads(
                 final_message = primary_text if primary_text else ""
                 
                 vd = {"video_id": vid_id, "title": final_title, "message": final_message}
-                if thumb:
-                    vd["image_url"] = thumb
+                if not thumb:
+                    raise RuntimeError(
+                        f"Thumbnail missing for {name}. "
+                        "Meta requires video_data.image_hash (or image_url). "
+                        f"thumb_error={file_data.get('thumbnail_error')}"
+                    )
+                vd["image_hash"] = thumb  # image_url -> image_hash로 변경
                 if store_url:
                     vd["call_to_action"] = {"type": cta, "value": {"link": store_url}}
                 
@@ -1025,12 +1022,18 @@ def upload_videos_create_ads(
         def _create_test_ad(file_data):
             name = file_data["name"]
             vid_id = file_data["video_id"]
-            thumb = file_data.get("thumbnail_url")
+            thumb = file_data.get("thumbnail_hash")  # thumbnail_url -> thumbnail_hash로 변경
             
             try:
                 # Standard Object Story (Simple)
                 vd = {"video_id": vid_id, "title": name, "message": ""}
-                if thumb: vd["image_url"] = thumb
+                if not thumb:
+                    raise RuntimeError(
+                        f"Thumbnail missing for {name}. "
+                        "Meta requires video_data.image_hash (or image_url). "
+                        f"thumb_error={file_data.get('thumbnail_error')}"
+                    )
+                vd["image_hash"] = thumb
                 if store_url:
                     vd["call_to_action"] = {"type": "INSTALL_MOBILE_APP", "value": {"link": store_url}}
                 
