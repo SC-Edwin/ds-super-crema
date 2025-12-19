@@ -756,15 +756,25 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         unity_ok_placeholder.error("No packs found. Create them first.")
                     else:
                         try:
-                            # Marketer mode for Unity (all games)
+                            # Test Mode: unassign + assign 실행
+                            # Marketer Mode: assign만 실행 (unassign 안 함)
                             res = unity_module.apply_unity_creative_packs_to_campaign(
                                 game=game, creative_pack_ids=pack_ids, settings=unity_settings, is_marketer=is_marketer
                             )
                             assigned = res.get("assigned_packs", [])
+                            removed = res.get("removed_assignments", [])
+                            
+                            if not is_marketer and removed:
+                                # Test Mode: unassign 결과 표시
+                                unity_ok_placeholder.success(f"✅ Unassigned {len(removed)} existing pack(s).")
+                            
                             if assigned:
-                                unity_ok_placeholder.success(f"Assigned {len(assigned)} packs.")
+                                unity_ok_placeholder.success(f"✅ Assigned {len(assigned)} new pack(s).")
                             else:
                                 unity_ok_placeholder.warning("No packs assigned.")
+                            
+                            if res.get("errors"):
+                                st.error("\n".join(res["errors"]))
                         except Exception as e:
                             st.error(str(e) if str(e) else "Unity apply failed")
                             devtools.record_exception("Unity apply failed", e)
