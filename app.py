@@ -3,7 +3,7 @@ Super Crema - Creative Intelligence Platform
 """
 
 import streamlit as st
-# from modules.auth_simple import check_authentication, show_login_page, logout, log_action  # ← Auth 비활성화
+from modules.auth_simple import check_authentication, show_login_page, logout, log_action  # ← 이 줄 추가
 
 import random
 
@@ -272,32 +272,48 @@ def render_header():
 def main():
     apply_theme()
 
-    # ========== Auth 비활성화: 더미 사용자 정보 설정 ==========
-    if 'authenticated' not in st.session_state:
-        st.session_state.authenticated = True
-        st.session_state.user_email = "local@test.com"
-        st.session_state.user_name = "Local User"
-        st.session_state.user_role = "Admin"
-        st.session_state.login_method = "local"
+    # ========== 인증 체크 (유지) ==========
+    if not check_authentication():
+        # 인증 실패 시, URL에 'logout' 파라미터가 있다면 제거하고 로그인 페이지 표시
+        if 'logout' in st.query_params:
+            st.query_params.clear()
+        show_login_page()
+        return
         
     render_header()
     
-    # ========== 사용자 정보 표시 (로그아웃 버튼 제거) ==========
+    # URL에 'logout' 파라미터가 감지되면 로그아웃 처리
+    if 'logout' in st.query_params:
+        logout()
+        st.query_params.clear() # 파라미터 제거
+        st.rerun() # 재실행하여 로그인 페이지로 이동
+        return
+
+    # ========== 사용자 정보 + 로그아웃 (옵션 1: 텍스트 링크로 대체) ==========
+    
+    # [여백, 전체 사용자 정보 블록]으로 컬럼 단순화
     col1, col2 = st.columns([8.5, 1.5]) 
         
     emoji = get_random_animal_emoji()
+    method_emoji = "🔑" if st.session_state.login_method == 'password' else "🌐"
     
     with col1:
         pass # 여백 유지
     
     with col2:
+        # 모든 텍스트 정보를 하나의 <div> 안에 넣고 오른쪽 정렬
+        # Logout 버튼을 쿼리 파라미터를 사용하는 HTML 링크로 대체합니다.
+        # '?logout=true' 파라미터를 URL에 추가하여 로그아웃 감지
         st.markdown(f"""
             <div style="text-align: right; line-height: 1.3; margin-top: 5px;">
                 <p style="font-size: 0.8rem; margin: 0; color: #fff;">
                     {emoji} {st.session_state.user_name} ({st.session_state.user_role})
                 </p>
                 <p style="font-size: 0.7rem; margin: 0; color: #ccc; opacity: 0.9;">
-                    🖥️ Local Mode
+                    {method_emoji} {st.session_state.login_method} 
+                    <a href="?logout=true" style="color: #ff006e; margin-left: 5px; text-decoration: none; font-weight: 600;">
+                        🚪 Logout
+                    </a>
                 </p>
             </div>
         """, unsafe_allow_html=True)
@@ -322,7 +338,7 @@ def main():
     #     st.markdown('</div>', unsafe_allow_html=True)
 
     with tab1:
-        # log_action(st.session_state.user_email, st.session_state.login_method, 'access_performance_ml')  # ← Auth 비활성화
+        log_action(st.session_state.user_email, st.session_state.login_method, 'access_performance_ml')  # ← 이 줄 추가
         st.markdown('<div id="viz-root">', unsafe_allow_html=True)
         from modules.visualization import main as viz_main
         viz_main.run()
