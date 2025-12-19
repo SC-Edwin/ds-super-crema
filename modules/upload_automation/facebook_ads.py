@@ -12,6 +12,12 @@ import os
 import requests
 import streamlit as st
 
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------
@@ -22,9 +28,7 @@ def extract_thumbnail_from_video(video_path: str, output_path: str | None = None
     Extract thumbnail from video using opencv.
     Returns path to the saved thumbnail image.
     """
-    try:
-        import cv2
-    except ImportError:
+    if not CV2_AVAILABLE:
         raise RuntimeError(
             "opencv-python-headless is required for thumbnail extraction. "
             "Install it with: pip install opencv-python-headless"
