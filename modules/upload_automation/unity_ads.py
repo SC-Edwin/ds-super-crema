@@ -334,17 +334,25 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
         st.markdown(f"#### {game} Unity Settings")
         cur = st.session_state.unity_settings.get(game, {})
 
-        # Test Mode와 Marketer Mode 모두 실제 앱 ID를 title_id로 사용해야 함
-        # Creative packs는 organizations/{org_id}/apps/{title_id}/creative-packs로 생성되므로
-        # title_id는 반드시 실제 앱 ID여야 함 (campaign_set_id가 아님)
-        secret_title_id = str(UNITY_GAME_IDS.get(game, ""))
-        if not secret_title_id:
-            # Fallback: campaign_set_id를 사용하지만 경고 표시
+        # Test Mode: campaign_set_id(aos)를 title_id로 사용
+        # Marketer Mode: 플랫폼에 따라 app_id를 title_id로 사용
+        if is_marketer:
+            # Marketer Mode: 플랫폼 선택에 따라 app_id 사용
+            # settings에서 platform 정보를 가져오거나 기본값 "aos" 사용
+            platform = cur.get("platform", "aos")
+            try:
+                secret_title_id = get_unity_app_id(game, platform)
+            except Exception as e:
+                logger.warning(f"Failed to get app ID for {game} ({platform}): {e}")
+                # Fallback: UNITY_GAME_IDS 사용
+                secret_title_id = str(UNITY_GAME_IDS.get(game, ""))
+        else:
+            # Test Mode: campaign_set_id (aos) 사용
             try:
                 secret_title_id = get_unity_campaign_set_id(game, "aos")
-                st.warning(f"⚠️ Warning: Using campaign_set_id as title_id for {game}. Please set the actual app ID in Unity settings.")
             except Exception as e:
                 logger.warning(f"Failed to get campaign set ID for {game}: {e}")
+                secret_title_id = ""
         
         secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
         default_campaign_id_val = secret_campaign_ids[0] if secret_campaign_ids else ""
@@ -1056,21 +1064,25 @@ def preview_unity_upload(
     Preview what would happen if Unity upload is executed.
     Returns a dict with preview information without actually uploading.
     """
-    # Get title_id: Test Mode와 Marketer Mode 모두 실제 앱 ID를 사용해야 함
-    # Creative packs는 organizations/{org_id}/apps/{title_id}/creative-packs로 생성되므로
-    # title_id는 반드시 실제 앱 ID여야 함 (campaign_set_id가 아님)
+    # Get title_id: Test Mode는 campaign_set_id(aos), Marketer Mode는 플랫폼별 app_id 사용
     title_id = (settings.get("title_id") or "").strip()
     if not title_id:
-        # settings에서 title_id를 가져오지 못하면, 실제 앱 ID 사용
-        title_id = str(UNITY_GAME_IDS.get(game, ""))
-        if not title_id:
-            # Fallback: campaign_set_id를 사용하지만 경고 표시
+        if is_marketer:
+            # Marketer Mode: 플랫폼에 따라 app_id 사용
+            platform = settings.get("platform", "aos")
+            try:
+                title_id = get_unity_app_id(game, platform)
+            except Exception as e:
+                logger.warning(f"Failed to get app ID for {game} ({platform}): {e}")
+                # Fallback: UNITY_GAME_IDS 사용
+                title_id = str(UNITY_GAME_IDS.get(game, ""))
+        else:
+            # Test Mode: campaign_set_id (aos) 사용
             try:
                 title_id = get_unity_campaign_set_id(game, "aos")
-                logger.warning(f"⚠️ Using campaign_set_id as title_id for {game}. This may cause issues. Creative packs should be created with actual app ID.")
             except Exception as e:
                 logger.warning(f"Failed to get campaign set ID for {game}: {e}")
-                raise RuntimeError(f"Missing title_id (app ID) for {game}. Please set it in Unity settings.")
+                raise RuntimeError(f"Missing title_id for {game}. Please set it in Unity settings.")
     
     campaign_id = (settings.get("campaign_id") or "").strip()
     if not campaign_id:
@@ -1187,22 +1199,26 @@ def upload_unity_creatives_to_campaign(
     - Only upload missing items
     - Resume from where it left off
     """
-    # Get title_id: Test Mode와 Marketer Mode 모두 실제 앱 ID를 사용해야 함
-    # Creative packs는 organizations/{org_id}/apps/{title_id}/creative-packs로 생성되므로
-    # title_id는 반드시 실제 앱 ID여야 함 (campaign_set_id가 아님)
+    # Get title_id: Test Mode는 campaign_set_id(aos), Marketer Mode는 플랫폼별 app_id 사용
     title_id = (settings.get("title_id") or "").strip()
     if not title_id:
-        # settings에서 title_id를 가져오지 못하면, 실제 앱 ID 사용
-        title_id = str(UNITY_GAME_IDS.get(game, ""))
-        if not title_id:
-            # Fallback: campaign_set_id를 사용하지만 경고 표시
+        # settings에서 platform 정보가 있으면 marketer mode로 간주
+        platform = settings.get("platform", "aos")
+        if platform in ("aos", "ios"):
+            # Marketer Mode: 플랫폼에 따라 app_id 사용
+            try:
+                title_id = get_unity_app_id(game, platform)
+            except Exception as e:
+                logger.warning(f"Failed to get app ID for {game} ({platform}): {e}")
+                # Fallback: UNITY_GAME_IDS 사용
+                title_id = str(UNITY_GAME_IDS.get(game, ""))
+        else:
+            # Test Mode: campaign_set_id (aos) 사용
             try:
                 title_id = get_unity_campaign_set_id(game, "aos")
-                logger.warning(f"⚠️ Using campaign_set_id as title_id for {game}. This may cause issues. Creative packs should be created with actual app ID.")
-                st.warning(f"⚠️ Warning: Using campaign_set_id as title_id for {game}. Please set the actual app ID in Unity settings.")
             except Exception as e:
                 logger.warning(f"Failed to get campaign set ID for {game}: {e}")
-                raise RuntimeError(f"Missing title_id (app ID) for {game}. Please set it in Unity settings.")
+                raise RuntimeError(f"Missing title_id for {game}. Please set it in Unity settings.")
     
     campaign_id = (settings.get("campaign_id") or "").strip()
     if not campaign_id:
