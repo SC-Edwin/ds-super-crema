@@ -334,17 +334,17 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
         st.markdown(f"#### {game} Unity Settings")
         cur = st.session_state.unity_settings.get(game, {})
 
-        # Test Mode: campaign set ID를 title_id로 사용
-        # Marketer Mode: app ID를 title_id로 사용
-        if is_marketer:
-            secret_title_id = str(UNITY_GAME_IDS.get(game, ""))
-        else:
-            # Test Mode: campaign set ID를 title_id로 사용
+        # Test Mode와 Marketer Mode 모두 실제 앱 ID를 title_id로 사용해야 함
+        # Creative packs는 organizations/{org_id}/apps/{title_id}/creative-packs로 생성되므로
+        # title_id는 반드시 실제 앱 ID여야 함 (campaign_set_id가 아님)
+        secret_title_id = str(UNITY_GAME_IDS.get(game, ""))
+        if not secret_title_id:
+            # Fallback: campaign_set_id를 사용하지만 경고 표시
             try:
                 secret_title_id = get_unity_campaign_set_id(game, "aos")
+                st.warning(f"⚠️ Warning: Using campaign_set_id as title_id for {game}. Please set the actual app ID in Unity settings.")
             except Exception as e:
                 logger.warning(f"Failed to get campaign set ID for {game}: {e}")
-                secret_title_id = str(UNITY_GAME_IDS.get(game, ""))
         
         secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
         default_campaign_id_val = secret_campaign_ids[0] if secret_campaign_ids else ""
@@ -1056,18 +1056,21 @@ def preview_unity_upload(
     Preview what would happen if Unity upload is executed.
     Returns a dict with preview information without actually uploading.
     """
-    # Get title_id: Test Mode에서는 campaign set ID를 사용, Marketer Mode에서는 app ID 사용
+    # Get title_id: Test Mode와 Marketer Mode 모두 실제 앱 ID를 사용해야 함
+    # Creative packs는 organizations/{org_id}/apps/{title_id}/creative-packs로 생성되므로
+    # title_id는 반드시 실제 앱 ID여야 함 (campaign_set_id가 아님)
     title_id = (settings.get("title_id") or "").strip()
     if not title_id:
-        # Marketer Mode: campaign_set_id를 title_id로 사용 (플랫폼별 app ID)
-        title_id = (settings.get("campaign_set_id") or "").strip()
-    if not title_id:
+        # settings에서 title_id를 가져오지 못하면, 실제 앱 ID 사용
         title_id = str(UNITY_GAME_IDS.get(game, ""))
         if not title_id:
+            # Fallback: campaign_set_id를 사용하지만 경고 표시
             try:
                 title_id = get_unity_campaign_set_id(game, "aos")
+                logger.warning(f"⚠️ Using campaign_set_id as title_id for {game}. This may cause issues. Creative packs should be created with actual app ID.")
             except Exception as e:
                 logger.warning(f"Failed to get campaign set ID for {game}: {e}")
+                raise RuntimeError(f"Missing title_id (app ID) for {game}. Please set it in Unity settings.")
     
     campaign_id = (settings.get("campaign_id") or "").strip()
     if not campaign_id:
@@ -1184,20 +1187,22 @@ def upload_unity_creatives_to_campaign(
     - Only upload missing items
     - Resume from where it left off
     """
-    # Get title_id: Test Mode에서는 campaign set ID를 사용, Marketer Mode에서는 app ID 사용
+    # Get title_id: Test Mode와 Marketer Mode 모두 실제 앱 ID를 사용해야 함
+    # Creative packs는 organizations/{org_id}/apps/{title_id}/creative-packs로 생성되므로
+    # title_id는 반드시 실제 앱 ID여야 함 (campaign_set_id가 아님)
     title_id = (settings.get("title_id") or "").strip()
     if not title_id:
-        # Marketer Mode: campaign_set_id를 title_id로 사용 (플랫폼별 app ID)
-        title_id = (settings.get("campaign_set_id") or "").strip()
-    if not title_id:
-        # Try to get from UNITY_GAME_IDS (for Marketer Mode) or campaign set ID (for Test Mode)
+        # settings에서 title_id를 가져오지 못하면, 실제 앱 ID 사용
         title_id = str(UNITY_GAME_IDS.get(game, ""))
-        # If still empty, try campaign set ID (Test Mode)
         if not title_id:
+            # Fallback: campaign_set_id를 사용하지만 경고 표시
             try:
                 title_id = get_unity_campaign_set_id(game, "aos")
+                logger.warning(f"⚠️ Using campaign_set_id as title_id for {game}. This may cause issues. Creative packs should be created with actual app ID.")
+                st.warning(f"⚠️ Warning: Using campaign_set_id as title_id for {game}. Please set the actual app ID in Unity settings.")
             except Exception as e:
                 logger.warning(f"Failed to get campaign set ID for {game}: {e}")
+                raise RuntimeError(f"Missing title_id (app ID) for {game}. Please set it in Unity settings.")
     
     campaign_id = (settings.get("campaign_id") or "").strip()
     if not campaign_id:
@@ -1210,12 +1215,16 @@ def upload_unity_creatives_to_campaign(
     if not all([title_id, campaign_id, org_id]):
         missing = []
         if not title_id:
-            missing.append("title_id")
+            missing.append("title_id (app ID)")
         if not campaign_id:
             missing.append("campaign_id")
         if not org_id:
             missing.append("org_id")
         raise RuntimeError(f"Unity Settings Missing for upload. Missing: {', '.join(missing)}")
+    
+    # 디버깅: 실제 사용되는 ID들 출력
+    st.info(f"🔍 **Debug Info:**\n- Org ID: {org_id}\n- Title ID (App ID): {title_id}\n- Campaign ID: {campaign_id}")
+    logger.info(f"Unity upload - org_id={org_id}, title_id={title_id}, campaign_id={campaign_id}")
 
     # Unity Ads creative limit per app (typically very high, but check for safety)
     # Unity Ads creative pack limit per campaign (typically 50)
@@ -1458,6 +1467,7 @@ def upload_unity_creatives_to_campaign(
             # ✅ pack_id가 있으면 생성하지 않고 기존 팩 사용
             if not pack_id:
                 status_container.info(f"📦 Creating pack: {final_pack_name}")
+                logger.info(f"Creating pack with org_id={org_id}, title_id={title_id}, pack_name={final_pack_name}, creative_ids={pack_creatives}")
                 pack_id = _unity_create_creative_pack(
                     org_id=org_id,
                     title_id=title_id,
@@ -1465,6 +1475,7 @@ def upload_unity_creatives_to_campaign(
                     creative_ids=pack_creatives,
                     pack_type="video+playable"
                 )
+                logger.info(f"✅ Created pack with ID: {pack_id}")
             else:
                 # ✅ 기존 팩이 있으면 명확하게 표시
                 if existing_pack_name != final_pack_name:
