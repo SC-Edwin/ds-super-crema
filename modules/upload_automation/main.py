@@ -339,6 +339,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         unity_ok_placeholder = st.empty()
                         # Unity 버튼들도 동일하게 적용
                         st.write("")
+                        cont_unity_create = False  # 기본값 설정 (test mode용)
                         if is_marketer:
                             cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{game}", use_container_width=True)
                         cont_unity_apply = st.button("캠페인에 적용", key=f"unity_apply_{game}", use_container_width=True)
