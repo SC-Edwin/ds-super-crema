@@ -168,8 +168,44 @@ def _upload_creative_set(game: str, idx: int, status: str = "PAUSED"):
     if not campaign_id:
         st.error("⚠️ Campaign을 선택해주세요.")
         return
+
+    if creative_action == "Import":
+        source_campaign_id = settings.get("source_campaign_id")
+        creative_set_ids = settings.get("selected_creative_set_ids", [])
+        
+        if not creative_set_ids:
+            st.error("⚠️ Import할 Creative Set을 선택해주세요.")
+            return
+        
+        with st.spinner(f"Importing {len(creative_set_ids)} creative set(s) as {status}..."):
+            try:
+                result = _clone_creative_sets_api(
+                    source_campaign_id=source_campaign_id,
+                    target_campaign_id=campaign_id,
+                    creative_set_ids=creative_set_ids,
+                    status=status
+                )
+                
+                if result.get("success"):
+                    st.success(f"✅ {result['total']} creative set(s) imported as {status}!")
+                    
+                    with st.expander("📋 Imported Creative Sets", expanded=False):
+                        for item in result.get("cloned_ids", []):
+                            st.write(f"✅ Original ID: {item['original_id']} → New ID: {item['new_id']}")
+                    
+                    if result.get("errors"):
+                        st.warning(f"⚠️ {result['failed']} creative set(s) failed")
+                        with st.expander("⚠️ Errors", expanded=False):
+                            for err in result["errors"]:
+                                st.write(f"- {err}")
+                else:
+                    st.error(f"❌ Import failed: {result.get('error')}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to import creative sets: {e}", exc_info=True)
+                st.error(f"❌ Import error: {e}")
     
-    if creative_action == "Create":
+    elif creative_action == "Create":
         video_ids = settings.get("video_ids", [])
         playable_ids = settings.get("playable_ids", [])
         creative_name = settings.get("generated_name", "")
@@ -184,7 +220,6 @@ def _upload_creative_set(game: str, idx: int, status: str = "PAUSED"):
         
         with st.spinner(f"Uploading creative set as {status}..."):
             try:
-                # API 호출
                 result = _create_creative_set_api(
                     campaign_id=campaign_id,
                     name=creative_name,
@@ -201,9 +236,6 @@ def _upload_creative_set(game: str, idx: int, status: str = "PAUSED"):
             except Exception as e:
                 logger.error(f"Failed to upload creative set: {e}", exc_info=True)
                 st.error(f"❌ Upload error: {e}")
-    
-    elif creative_action == "Import":
-        st.warning("⚠️ Import 기능은 아직 구현되지 않았습니다.")
 
 
 def _create_creative_set_api(
@@ -396,7 +428,77 @@ def _upload_assets_to_media_library(files: List[Dict], max_workers: int = 3) -> 
         "failed": failed,
         "errors": errors
     }
-
+def _clone_creative_sets_api(
+    source_campaign_id: str,
+    target_campaign_id: str,
+    creative_set_ids: List[str],
+    status: str = "PAUSED"
+) -> Dict:
+    """
+    Clone multiple creative sets to target campaign.
+    
+    Args:
+        source_campaign_id: Source campaign ID (for reference)
+        target_campaign_id: Target campaign ID
+        creative_set_ids: List of creative set IDs to clone
+        status: PAUSED or LIVE
+        
+    Returns:
+        Dict with success, cloned_ids, errors
+    """
+    try:
+        config = _get_api_config()
+        headers = {
+            "Authorization": config["api_key"],
+            "Content-Type": "application/json"
+        }
+        
+        cloned_ids = []
+        errors = []
+        
+        for cs_id in creative_set_ids:
+            try:
+                payload = {
+                    "campaign_id": target_campaign_id,
+                    "creative_set_id": cs_id,
+                    "status": status
+                }
+                
+                response = requests.post(
+                    f"{APPLOVIN_BASE_URL}/creative_set/clone",
+                    headers=headers,
+                    params={"account_id": config["account_id"]},
+                    json=payload,
+                    timeout=30
+                )
+                
+                response.raise_for_status()
+                result = response.json()
+                
+                cloned_ids.append({
+                    "original_id": cs_id,
+                    "new_id": result.get("id"),
+                    "version": result.get("version")
+                })
+                
+                logger.info(f"Cloned creative set {cs_id} → {result.get('id')}")
+                
+            except Exception as e:
+                error_msg = f"Creative Set {cs_id}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+        
+        return {
+            "success": len(cloned_ids) > 0,
+            "cloned_ids": cloned_ids,
+            "total": len(cloned_ids),
+            "failed": len(errors),
+            "errors": errors
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to clone creative sets: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "cloned_ids": [], "errors": [str(e)]}
 # =========================================================
 # API Functions
 # =========================================================
@@ -603,6 +705,48 @@ def get_assets(game: str = None) -> Dict[str, List[Dict]]:
         st.error(f"Applovin asset 목록을 가져오는데 실패했습니다: {e}")
         return {"videos": [], "playables": []}
 
+@st.cache_data(ttl=300)  # 5분 캐시
+def get_creative_sets_by_campaign(campaign_id: str) -> List[Dict]:
+    """
+    Fetch all creative sets for a specific campaign.
+    
+    Args:
+        campaign_id: Campaign ID
+        
+    Returns:
+        List of creative set dicts
+    """
+    try:
+        config = _get_api_config()
+        headers = {"Authorization": config["api_key"]}
+        account_id = config["account_id"]
+        
+        params = {
+            "account_id": account_id,
+            "ids": campaign_id  # Filter by campaign ID
+        }
+        
+        response = requests.get(
+            f"{APPLOVIN_BASE_URL}/creative_set/list_by_campaign_id",
+            headers=headers,
+            params=params,
+            timeout=30
+        )
+        response.raise_for_status()
+        data = response.json()
+        
+        # Extract creative sets for this campaign
+        campaigns_data = data.get("campaigns", {})
+        creative_sets = campaigns_data.get(str(campaign_id), [])
+        
+        logger.info(f"Found {len(creative_sets)} creative sets for campaign {campaign_id}")
+        return creative_sets
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch creative sets: {e}", exc_info=True)
+        st.error(f"Creative Set 목록을 가져오는데 실패했습니다: {e}")
+        return []
+
 # =========================================================
 # UI Renderer
 # =========================================================
@@ -687,6 +831,94 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
         # Create 선택 시 Videos와 Playables 멀티 선택
         selected_video_ids = []
         selected_playable_ids = []
+
+        selected_cs_ids = []
+        source_campaign_id = ""
+        
+        if creative_action == "Import":
+            st.markdown("##### 📥 Import Creative Sets")
+            
+            # Source Campaign 선택
+            st.markdown("**Source Campaign (Import from)**")
+            
+            source_campaign_options = {
+                f"{c.get('name', 'Unnamed')} (ID: {c.get('id', 'N/A')})": c.get('id')
+                for c in campaigns
+            }
+            
+            current_source_id = cur.get("source_campaign_id", "")
+            default_source_idx = 0
+            if current_source_id:
+                for i, cid in enumerate(source_campaign_options.values()):
+                    if str(cid) == str(current_source_id):
+                        default_source_idx = i
+                        break
+            
+            selected_source_campaign = st.selectbox(
+                "Source Campaign 선택",
+                options=list(source_campaign_options.keys()),
+                index=default_source_idx,
+                key=f"applovin_source_campaign_{idx}",
+                help="어느 캠페인에서 Creative Set을 가져올지 선택"
+            )
+            
+            source_campaign_id = source_campaign_options[selected_source_campaign]
+            
+            # Load creative sets 버튼
+            if st.button(f"🔍 Load Creative Sets", key=f"applovin_load_creativesets_{idx}"):
+                with st.spinner("Loading creative sets..."):
+                    creative_sets = get_creative_sets_by_campaign(source_campaign_id)
+                    st.session_state[f"applovin_creative_sets_{game}_{source_campaign_id}"] = creative_sets
+                    
+                    if creative_sets:
+                        st.success(f"✅ Loaded {len(creative_sets)} creative sets")
+                    else:
+                        st.warning("⚠️ No creative sets found")
+                    st.rerun()
+            
+            # Creative Sets 다중 선택
+            creative_sets = st.session_state.get(f"applovin_creative_sets_{game}_{source_campaign_id}", [])
+            
+            if creative_sets:
+                st.markdown("**Select Creative Sets (다중 선택)**")
+                
+                creative_set_options = {
+                    f"{cs.get('name', 'Unnamed')} (ID: {cs.get('id', 'N/A')})": cs.get('id')
+                    for cs in creative_sets
+                }
+                
+                current_cs_ids = cur.get("selected_creative_set_ids", [])
+                default_cs_labels = [
+                    label for label, cs_id in creative_set_options.items()
+                    if cs_id in current_cs_ids
+                ]
+                
+                selected_cs_labels = st.multiselect(
+                    "Creative Sets 선택",
+                    options=list(creative_set_options.keys()),
+                    default=default_cs_labels,
+                    key=f"applovin_creative_sets_select_{idx}",
+                    help="Import할 Creative Set들을 선택하세요"
+                )
+                
+                selected_cs_ids = [creative_set_options[label] for label in selected_cs_labels]
+                
+                if selected_cs_ids:
+                    st.write(f"**선택됨: {len(selected_cs_ids)}개**")
+                    for cs_id in selected_cs_ids:
+                        cs_name = next(
+                            (cs['name'] for cs in creative_sets if cs['id'] == cs_id),
+                            cs_id
+                        )
+                        st.caption(f"📦 {cs_name}")
+            else:
+                st.info("👆 'Load Creative Sets' 버튼을 클릭하여 Creative Set을 불러오세요")
+        
+        # --- Create 모드 ---
+        selected_video_ids = []
+        selected_playable_ids = []
+        creative_name = ""
+        custom_name = ""
         
         if creative_action == "Create":
             assets = st.session_state.get(assets_key, {"videos": [], "playables": []})
@@ -806,15 +1038,22 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
                     creative_name = ""
         
         # Save settings
-        # Save settings
-        st.session_state.applovin_settings[game] = {
-            "campaign_id": str(campaign_id),
-            "creative_action": creative_action,
-            "video_ids": selected_video_ids if creative_action == "Create" else [],
-            "playable_ids": selected_playable_ids if creative_action == "Create" else [],
-            "custom_name": custom_name.strip() if creative_action == "Create" else "",
-            "generated_name": creative_name if creative_action == "Create" else "",
-        }
+        if creative_action == "Import":
+            st.session_state.applovin_settings[game] = {
+                "campaign_id": str(campaign_id),
+                "creative_action": "Import",
+                "source_campaign_id": source_campaign_id if 'source_campaign_id' in locals() else "",
+                "selected_creative_set_ids": selected_cs_ids if 'selected_cs_ids' in locals() else [],
+            }
+        else:  # Create
+            st.session_state.applovin_settings[game] = {
+                "campaign_id": str(campaign_id),
+                "creative_action": "Create",
+                "video_ids": selected_video_ids,
+                "playable_ids": selected_playable_ids,
+                "custom_name": custom_name.strip() if custom_name else "",
+                "generated_name": creative_name,
+            }
         
         st.markdown("---")
         

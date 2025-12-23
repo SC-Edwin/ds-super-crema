@@ -88,6 +88,7 @@ from modules.upload_automation import game_manager  # ← 수정
 # 2. Operations Modules (Admin/Full Access)
 from modules.upload_automation import facebook_ads as fb_ops  # ← 수정
 from modules.upload_automation import unity_ads as uni_ops  # ← 수정
+from modules.upload_automation import applovin as applovin
 
 # 3. Marketer Modules (Simplified/Restricted)
 # 3. Marketer Modules (Simplified/Restricted)
