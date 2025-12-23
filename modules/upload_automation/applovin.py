@@ -44,6 +44,109 @@ def get_applovin_settings(game: str) -> Dict:
     _ensure_applovin_settings_state()
     return st.session_state.applovin_settings.get(game, {})
 
+def _extract_number_from_asset(asset_id: str, asset_list: List[Dict], include_subname: bool = False) -> str:
+    """
+    Extract number (and optionally subname) from asset name.
+    
+    Examples:
+    - "video123_pizzaidle_en.mp4" -> "123"
+    - "playable035_pizzaidle_applovin.html" -> "035"
+    - "playable035skipintro_pizzaidle_applovin.html" -> "035skipintro" (if include_subname=True)
+    
+    Args:
+        asset_id: Asset ID to look up
+        asset_list: List of assets to search in
+        include_subname: If True, include subname part (e.g., "skipintro")
+    """
+    import re
+    
+    # asset_id로 asset 찾기
+    asset = next((a for a in asset_list if a['id'] == asset_id), None)
+    if not asset:
+        return asset_id  # fallback
+    
+    name = asset.get('name', '')
+    
+    if include_subname:
+        # playable035skipintro 같은 패턴 추출 (subname 포함)
+        # playable + 숫자 + (선택적 알파벳) 형태
+        match = re.search(r'(playable\d+[a-zA-Z]*)', name, re.IGNORECASE)
+        if match:
+            return match.group(1).replace('playable', '')  # "035skipintro"
+        
+        # video는 subname 없음
+        match = re.search(r'video(\d+)', name, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    else:
+        # 숫자만 추출 (기존 로직)
+        match = re.search(r'(?:video|playable)(\d+)', name, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    
+    # 일반적인 숫자 패턴 (fallback)
+    match = re.search(r'(\d+)', name)
+    if match:
+        return match.group(1)
+    
+    return asset_id  # fallback
+
+
+def _generate_creative_name(video_ids: List[str], playable_ids: List[str], assets: Dict) -> str:
+    """
+    Generate creative set name based on selected videos and playables.
+    
+    Rules:
+    - 1 video + 1 playable: video123_playable456 or video123_playable456skipintro
+    - Multiple videos + 1 playable: video100-109_playable456
+    - 1 video + Multiple playables: video123_playabletop{count}
+    - Multiple videos + Multiple playables: video100-109_playabletop{count}
+    """
+    import re
+    
+    if not video_ids and not playable_ids:
+        return ""
+    
+    parts = []
+    
+    # Video 부분
+    if video_ids:
+        if len(video_ids) == 1:
+            video_num = _extract_number_from_asset(video_ids[0], assets['videos'])
+            parts.append(f"video{video_num}")
+        else:
+            # 여러 개: 숫자만 추출해서 최소-최대 계산
+            video_nums = []
+            for vid in video_ids:
+                num_str = _extract_number_from_asset(vid, assets['videos'])
+                # 숫자만 추출 (문자 제거)
+                match = re.search(r'(\d+)', num_str)
+                if match:
+                    video_nums.append(int(match.group(1)))
+            
+            if video_nums:
+                min_num = min(video_nums)
+                max_num = max(video_nums)
+                parts.append(f"video{min_num}-{max_num}")
+            else:
+                parts.append(f"video{len(video_ids)}items")
+    
+    # Playable 부분
+    if playable_ids:
+        if len(playable_ids) == 1:
+            # 단일 playable: subname 포함
+            playable_num = _extract_number_from_asset(
+                playable_ids[0], 
+                assets['playables'], 
+                include_subname=True
+            )
+            parts.append(f"playable{playable_num}")
+        else:
+            # 여러 개: playabletop{count}
+            parts.append(f"playabletop{len(playable_ids)}")
+    
+    return "_".join(parts)
+
 # =========================================================
 # API Functions
 # =========================================================
@@ -255,18 +358,49 @@ def get_assets(game: str = None) -> Dict[str, List[Dict]]:
 # =========================================================
 
 def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: bool = True) -> None:
-    """Render Applovin settings panel with campaign and asset selection."""
+    """Render Applovin settings panel with lazy loading."""
     _ensure_applovin_settings_state()
     cur = get_applovin_settings(game) or {}
     
     with container:
         st.markdown(f"#### {game} Applovin Settings")
         
-        # Fetch campaigns for this game
-        campaigns = get_campaigns(game=game)
+        # Lazy loading: 버튼으로 명시적 로드
+        campaigns_key = f"applovin_campaigns_{game}"
+        assets_key = f"applovin_assets_{game}"
+        
+        # 데이터가 이미 로드되었는지 확인
+        is_loaded = campaigns_key in st.session_state
+        
+        if not is_loaded:
+            if st.button(f"📥 Load Applovin Data", key=f"applovin_load_{idx}"):
+                with st.spinner("Loading campaigns and assets..."):
+                    # Fetch campaigns
+                    campaigns = get_campaigns(game=game)
+                    st.session_state[campaigns_key] = campaigns
+                    
+                    if campaigns:
+                        st.success(f"✅ Loaded {len(campaigns)} campaigns")
+                    else:
+                        st.warning("⚠️ No campaigns found")
+                        return
+                    
+                    # Fetch assets (Create 모드에서 필요)
+                    assets = get_assets(game=game)
+                    st.session_state[assets_key] = assets
+                    st.success(f"✅ Loaded {len(assets['videos'])} videos, {len(assets['playables'])} playables")
+                    
+                    # 강제 리렌더링
+                    st.rerun()
+            else:
+                st.info("👆 Click to load Applovin data")
+                return
+        
+        # 로드된 데이터 가져오기
+        campaigns = st.session_state.get(campaigns_key, [])
         
         if not campaigns:
-            st.warning("⚠️ Campaign을 불러올 수 없습니다.")
+            st.warning("⚠️ No campaigns available")
             return
         
         # Campaign selection
@@ -300,49 +434,135 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
             key=f"applovin_creative_action_{idx}",
         )
         
-        # Create 선택 시 Videos와 Playables 드롭다운 표시
-        selected_video_id = None
-        selected_playable_id = None
+        # Create 선택 시 Videos와 Playables 멀티 선택
+        selected_video_ids = []
+        selected_playable_ids = []
         
         if creative_action == "Create":
-            assets = get_assets(game=game)
+            assets = st.session_state.get(assets_key, {"videos": [], "playables": []})
             
-            # Videos 드롭다운
+            # 현재 선택된 항목 (session_state에서 가져오기)
+            current_videos = cur.get("video_ids", [])
+            current_playables = cur.get("playable_ids", [])
+            
+            # Videos 섹션
+            st.markdown("##### 📹 Videos (최대 10개)")
+            
             if assets["videos"]:
                 video_options = {
                     f"{v['name']} (ID: {v['id']})": v['id']
                     for v in assets["videos"]
                 }
-                selected_video = st.selectbox(
-                    "Video 선택",
+                
+                default_video_labels = [
+                    label for label, vid in video_options.items() 
+                    if vid in current_videos
+                ]
+                
+                selected_video_labels = st.multiselect(
+                    "Video 선택 (최대 10개)",
                     options=list(video_options.keys()),
-                    key=f"applovin_video_{idx}",
+                    default=default_video_labels,
+                    max_selections=10,
+                    key=f"applovin_videos_{idx}",
                 )
-                selected_video_id = video_options[selected_video]
+                
+                selected_video_ids = [video_options[label] for label in selected_video_labels]
+                
+                if selected_video_ids:
+                    st.write(f"**선택됨: {len(selected_video_ids)}개**")
+                    cols = st.columns(5)
+                    for i, vid in enumerate(selected_video_ids):
+                        with cols[i % 5]:
+                            video_name = next(
+                                (v['name'] for v in assets['videos'] if v['id'] == vid),
+                                vid
+                            )
+                            display_name = video_name[:20] + "..." if len(video_name) > 20 else video_name
+                            st.caption(f"🎬 {display_name}")
             else:
                 st.warning(f"⚠️ {game}에 해당하는 Video asset이 없습니다.")
             
-            # Playables 드롭다운
+            st.markdown("---")
+            
+            # Playables 섹션 (Videos 다음에!)
+            st.markdown("##### 🎮 Playables (최대 10개)")
+            
             if assets["playables"]:
                 playable_options = {
                     f"{p['name']} (ID: {p['id']})": p['id']
                     for p in assets["playables"]
                 }
-                selected_playable = st.selectbox(
-                    "Playable (HTML) 선택",
+                
+                default_playable_labels = [
+                    label for label, pid in playable_options.items() 
+                    if pid in current_playables
+                ]
+                
+                selected_playable_labels = st.multiselect(
+                    "Playable 선택 (최대 10개)",
                     options=list(playable_options.keys()),
-                    key=f"applovin_playable_{idx}",
+                    default=default_playable_labels,
+                    max_selections=10,
+                    key=f"applovin_playables_{idx}",
                 )
-                selected_playable_id = playable_options[selected_playable]
+                
+                selected_playable_ids = [playable_options[label] for label in selected_playable_labels]
+                
+                if selected_playable_ids:
+                    st.write(f"**선택됨: {len(selected_playable_ids)}개**")
+                    cols = st.columns(5)
+                    for i, pid in enumerate(selected_playable_ids):
+                        with cols[i % 5]:
+                            playable_name = next(
+                                (p['name'] for p in assets['playables'] if p['id'] == pid),
+                                pid
+                            )
+                            display_name = playable_name[:20] + "..." if len(playable_name) > 20 else playable_name
+                            st.caption(f"🎮 {display_name}")
             else:
                 st.warning(f"⚠️ {game}에 해당하는 Playable asset이 없습니다.")
+            
+            st.markdown("---")
+            
+            # Creative Name 설정
+            st.markdown("##### 📝 Creative Set Name")
+            
+            # 자동 생성된 이름 먼저 계산
+            auto_generated_name = _generate_creative_name(
+                selected_video_ids, 
+                selected_playable_ids,
+                assets
+            )
+            
+            # 텍스트 입력 (placeholder에 자동 생성 이름 표시)
+            custom_name = st.text_input(
+                "Creative Set Name (비워두면 자동 생성)",
+                value=cur.get("custom_name", ""),
+                placeholder=auto_generated_name if auto_generated_name else "예: video123_playable456",
+                key=f"applovin_custom_name_{idx}",
+                help="입력하지 않으면 자동으로 이름이 생성됩니다"
+            )
+            
+            # 최종 이름 결정
+            if custom_name.strip():
+                creative_name = custom_name.strip()
+                st.success(f"✅ 사용할 이름: `{creative_name}`")
+            else:
+                creative_name = auto_generated_name
+                if creative_name:
+                    st.info(f"ℹ️ 자동 생성 이름: `{creative_name}`")
+                else:
+                    creative_name = ""
         
         # Save settings
         st.session_state.applovin_settings[game] = {
             "campaign_id": str(campaign_id),
             "creative_action": creative_action,
-            "video_id": selected_video_id,
-            "playable_id": selected_playable_id,
+            "video_ids": selected_video_ids,
+            "playable_ids": selected_playable_ids,
+            "custom_name": custom_name.strip() if creative_action == "Create" else "",
+            "generated_name": creative_name if creative_action == "Create" else "",
         }
 # =========================================================
 # Upload Logic
