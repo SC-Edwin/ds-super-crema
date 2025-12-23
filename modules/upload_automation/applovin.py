@@ -103,7 +103,7 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
     with container:
         st.markdown(f"#### {game} Applovin Settings")
         
-        # Fetch campaigns
+        # Fetch campaigns for this game
         campaigns = get_campaigns(game=game)
         
         if not campaigns:
@@ -134,29 +134,19 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
         
         campaign_id = campaign_options[selected_campaign]
         
-        # ✅ Campaign 선택 시 현재 탭 유지
-        if st.session_state.get(f"prev_applovin_campaign_{idx}") != campaign_id:
-            st.query_params["tab"] = game
-            st.session_state[f"prev_applovin_campaign_{idx}"] = campaign_id
-        
-        # Creative Type
-        creative_type = st.selectbox(
-            "Creative Type",
-            options=["Video", "Image"],
-            index=0,
-            key=f"applovin_creative_type_{idx}",
-            help="업로드할 크리에이티브 타입"
+        # Create or Import Creative
+        creative_action = st.selectbox(
+            "Create/Import Creative",
+            options=["Create", "Import"],
+            index=0 if cur.get("creative_action") != "Import" else 1,
+            key=f"applovin_creative_action_{idx}",
+            help="Create: 새로운 크리에이티브 생성 | Import: 기존 크리에이티브 가져오기"
         )
-        
-        # ✅ Creative Type 선택 시에도 현재 탭 유지 (선택사항)
-        if st.session_state.get(f"prev_applovin_creative_type_{idx}") != creative_type:
-            st.query_params["tab"] = game
-            st.session_state[f"prev_applovin_creative_type_{idx}"] = creative_type
         
         # Save settings
         st.session_state.applovin_settings[game] = {
             "campaign_id": str(campaign_id),
-            "creative_type": creative_type,
+            "creative_action": creative_action,
         }
 # =========================================================
 # Upload Logic
