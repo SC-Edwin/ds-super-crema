@@ -276,6 +276,127 @@ def _create_creative_set_api(
         logger.error(f"Failed to create creative set: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
 
+def _upload_assets_to_media_library(files: List[Dict], max_workers: int = 3) -> Dict:
+    """
+    Upload video/playable files to Applovin Media Library.
+    
+    Args:
+        files: List of dicts with 'name' and 'path' keys
+        max_workers: Parallel upload workers
+        
+    Returns:
+        Dict with uploaded_ids, failed, errors
+    """
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    config = _get_api_config()
+    headers = {"Authorization": config["api_key"]}
+    account_id = config["account_id"]
+    
+    uploaded_ids = []
+    failed = 0
+    errors = []
+    
+    def upload_single_file(file_info):
+        try:
+            file_path = file_info.get("path")
+            file_name = file_info.get("name")
+            
+            # Determine content type
+            if file_name.lower().endswith(('.mp4', '.mov')):
+                content_type = 'video/mp4'
+            elif file_name.lower().endswith('.html'):
+                content_type = 'text/html'
+            else:
+                return {"success": False, "error": f"Unsupported file type: {file_name}"}
+            
+            # Read file
+            with open(file_path, 'rb') as f:
+                files_payload = {
+                    'files': (file_name, f, content_type)
+                }
+                
+                response = requests.post(
+                    f"{APPLOVIN_BASE_URL}/asset/upload",
+                    headers=headers,
+                    params={"account_id": account_id},
+                    files=files_payload,
+                    timeout=120  # 2분 타임아웃 (큰 파일 대비)
+                )
+                
+                response.raise_for_status()
+                result = response.json()
+                upload_id = result.get("upload_id")
+                
+                if not upload_id:
+                    return {"success": False, "error": f"No upload_id returned for {file_name}"}
+                
+                # Poll upload status
+                max_attempts = 30  # 최대 30번 체크 (30초)
+                for attempt in range(max_attempts):
+                    time.sleep(1)
+                    
+                    status_response = requests.get(
+                        f"{APPLOVIN_BASE_URL}/asset/upload_result",
+                        headers=headers,
+                        params={
+                            "account_id": account_id,
+                            "upload_id": upload_id
+                        },
+                        timeout=30
+                    )
+                    status_response.raise_for_status()
+                    status_data = status_response.json()
+                    
+                    upload_status = status_data.get("upload_status")
+                    
+                    if upload_status == "FINISHED":
+                        details = status_data.get("details", [])
+                        if details and details[0].get("file_status") == "SUCCESS":
+                            asset_id = details[0].get("id")
+                            return {
+                                "success": True,
+                                "asset_id": asset_id,
+                                "name": file_name
+                            }
+                        else:
+                            error_msg = details[0].get("error_message", "Unknown error")
+                            return {"success": False, "error": f"{file_name}: {error_msg}"}
+                    
+                    elif upload_status == "PENDING":
+                        continue  # Keep polling
+                    else:
+                        return {"success": False, "error": f"{file_name}: Unknown status {upload_status}"}
+                
+                return {"success": False, "error": f"{file_name}: Upload timeout"}
+                
+        except Exception as e:
+            logger.error(f"Failed to upload {file_info.get('name')}: {e}", exc_info=True)
+            return {"success": False, "error": f"{file_info.get('name')}: {str(e)}"}
+    
+    # Parallel upload
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(upload_single_file, f): f for f in files}
+        
+        for future in as_completed(futures):
+            result = future.result()
+            if result.get("success"):
+                uploaded_ids.append({
+                    "id": result["asset_id"],
+                    "name": result["name"]
+                })
+            else:
+                failed += 1
+                errors.append(result.get("error", "Unknown error"))
+    
+    return {
+        "uploaded_ids": uploaded_ids,
+        "total": len(uploaded_ids),
+        "failed": failed,
+        "errors": errors
+    }
+
 # =========================================================
 # API Functions
 # =========================================================

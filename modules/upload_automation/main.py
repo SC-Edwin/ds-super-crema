@@ -257,6 +257,68 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     elif platform == "Applovin":
                         st.markdown("### Applovin")
 
+                        # Media Library 업로드 버튼
+                        if is_marketer:
+                            st.write("")
+                            if st.button(
+                                "📤 Media Library에 업로드",
+                                key=f"applovin_media_upload_{game}",
+                                use_container_width=True,
+                                help="Drive/로컬에서 가져온 파일을 Applovin Media Library에 업로드합니다"
+                            ):
+                                remote_list = st.session_state.remote_videos.get(game, [])
+                                if not remote_list:
+                                    st.warning("⚠️ 업로드할 파일이 없습니다. 먼저 파일을 가져오세요.")
+                                else:
+                                    try:
+                                        from modules.upload_automation import applovin as applovin_module
+                                        
+                                        with st.status("📤 Uploading to Applovin Media Library...", expanded=True) as status:
+                                            result = applovin_module._upload_assets_to_media_library(
+                                                files=remote_list,
+                                                max_workers=3
+                                            )
+                                            
+                                            uploaded_count = result["total"]
+                                            failed_count = result["failed"]
+                                            
+                                            if uploaded_count > 0:
+                                                status.update(
+                                                    label=f"✅ Uploaded {uploaded_count} asset(s)",
+                                                    state="complete"
+                                                )
+                                                st.success(
+                                                    f"✅ Media Library 업로드 완료!\n\n"
+                                                    f"- 성공: {uploaded_count}개\n"
+                                                    f"- 실패: {failed_count}개"
+                                                )
+                                                
+                                                # 업로드된 asset 목록 표시
+                                                with st.expander("📋 업로드된 Asset 목록", expanded=False):
+                                                    for asset in result["uploaded_ids"]:
+                                                        st.write(f"✅ {asset['name']} (ID: {asset['id']})")
+                                                
+                                                # Asset 캐시 무효화 (새로 업로드된 asset이 리스트에 나오도록)
+                                                assets_key = f"applovin_assets_{game}"
+                                                if assets_key in st.session_state:
+                                                    del st.session_state[assets_key]
+                                                
+                                                st.info("💡 'Load Applovin Data' 버튼을 다시 클릭하여 새 asset을 확인하세요.")
+                                            else:
+                                                status.update(label="❌ No assets uploaded", state="error")
+                                                st.error("업로드 실패")
+                                            
+                                            # 에러 목록 표시
+                                            if result["errors"]:
+                                                with st.expander("⚠️ Upload Errors", expanded=False):
+                                                    for err in result["errors"]:
+                                                        st.write(f"- {err}")
+                                    except Exception as e:
+                                        st.error(f"❌ Media Library 업로드 실패: {e}")
+                                        devtools.record_exception("Applovin media library upload failed", e)
+                            
+                            st.write("")
+
                     # --- Drive Import Section ---
                     st.markdown("**Creative Videos 가져오기**")
                     
