@@ -147,6 +147,135 @@ def _generate_creative_name(video_ids: List[str], playable_ids: List[str], asset
     
     return "_".join(parts)
 
+def _upload_creative_set(game: str, idx: int, status: str = "PAUSED"):
+    """
+    Upload creative set to Applovin campaign.
+    
+    Args:
+        game: Game name
+        idx: Tab index for unique keys
+        status: "PAUSED" or "LIVE"
+    """
+    settings = get_applovin_settings(game)
+    
+    if not settings:
+        st.error("⚠️ Applovin 설정이 없습니다.")
+        return
+    
+    campaign_id = settings.get("campaign_id")
+    creative_action = settings.get("creative_action")
+    
+    if not campaign_id:
+        st.error("⚠️ Campaign을 선택해주세요.")
+        return
+    
+    if creative_action == "Create":
+        video_ids = settings.get("video_ids", [])
+        playable_ids = settings.get("playable_ids", [])
+        creative_name = settings.get("generated_name", "")
+        
+        if not video_ids and not playable_ids:
+            st.error("⚠️ Video 또는 Playable을 선택해주세요.")
+            return
+        
+        if not creative_name:
+            st.error("⚠️ Creative Set 이름이 필요합니다.")
+            return
+        
+        with st.spinner(f"Uploading creative set as {status}..."):
+            try:
+                # API 호출
+                result = _create_creative_set_api(
+                    campaign_id=campaign_id,
+                    name=creative_name,
+                    video_ids=video_ids,
+                    playable_ids=playable_ids,
+                    status=status
+                )
+                
+                if result.get("success"):
+                    st.success(f"✅ Creative set '{creative_name}' uploaded as {status}!")
+                    st.info(f"Creative Set ID: {result.get('id')}")
+                else:
+                    st.error(f"❌ Upload failed: {result.get('error')}")
+            except Exception as e:
+                logger.error(f"Failed to upload creative set: {e}", exc_info=True)
+                st.error(f"❌ Upload error: {e}")
+    
+    elif creative_action == "Import":
+        st.warning("⚠️ Import 기능은 아직 구현되지 않았습니다.")
+
+
+def _create_creative_set_api(
+    campaign_id: str,
+    name: str,
+    video_ids: List[str],
+    playable_ids: List[str],
+    status: str = "PAUSED"
+) -> Dict:
+    """
+    Call Applovin API to create creative set.
+    
+    Returns:
+        Dict with success, id, error
+    """
+    try:
+        config = _get_api_config()
+        headers = {
+            "Authorization": config["api_key"],
+            "Content-Type": "application/json"
+        }
+        
+        # Creative set payload
+        payload = {
+            "campaign_id": campaign_id,
+            "type": "APP",
+            "name": name,
+            "status": status,
+            "assets": [],
+            "languages": ["ENGLISH"],  # TODO: 설정 가능하게
+            "countries": []  # 빈 배열 = 모든 국가
+        }
+        
+        # Add video assets
+        for vid in video_ids:
+            payload["assets"].append({"id": vid})
+        
+        # Add playable assets
+        for pid in playable_ids:
+            payload["assets"].append({"id": pid})
+        
+        logger.info(f"Creating creative set: {name} with {len(video_ids)} videos, {len(playable_ids)} playables")
+        
+        response = requests.post(
+            f"{APPLOVIN_BASE_URL}/creative_set/create",
+            headers=headers,
+            params={"account_id": config["account_id"]},
+            json=payload,
+            timeout=30
+        )
+        
+        response.raise_for_status()
+        result = response.json()
+        
+        logger.info(f"Creative set created: {result}")
+        
+        return {
+            "success": True,
+            "id": result.get("id"),
+            "version": result.get("version")
+        }
+        
+    except requests.exceptions.HTTPError as e:
+        error_msg = f"API error: {e.response.status_code}"
+        if e.response.text:
+            error_msg += f" - {e.response.text}"
+        logger.error(error_msg)
+        return {"success": False, "error": error_msg}
+    except Exception as e:
+        logger.error(f"Failed to create creative set: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
 # =========================================================
 # API Functions
 # =========================================================
@@ -556,53 +685,35 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
                     creative_name = ""
         
         # Save settings
+        # Save settings
         st.session_state.applovin_settings[game] = {
             "campaign_id": str(campaign_id),
             "creative_action": creative_action,
-            "video_ids": selected_video_ids,
-            "playable_ids": selected_playable_ids,
+            "video_ids": selected_video_ids if creative_action == "Create" else [],
+            "playable_ids": selected_playable_ids if creative_action == "Create" else [],
             "custom_name": custom_name.strip() if creative_action == "Create" else "",
             "generated_name": creative_name if creative_action == "Create" else "",
         }
-# =========================================================
-# Upload Logic
-# =========================================================
-
-def upload_to_applovin(game: str, videos: List[Dict], settings: Dict) -> Dict:
-    """
-    Upload videos to Applovin.
-    
-    Args:
-        game: Game name
-        videos: List of video dictionaries (from Drive import)
-        settings: Applovin settings dictionary
         
-    Returns:
-        Dict with success status, message, and errors
-    """
-    logger.info(f"Uploading {len(videos)} videos to Applovin for {game}")
-    
-    # TODO: Implement Applovin API integration
-    # This is a placeholder implementation
-    
-    campaign_id = settings.get("campaign_id", "")
-    ad_group_id = settings.get("ad_group_id", "")
-    creative_type = settings.get("creative_type", "Video")
-    
-    if not campaign_id:
-        return {
-            "success": False,
-            "error": "Campaign ID가 필요합니다.",
-            "errors": ["Campaign ID를 입력해주세요."]
-        }
-    
-    # Placeholder: 실제 Applovin API 호출은 여기에 구현
-    logger.warning(f"Applovin upload not yet implemented. Would upload {len(videos)} videos to campaign {campaign_id}")
-    
-    return {
-        "success": False,
-        "error": "Applovin upload 기능은 아직 구현되지 않았습니다.",
-        "errors": ["Applovin API 통합이 필요합니다."],
-        "message": f"{len(videos)}개의 비디오를 업로드할 준비가 되었습니다."
-    }
-
+        st.markdown("---")
+        
+        # Upload buttons (양옆 배치)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button(
+                "⏸️ Save as Paused",
+                key=f"applovin_upload_paused_{idx}",
+                use_container_width=True,
+                type="secondary"
+            ):
+                _upload_creative_set(game, idx, status="PAUSED")
+        
+        with col2:
+            if st.button(
+                "▶️ Save as Live",
+                key=f"applovin_upload_live_{idx}",
+                use_container_width=True,
+                type="primary"
+            ):
+                _upload_creative_set(game, idx, status="LIVE")

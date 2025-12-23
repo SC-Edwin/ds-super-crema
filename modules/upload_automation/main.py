@@ -441,9 +441,29 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     elif platform == "Applovin":
                         applovin_ok_placeholder = st.empty()
                         st.write("")
-                        cont_applovin = st.button("Applovin Creative 업로드하기", key=f"applovin_upload_{game}", use_container_width=True)
-                        if cont_applovin:
+                        
+                        # Applovin 업로드 (2개 버튼)
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            cont_applovin_paused = st.button(
+                                "⏸️ Applovin (Paused)",
+                                key=f"applovin_upload_paused_{game}",
+                                use_container_width=True,
+                                type="secondary"
+                            )
+                        
+                        with col2:
+                            cont_applovin_live = st.button(
+                                "▶️ Applovin (Live)",
+                                key=f"applovin_upload_live_{game}",
+                                use_container_width=True,
+                                type="primary"
+                            )
+                        
+                        if cont_applovin_paused or cont_applovin_live:
                             st.query_params["tab"] = game
+                        
                         clr_applovin = st.button("전체 초기화 (Applovin)", key=f"applovin_clear_{game}", use_container_width=True)
 
             # =========================
@@ -947,37 +967,31 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     st.rerun()
             
             # --- APPLOVIN ACTIONS ---
+            # --- APPLOVIN ACTIONS ---
             if platform == "Applovin":
-                if "cont_applovin" in locals() and cont_applovin:
+                # Paused 버튼 클릭 시
+                if "cont_applovin_paused" in locals() and cont_applovin_paused:
                     st.query_params["tab"] = game
                     
-                    remote_list = st.session_state.remote_videos.get(game, [])
-                    ok, msg = validate_count(remote_list)
-                    if not ok:
-                        applovin_ok_placeholder.error(msg)
+                    from modules.upload_automation import applovin as applovin_module
+                    applovin_settings = applovin_module.get_applovin_settings(game)
+                    
+                    if applovin_settings:
+                        applovin_module._upload_creative_set(game, i, status="PAUSED")
                     else:
-                        try:
-                            from modules.upload_automation import applovin as applovin_module
-                            applovin_settings = applovin_module.get_applovin_settings(game)
-                            
-                            result = applovin_module.upload_to_applovin(
-                                game=game,
-                                videos=remote_list,
-                                settings=applovin_settings
-                            )
-                            
-                            if result.get("success"):
-                                applovin_ok_placeholder.success(f"✅ Applovin 업로드 완료: {result.get('message', '')}")
-                            else:
-                                applovin_ok_placeholder.error(f"❌ Applovin 업로드 실패: {result.get('error', 'Unknown error')}")
-                                
-                            if result.get("errors"):
-                                st.error("\n".join(result["errors"]))
-                        except Exception as e:
-                            st.error(str(e) if str(e) else "Applovin upload failed")
-                            devtools.record_exception("Applovin upload failed", e)
-                        finally:
-                            st.query_params["tab"] = game
+                        applovin_ok_placeholder.warning(f"⚠️ {game}의 Applovin 설정을 먼저 완료해주세요.")
+                
+                # Live 버튼 클릭 시
+                if "cont_applovin_live" in locals() and cont_applovin_live:
+                    st.query_params["tab"] = game
+                    
+                    from modules.upload_automation import applovin as applovin_module
+                    applovin_settings = applovin_module.get_applovin_settings(game)
+                    
+                    if applovin_settings:
+                        applovin_module._upload_creative_set(game, i, status="LIVE")
+                    else:
+                        applovin_ok_placeholder.warning(f"⚠️ {game}의 Applovin 설정을 먼저 완료해주세요.")
                 
                 if "clr_applovin" in locals() and clr_applovin:
                     if "applovin_settings" in st.session_state:
