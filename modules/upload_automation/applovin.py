@@ -14,6 +14,8 @@ import streamlit as st
 
 import requests
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,18 +48,18 @@ def get_applovin_settings(game: str) -> Dict:
 # API Functions
 # =========================================================
 
+@st.cache_data(ttl=300)  # 5분 캐시
 def get_campaigns(game: str = None) -> List[Dict]:
     """
-    Fetch campaigns from Applovin API, optionally filtered by game.
-    
-    Args:
-        game: Optional game name to filter campaigns by name pattern
+    Fetch all LIVE campaigns with parallel requests (cached).
     """
     try:
         config = _get_api_config()
         headers = {"Authorization": config["api_key"]}
-        params = {"account_id": config["account_id"]}
+        account_id = config["account_id"]
         
+        # 먼저 첫 페이지로 전체 페이지 수 추정
+        params = {"account_id": account_id, "page": 1, "size": 100}
         response = requests.get(
             f"{APPLOVIN_BASE_URL}/campaign/list",
             headers=headers,
@@ -65,38 +67,195 @@ def get_campaigns(game: str = None) -> List[Dict]:
             timeout=30
         )
         response.raise_for_status()
+        first_page = response.json()
+        campaigns = first_page if isinstance(first_page, list) else first_page.get("results", [])
         
-        data = response.json()
-        
-        if isinstance(data, list):
-            campaigns = data
+        if len(campaigns) < 100:
+            # 1페이지로 끝
+            all_campaigns = campaigns
         else:
-            campaigns = data.get("results", [])
+            # 여러 페이지 병렬 처리
+            all_campaigns = list(campaigns)
+            
+            def fetch_page(page_num):
+                params = {"account_id": account_id, "page": page_num, "size": 100}
+                resp = requests.get(
+                    f"{APPLOVIN_BASE_URL}/campaign/list",
+                    headers=headers,
+                    params=params,
+                    timeout=30
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data if isinstance(data, list) else data.get("results", [])
+            
+            # 최대 20페이지까지 병렬 요청
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                page = 2
+                while page <= 20:  # 최대 2000개
+                    # 5페이지씩 묶어서 병렬 요청
+                    batch_pages = range(page, min(page + 5, 21))
+                    futures = {executor.submit(fetch_page, p): p for p in batch_pages}
+                    
+                    batch_results = []
+                    for future in as_completed(futures):
+                        try:
+                            result = future.result()
+                            if result:
+                                batch_results.append((futures[future], result))
+                        except Exception as e:
+                            logger.error(f"Campaign page {futures[future]} failed: {e}")
+                    
+                    # 페이지 순서대로 정렬
+                    batch_results.sort(key=lambda x: x[0])
+                    
+                    # 결과 추가
+                    has_more = False
+                    for page_num, result in batch_results:
+                        all_campaigns.extend(result)
+                        if len(result) == 100:
+                            has_more = True
+                    
+                    if not has_more:
+                        break
+                    
+                    page += 5
+                    logger.info(f"Fetched campaigns up to page {page-1}, total: {len(all_campaigns)}")
+        
+        logger.info(f"Total campaigns fetched: {len(all_campaigns)}")
+        
+        # LIVE만 필터링
+        all_campaigns = [c for c in all_campaigns if c.get("status") == "LIVE"]
+        logger.info(f"After LIVE filter: {len(all_campaigns)}")
         
         # 게임별 필터링
         if game and "game_mapping" in config:
-            campaign_keyword = config["game_mapping"].get(game, "").lower()
-            if campaign_keyword:
-                campaigns = [
-                    c for c in campaigns 
-                    if campaign_keyword in c.get("name", "").lower()
+            keyword = config["game_mapping"].get(game, "").lower()
+            if keyword:
+                all_campaigns = [
+                    c for c in all_campaigns 
+                    if keyword in c.get("name", "").lower()
                 ]
-                logger.info(f"Filtered to {len(campaigns)} campaigns for {game} (keyword: {campaign_keyword})")
+                logger.info(f"After game filter ({keyword}): {len(all_campaigns)}")
         
-        logger.info(f"Fetched {len(campaigns)} campaigns from Applovin")
-        return campaigns
+        return all_campaigns
         
     except Exception as e:
-        logger.error(f"Failed to fetch Applovin campaigns: {e}", exc_info=True)
-        st.error(f"Applovin campaign 목록을 가져오는데 실패했습니다: {e}")
+        logger.error(f"Failed to fetch campaigns: {e}", exc_info=True)
+        st.error(f"Campaign 목록을 가져오는데 실패했습니다: {e}")
         return []
+
+@st.cache_data(ttl=300)  # 5분 캐시
+def get_assets(game: str = None) -> Dict[str, List[Dict]]:
+    """
+    Fetch all assets with parallel requests (cached).
+    """
+    try:
+        config = _get_api_config()
+        headers = {"Authorization": config["api_key"]}
+        account_id = config["account_id"]
+        
+        # 먼저 첫 페이지로 전체 페이지 수 추정
+        params = {"account_id": account_id, "page": 1, "size": 100}
+        response = requests.get(
+            f"{APPLOVIN_BASE_URL}/asset/list",
+            headers=headers,
+            params=params,
+            timeout=30
+        )
+        response.raise_for_status()
+        first_page = response.json()
+        assets = first_page if isinstance(first_page, list) else first_page.get("results", [])
+        
+        if len(assets) < 100:
+            # 1페이지로 끝
+            all_assets = assets
+        else:
+            # 여러 페이지 병렬 처리
+            all_assets = list(assets)
+            
+            def fetch_page(page_num):
+                params = {"account_id": account_id, "page": page_num, "size": 100}
+                resp = requests.get(
+                    f"{APPLOVIN_BASE_URL}/asset/list",
+                    headers=headers,
+                    params=params,
+                    timeout=30
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data if isinstance(data, list) else data.get("results", [])
+            
+            # 최대 60페이지까지 병렬 요청 (5~10개씩 동시)
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                page = 2
+                while page <= 60:  # 최대 6000개
+                    # 5페이지씩 묶어서 병렬 요청
+                    batch_pages = range(page, min(page + 5, 61))
+                    futures = {executor.submit(fetch_page, p): p for p in batch_pages}
+                    
+                    batch_results = []
+                    for future in as_completed(futures):
+                        try:
+                            result = future.result()
+                            if result:
+                                batch_results.append((futures[future], result))
+                        except Exception as e:
+                            logger.error(f"Page {futures[future]} failed: {e}")
+                    
+                    # 페이지 순서대로 정렬
+                    batch_results.sort(key=lambda x: x[0])
+                    
+                    # 결과 추가
+                    has_more = False
+                    for page_num, result in batch_results:
+                        all_assets.extend(result)
+                        if len(result) == 100:
+                            has_more = True
+                    
+                    if not has_more:
+                        break
+                    
+                    page += 5
+                    logger.info(f"Fetched up to page {page-1}, total: {len(all_assets)}")
+        
+        logger.info(f"Total assets fetched: {len(all_assets)}")
+        
+        # ACTIVE만 필터링
+        all_assets = [a for a in all_assets if a.get("status") == "ACTIVE"]
+        
+        # 게임별 필터링
+        if game and "game_mapping" in config:
+            package_keyword = config["game_mapping"].get(game, "").lower()
+            if package_keyword:
+                all_assets = [
+                    a for a in all_assets
+                    if package_keyword in a.get("name", "").lower()
+                ]
+                logger.info(f"Filtered to {len(all_assets)} assets for {game}")
+        
+        # Videos와 Playables 분리
+        videos = [a for a in all_assets if a.get("resource_type") == "VIDEO"]
+        playables = [a for a in all_assets if a.get("resource_type") == "HTML"]
+        
+        logger.info(f"Split: {len(videos)} videos, {len(playables)} playables")
+        
+        return {
+            "videos": videos,
+            "playables": playables
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch Applovin assets: {e}", exc_info=True)
+        st.error(f"Applovin asset 목록을 가져오는데 실패했습니다: {e}")
+        return {"videos": [], "playables": []}
 
 # =========================================================
 # UI Renderer
 # =========================================================
 
 def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: bool = True) -> None:
-    """Render Applovin settings panel with campaign selection."""
+    """Render Applovin settings panel with campaign and asset selection."""
     _ensure_applovin_settings_state()
     cur = get_applovin_settings(game) or {}
     
@@ -107,7 +266,7 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
         campaigns = get_campaigns(game=game)
         
         if not campaigns:
-            st.warning("⚠️ Campaign을 불러올 수 없습니다. API 설정을 확인해주세요.")
+            st.warning("⚠️ Campaign을 불러올 수 없습니다.")
             return
         
         # Campaign selection
@@ -129,7 +288,6 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
             options=list(campaign_options.keys()),
             index=default_idx,
             key=f"applovin_campaign_{idx}",
-            help="업로드할 Campaign을 선택하세요."
         )
         
         campaign_id = campaign_options[selected_campaign]
@@ -140,13 +298,51 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
             options=["Create", "Import"],
             index=0 if cur.get("creative_action") != "Import" else 1,
             key=f"applovin_creative_action_{idx}",
-            help="Create: 새로운 크리에이티브 생성 | Import: 기존 크리에이티브 가져오기"
         )
+        
+        # Create 선택 시 Videos와 Playables 드롭다운 표시
+        selected_video_id = None
+        selected_playable_id = None
+        
+        if creative_action == "Create":
+            assets = get_assets(game=game)
+            
+            # Videos 드롭다운
+            if assets["videos"]:
+                video_options = {
+                    f"{v['name']} (ID: {v['id']})": v['id']
+                    for v in assets["videos"]
+                }
+                selected_video = st.selectbox(
+                    "Video 선택",
+                    options=list(video_options.keys()),
+                    key=f"applovin_video_{idx}",
+                )
+                selected_video_id = video_options[selected_video]
+            else:
+                st.warning(f"⚠️ {game}에 해당하는 Video asset이 없습니다.")
+            
+            # Playables 드롭다운
+            if assets["playables"]:
+                playable_options = {
+                    f"{p['name']} (ID: {p['id']})": p['id']
+                    for p in assets["playables"]
+                }
+                selected_playable = st.selectbox(
+                    "Playable (HTML) 선택",
+                    options=list(playable_options.keys()),
+                    key=f"applovin_playable_{idx}",
+                )
+                selected_playable_id = playable_options[selected_playable]
+            else:
+                st.warning(f"⚠️ {game}에 해당하는 Playable asset이 없습니다.")
         
         # Save settings
         st.session_state.applovin_settings[game] = {
             "campaign_id": str(campaign_id),
             "creative_action": creative_action,
+            "video_id": selected_video_id,
+            "playable_id": selected_playable_id,
         }
 # =========================================================
 # Upload Logic

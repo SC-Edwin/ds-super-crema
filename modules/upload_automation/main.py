@@ -1112,18 +1112,7 @@ def run():
     """
     Main entry point called by the parent app.
     """
-    # Developer Mode 토글 (최상단)
-    if st.checkbox("🔧 Developer Mode", value=st.session_state.get('dev_mode', False), key="dev_mode_toggle"):
-        st.session_state.dev_mode = True
-        with st.expander("🔧 Developer Logs & Errors", expanded=False):
-            # 최근 로그 표시
-            log_buffer = devtools.get_log_buffer()
-            if log_buffer:
-                st.code('\n'.join(log_buffer[-100:]), language="log")
-            else:
-                st.info("No logs yet")
-    else:
-        st.session_state.dev_mode = False
+
     # ========================================================
     # [중요] 필수 초기화 함수들 (이게 없으면 에러 납니다!)
     # ========================================================
@@ -1140,7 +1129,7 @@ def run():
         st.session_state["page"] = "Creative 자동 업로드"
 
     # 상단에 모드 전환 버튼 배치
-    st.markdown("#### ��️ 모드 선택")
+    st.markdown("#### 모드 선택")
     
     
     # 컬럼을 사용하여 버튼을 가로로 배치
