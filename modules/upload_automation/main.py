@@ -5,6 +5,7 @@ import os
 import sys
 import pathlib
 import logging
+
 from typing import List, Dict
 # =========================================================
 # 1. 경로 설정 (Root 디렉토리 찾기)
@@ -212,10 +213,12 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
     selected_tab = query_params.get("tab", [None])[0] if query_params.get("tab") else None
     
     _tabs = st.tabs(GAMES)
+ 
     
     # If a tab was selected via query params, try to find its index
     if selected_tab and selected_tab in GAMES:
         tab_index = GAMES.index(selected_tab)
+        st.query_params["tab_index"] = tab_index
         # Note: Streamlit tabs don't support programmatic selection, but this helps with state tracking
 
     for i, game in enumerate(GAMES):
@@ -230,9 +233,16 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     st.subheader(game)
 
                     # --- Platform Radio ---
+                    # Test mode: Facebook, Unity Ads
+                    # Marketer mode: Facebook, Unity Ads, Google Ads, Applovin
+                    if is_marketer:
+                        platform_options = ["Facebook", "Unity Ads", "Google Ads", "Applovin"]
+                    else:
+                        platform_options = ["Facebook", "Unity Ads"]
+                    
                     platform = st.radio(
                         "플랫폼 선택",
-                        ["Facebook", "Unity Ads"],
+                        platform_options,
                         index=0,
                         horizontal=True,
                         key=f"platform_{game}",
@@ -240,8 +250,12 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
 
                     if platform == "Facebook":
                         st.markdown("### Facebook")
-                    else:
+                    elif platform == "Unity Ads":
                         st.markdown("### Unity Ads")
+                    elif platform == "Google Ads":
+                        st.markdown("### Google Ads")
+                    elif platform == "Applovin":
+                        st.markdown("### Applovin")
 
                     # --- Drive Import Section ---
                     st.markdown("**구글 드라이브에서 Creative Videos를 가져옵니다**")
@@ -335,7 +349,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         if cont:
                             st.query_params["tab"] = game
                         clr = st.button("전체 초기화", key=f"clear_{game}", use_container_width=True)
-                    else:
+                    elif platform == "Unity Ads":
                         unity_ok_placeholder = st.empty()
                         # Unity 버튼들도 동일하게 적용
                         st.write("")
@@ -346,6 +360,20 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         if cont_unity_create or cont_unity_apply:
                             st.query_params["tab"] = game
                         clr_unity = st.button("전체 초기화 (Unity)", key=f"unity_clear_{game}", use_container_width=True)
+                    elif platform == "Google Ads":
+                        google_ok_placeholder = st.empty()
+                        st.write("")
+                        cont_google = st.button("Google Ads Creative 업로드하기", key=f"google_upload_{game}", use_container_width=True)
+                        if cont_google:
+                            st.query_params["tab"] = game
+                        clr_google = st.button("전체 초기화 (Google Ads)", key=f"google_clear_{game}", use_container_width=True)
+                    elif platform == "Applovin":
+                        applovin_ok_placeholder = st.empty()
+                        st.write("")
+                        cont_applovin = st.button("Applovin Creative 업로드하기", key=f"applovin_upload_{game}", use_container_width=True)
+                        if cont_applovin:
+                            st.query_params["tab"] = game
+                        clr_applovin = st.button("전체 초기화 (Applovin)", key=f"applovin_clear_{game}", use_container_width=True)
 
             # =========================
             # RIGHT COLUMN: Settings
@@ -371,6 +399,26 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     except Exception as e:
                         st.error(str(e) if str(e) else "Unity 설정 패널 로드 실패")
                         devtools.record_exception("Unity settings panel load failed", e)
+            
+            elif platform == "Google Ads":
+                with right_col:
+                    google_card = st.container(border=True)
+                    try:
+                        from modules.upload_automation import google_ads as google_module
+                        google_module.render_google_ads_settings_panel(google_card, game, i, is_marketer=is_marketer)
+                    except Exception as e:
+                        st.error(str(e) if str(e) else "Google Ads 설정 패널 로드 실패")
+                        devtools.record_exception("Google Ads settings panel load failed", e)
+            
+            elif platform == "Applovin":
+                with right_col:
+                    applovin_card = st.container(border=True)
+                    try:
+                        from modules.upload_automation import applovin as applovin_module
+                        applovin_module.render_applovin_settings_panel(applovin_card, game, i, is_marketer=is_marketer)
+                    except Exception as e:
+                        st.error(str(e) if str(e) else "Applovin 설정 패널 로드 실패")
+                        devtools.record_exception("Applovin settings panel load failed", e)
 
             # =========================
             # EXECUTION LOGIC
@@ -786,6 +834,86 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     st.session_state.remote_videos.pop(game, None)
                     st.query_params["tab"] = game  # Preserve current tab
                     st.rerun()
+            
+            # --- GOOGLE ADS ACTIONS ---
+            if platform == "Google Ads":
+                if "cont_google" in locals() and cont_google:
+                    st.query_params["tab"] = game
+                    
+                    remote_list = st.session_state.remote_videos.get(game, [])
+                    ok, msg = validate_count(remote_list)
+                    if not ok:
+                        google_ok_placeholder.error(msg)
+                    else:
+                        try:
+                            from modules.upload_automation import google_ads as google_module
+                            google_settings = google_module.get_google_ads_settings(game)
+                            
+                            result = google_module.upload_to_google_ads(
+                                game=game,
+                                videos=remote_list,
+                                settings=google_settings
+                            )
+                            
+                            if result.get("success"):
+                                google_ok_placeholder.success(f"✅ Google Ads 업로드 완료: {result.get('message', '')}")
+                            else:
+                                google_ok_placeholder.error(f"❌ Google Ads 업로드 실패: {result.get('error', 'Unknown error')}")
+                                
+                            if result.get("errors"):
+                                st.error("\n".join(result["errors"]))
+                        except Exception as e:
+                            st.error(str(e) if str(e) else "Google Ads upload failed")
+                            devtools.record_exception("Google Ads upload failed", e)
+                        finally:
+                            st.query_params["tab"] = game
+                
+                if "clr_google" in locals() and clr_google:
+                    if "google_ads_settings" in st.session_state:
+                        st.session_state.google_ads_settings.pop(game, None)
+                    st.session_state.remote_videos.pop(game, None)
+                    st.query_params["tab"] = game
+                    st.rerun()
+            
+            # --- APPLOVIN ACTIONS ---
+            if platform == "Applovin":
+                if "cont_applovin" in locals() and cont_applovin:
+                    st.query_params["tab"] = game
+                    
+                    remote_list = st.session_state.remote_videos.get(game, [])
+                    ok, msg = validate_count(remote_list)
+                    if not ok:
+                        applovin_ok_placeholder.error(msg)
+                    else:
+                        try:
+                            from modules.upload_automation import applovin as applovin_module
+                            applovin_settings = applovin_module.get_applovin_settings(game)
+                            
+                            result = applovin_module.upload_to_applovin(
+                                game=game,
+                                videos=remote_list,
+                                settings=applovin_settings
+                            )
+                            
+                            if result.get("success"):
+                                applovin_ok_placeholder.success(f"✅ Applovin 업로드 완료: {result.get('message', '')}")
+                            else:
+                                applovin_ok_placeholder.error(f"❌ Applovin 업로드 실패: {result.get('error', 'Unknown error')}")
+                                
+                            if result.get("errors"):
+                                st.error("\n".join(result["errors"]))
+                        except Exception as e:
+                            st.error(str(e) if str(e) else "Applovin upload failed")
+                            devtools.record_exception("Applovin upload failed", e)
+                        finally:
+                            st.query_params["tab"] = game
+                
+                if "clr_applovin" in locals() and clr_applovin:
+                    if "applovin_settings" in st.session_state:
+                        st.session_state.applovin_settings.pop(game, None)
+                    st.session_state.remote_videos.pop(game, None)
+                    st.query_params["tab"] = game
+                    st.rerun()
 
     # Summary
     st.subheader("Upload Summary")
@@ -913,6 +1041,18 @@ def run():
     """
     Main entry point called by the parent app.
     """
+    # Developer Mode 토글 (최상단)
+    if st.checkbox("🔧 Developer Mode", value=st.session_state.get('dev_mode', False), key="dev_mode_toggle"):
+        st.session_state.dev_mode = True
+        with st.expander("🔧 Developer Logs & Errors", expanded=False):
+            # 최근 로그 표시
+            log_buffer = devtools.get_log_buffer()
+            if log_buffer:
+                st.code('\n'.join(log_buffer[-100:]), language="log")
+            else:
+                st.info("No logs yet")
+    else:
+        st.session_state.dev_mode = False
     # ========================================================
     # [중요] 필수 초기화 함수들 (이게 없으면 에러 납니다!)
     # ========================================================
