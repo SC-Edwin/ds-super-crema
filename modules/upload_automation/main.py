@@ -5,6 +5,7 @@ import os
 import sys
 import pathlib
 import logging
+
 from typing import List, Dict
 # =========================================================
 # 1. 경로 설정 (Root 디렉토리 찾기)
@@ -90,9 +91,11 @@ from modules.upload_automation import unity_ads as uni_ops  # ← 수정
 
 # 3. Marketer Modules (Simplified/Restricted)
 # 3. Marketer Modules (Simplified/Restricted)
+# 3. Marketer Modules (Simplified/Restricted)
 try:
-    from modules.upload_automation import fb as fb_marketer  # ← 수정
-    from modules.upload_automation import uni as uni_marketer  # ← 수정
+    from modules.upload_automation import fb as fb_marketer
+    from modules.upload_automation import uni as uni_marketer
+    from modules.upload_automation import applovin as applovin_module  # ← 추가!
 except ImportError as e:
     st.error(f"Module Import Error: {e}. Please ensure fb.py and uni.py are in {current_dir}")
     st.stop()
@@ -212,10 +215,12 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
     selected_tab = query_params.get("tab", [None])[0] if query_params.get("tab") else None
     
     _tabs = st.tabs(GAMES)
+ 
     
     # If a tab was selected via query params, try to find its index
     if selected_tab and selected_tab in GAMES:
         tab_index = GAMES.index(selected_tab)
+        st.query_params["tab_index"] = tab_index
         # Note: Streamlit tabs don't support programmatic selection, but this helps with state tracking
 
     for i, game in enumerate(GAMES):
@@ -230,9 +235,16 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     st.subheader(game)
 
                     # --- Platform Radio ---
+                    # Test mode: Facebook, Unity Ads
+                    # Marketer mode: Facebook, Unity Ads, Google Ads, Applovin
+                    if is_marketer:
+                        platform_options = ["Facebook", "Unity Ads", "Google Ads", "Applovin"]
+                    else:
+                        platform_options = ["Facebook", "Unity Ads"]
+                    
                     platform = st.radio(
                         "플랫폼 선택",
-                        ["Facebook", "Unity Ads"],
+                        platform_options,
                         index=0,
                         horizontal=True,
                         key=f"platform_{game}",
@@ -240,62 +252,199 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
 
                     if platform == "Facebook":
                         st.markdown("### Facebook")
-                    else:
+                    elif platform == "Unity Ads":
                         st.markdown("### Unity Ads")
+                    elif platform == "Google Ads":
+                        st.markdown("### Google Ads")
+                    elif platform == "Applovin":
+                        st.markdown("### Applovin")
+
+                        # Media Library 업로드 버튼
+                        if is_marketer:
+                            st.write("")
+                            if st.button(
+                                "📤 Media Library에 업로드",
+                                key=f"applovin_media_upload_{game}",
+                                use_container_width=True,
+                                help="Drive/로컬에서 가져온 파일을 Applovin Media Library에 업로드합니다"
+                            ):
+                                remote_list = st.session_state.remote_videos.get(game, [])
+                                if not remote_list:
+                                    st.warning("⚠️ 업로드할 파일이 없습니다. 먼저 파일을 가져오세요.")
+                                else:
+                                    try:
+                                        from modules.upload_automation import applovin as applovin_module
+                                        
+                                        with st.status("📤 Uploading to Applovin Media Library...", expanded=True) as status:
+                                            result = applovin_module._upload_assets_to_media_library(
+                                                files=remote_list,
+                                                max_workers=3
+                                            )
+                                            
+                                            uploaded_count = result["total"]
+                                            failed_count = result["failed"]
+                                            
+                                            if uploaded_count > 0:
+                                                status.update(
+                                                    label=f"✅ Uploaded {uploaded_count} asset(s)",
+                                                    state="complete"
+                                                )
+                                                st.success(
+                                                    f"✅ Media Library 업로드 완료!\n\n"
+                                                    f"- 성공: {uploaded_count}개\n"
+                                                    f"- 실패: {failed_count}개"
+                                                )
+                                                
+                                                # 업로드된 asset 목록 표시
+                                                with st.expander("📋 업로드된 Asset 목록", expanded=False):
+                                                    for asset in result["uploaded_ids"]:
+                                                        st.write(f"✅ {asset['name']} (ID: {asset['id']})")
+                                                
+                                                # Asset 캐시 무효화 (새로 업로드된 asset이 리스트에 나오도록)
+                                                assets_key = f"applovin_assets_{game}"
+                                                if assets_key in st.session_state:
+                                                    del st.session_state[assets_key]
+                                                
+                                                st.info("💡 'Load Applovin Data' 버튼을 다시 클릭하여 새 asset을 확인하세요.")
+                                            else:
+                                                status.update(label="❌ No assets uploaded", state="error")
+                                                st.error("업로드 실패")
+                                            
+                                            # 에러 목록 표시
+                                            if result["errors"]:
+                                                with st.expander("⚠️ Upload Errors", expanded=False):
+                                                    for err in result["errors"]:
+                                                        st.write(f"- {err}")
+                                    except Exception as e:
+                                        st.error(f"❌ Media Library 업로드 실패: {e}")
+                                        devtools.record_exception("Applovin media library upload failed", e)
+                            
+                            st.write("")
 
                     # --- Drive Import Section ---
-                    st.markdown("**구글 드라이브에서 Creative Videos를 가져옵니다**")
-                    drv_input = st.text_input(
-                        "Drive folder URL or ID",
-                        key=f"drive_folder_{game}",
-                        placeholder="https://drive.google.com/drive/folders/..."
+                    st.markdown("**Creative Videos 가져오기**")
+                    
+                    # 탭으로 Drive / Local 선택
+                    import_method = st.radio(
+                        "가져오기 방법",
+                        ["Google Drive", "로컬 파일"],
+                        index=0,
+                        horizontal=True,
+                        key=f"import_method_{game}",
                     )
-
-                    with st.expander("Advanced import options", expanded=False):
-                        workers = st.number_input(
-                            "Parallel workers", min_value=1, max_value=16, value=8, key=f"drive_workers_{game}"
+                    
+                    if import_method == "Google Drive":
+                        st.markdown("**구글 드라이브에서 Creative Videos를 가져옵니다**")
+                        drv_input = st.text_input(
+                            "Drive folder URL or ID",
+                            key=f"drive_folder_{game}",
+                            placeholder="https://drive.google.com/drive/folders/..."
                         )
 
-                    # [수정 1] 드라이브 가져오기 버튼: 너비 꽉 채우기
-                    if st.button("드라이브에서 Creative 가져오기", key=f"drive_import_{game}", use_container_width=True):
-                        try:
-                            overall = st.progress(0, text="Waiting...")
-                            log_box = st.empty()
-                            lines = []
-                            import time
-                            last_flush = [0.0]
+                        with st.expander("Advanced import options", expanded=False):
+                            workers = st.number_input(
+                                "Parallel workers", min_value=1, max_value=16, value=8, key=f"drive_workers_{game}"
+                            )
 
-                            def _on_progress(done, total, name, err):
-                                pct = int((done / max(total, 1)) * 100)
-                                label = f"{done}/{total} • {name}" if name else f"{done}/{total}"
-                                if err: lines.append(f"❌ {name} — {err}")
-                                else: lines.append(f"✅ {name}")
-                                
-                                now = time.time()
-                                if (now - last_flush[0]) > 0.3 or done == total:
-                                    overall.progress(pct, text=label)
-                                    log_box.write("\n".join(lines[-200:]))
-                                    last_flush[0] = now
+                        # [수정 1] 드라이브 가져오기 버튼: 너비 꽉 채우기
+                        if st.button("드라이브에서 Creative 가져오기", key=f"drive_import_{game}", use_container_width=True):
+                            try:
+                                overall = st.progress(0, text="Waiting...")
+                                log_box = st.empty()
+                                lines = []
+                                import time
+                                last_flush = [0.0]
 
-                            with st.status("Importing videos...", expanded=True) as status:
-                                imported = _run_drive_import(drv_input, int(workers), _on_progress)
-                                lst = st.session_state.remote_videos.get(game, [])
-                                # Combine existing and newly imported files
-                                combined = lst + imported
-                                # Remove duplicates by filename (case-insensitive)
-                                deduplicated = fb_ops._dedupe_by_name(combined)
-                                st.session_state.remote_videos[game] = deduplicated
-                                new_count = len(imported)
-                                duplicate_count = len(combined) - len(deduplicated)
-                                status.update(label=f"Done: {new_count} files imported", state="complete")
-                                if isinstance(imported, dict) and imported.get("errors"):
-                                    st.warning("\n".join(imported["errors"]))
-                            if duplicate_count > 0:
-                                st.success(f"Imported {new_count} videos. ({duplicate_count} duplicates removed)")
-                            else:
-                                st.success(f"Imported {new_count} videos.")
-                        except Exception as e:
-                            st.error(f"Import failed: {e}")
+                                def _on_progress(done, total, name, err):
+                                    pct = int((done / max(total, 1)) * 100)
+                                    label = f"{done}/{total} • {name}" if name else f"{done}/{total}"
+                                    if err: lines.append(f"❌ {name} — {err}")
+                                    else: lines.append(f"✅ {name}")
+                                    
+                                    now = time.time()
+                                    if (now - last_flush[0]) > 0.3 or done == total:
+                                        overall.progress(pct, text=label)
+                                        log_box.write("\n".join(lines[-200:]))
+                                        last_flush[0] = now
+
+                                with st.status("Importing videos...", expanded=True) as status:
+                                    imported = _run_drive_import(drv_input, int(workers), _on_progress)
+                                    lst = st.session_state.remote_videos.get(game, [])
+                                    # Combine existing and newly imported files
+                                    combined = lst + imported
+                                    # Remove duplicates by filename (case-insensitive)
+                                    deduplicated = fb_ops._dedupe_by_name(combined)
+                                    st.session_state.remote_videos[game] = deduplicated
+                                    new_count = len(imported)
+                                    duplicate_count = len(combined) - len(deduplicated)
+                                    status.update(label=f"Done: {new_count} files imported", state="complete")
+                                    if isinstance(imported, dict) and imported.get("errors"):
+                                        st.warning("\n".join(imported["errors"]))
+                                if duplicate_count > 0:
+                                    st.success(f"Imported {new_count} videos. ({duplicate_count} duplicates removed)")
+                                else:
+                                    st.success(f"Imported {new_count} videos.")
+                            except Exception as e:
+                                st.error(f"Import failed: {e}")
+                    
+                    else:  # 로컬 파일
+                        st.markdown("**로컬 컴퓨터에서 Creative Videos를 업로드합니다**")
+                        uploaded_files = st.file_uploader(
+                            "비디오 파일 선택",
+                            type=["mp4", "mpeg4"],
+                            accept_multiple_files=True,
+                            key=f"local_upload_{game}",
+                            help="여러 파일을 선택할 수 있습니다. (.mp4, .mpeg4 형식만 지원)"
+                        )
+                        
+                        if uploaded_files:
+                            if st.button("로컬 파일 추가하기", key=f"local_add_{game}", use_container_width=True):
+                                try:
+                                    import tempfile
+                                    import pathlib
+                                    
+                                    imported = []
+                                    for uploaded_file in uploaded_files:
+                                        # 임시 파일로 저장
+                                        suffix = pathlib.Path(uploaded_file.name).suffix or ".mp4"
+                                        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                                            tmp.write(uploaded_file.getvalue())
+                                            tmp_path = tmp.name
+                                        
+                                        imported.append({
+                                            "name": uploaded_file.name,
+                                            "path": tmp_path
+                                        })
+                                    
+                                    # 기존 파일과 병합 및 중복 제거
+                                    lst = st.session_state.remote_videos.get(game, [])
+                                    combined = lst + imported
+                                    deduplicated = fb_ops._dedupe_by_name(combined)
+                                    st.session_state.remote_videos[game] = deduplicated
+                                    
+                                    new_count = len(imported)
+                                    duplicate_count = len(combined) - len(deduplicated)
+                                    
+                                    if duplicate_count > 0:
+                                        st.success(f"✅ {new_count}개 파일 추가됨 ({duplicate_count}개 중복 제거됨)")
+                                    else:
+                                        st.success(f"✅ {new_count}개 파일 추가됨")
+                                    
+                                    # 파일 업로더 초기화 (선택사항)
+                                    st.rerun()
+                                    
+                                except Exception as e:
+                                    st.error(f"파일 추가 실패: {e}")
+                                    devtools.record_exception("Local file upload failed", e)
+                        
+                        # ✅ 선택된 비디오 초기화 버튼 (file_uploader만 초기화)
+                        if uploaded_files or st.session_state.get(f"local_upload_{game}"):
+                            if st.button("선택된 비디오 초기화", key=f"clear_selected_{game}", use_container_width=True):
+                                # file_uploader의 선택만 초기화
+                                if f"local_upload_{game}" in st.session_state:
+                                    del st.session_state[f"local_upload_{game}"]
+                                st.session_state.current_tab_index = i  # Preserve current tab
+                                st.rerun()
 
                     # --- Display List ---
                     remote_list = st.session_state.remote_videos.get(game, [])
@@ -306,8 +455,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     else:
                         st.write("- (None)")
 
-                    # [수정 2] 초기화 버튼: 너비 꽉 채우기
-                    if st.button("초기화 (Clear Videos)", key=f"clearurl_{game}", use_container_width=True):
+                    # ✅ 다운로드된 Creatives 초기화 버튼 (remote_videos만 초기화)
+                    if st.button("다운로드된 Creatives 초기화", key=f"clearurl_{game}", use_container_width=True):
                         st.session_state.remote_videos[game] = []
                         st.session_state.current_tab_index = i  # Preserve current tab
                         st.rerun()
@@ -335,7 +484,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         if cont:
                             st.query_params["tab"] = game
                         clr = st.button("전체 초기화", key=f"clear_{game}", use_container_width=True)
-                    else:
+                    elif platform == "Unity Ads":
                         unity_ok_placeholder = st.empty()
                         # Unity 버튼들도 동일하게 적용
                         st.write("")
@@ -346,6 +495,40 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         if cont_unity_create or cont_unity_apply:
                             st.query_params["tab"] = game
                         clr_unity = st.button("전체 초기화 (Unity)", key=f"unity_clear_{game}", use_container_width=True)
+                    elif platform == "Google Ads":
+                        google_ok_placeholder = st.empty()
+                        st.write("")
+                        cont_google = st.button("Google Ads Creative 업로드하기", key=f"google_upload_{game}", use_container_width=True)
+                        if cont_google:
+                            st.query_params["tab"] = game
+                        clr_google = st.button("전체 초기화 (Google Ads)", key=f"google_clear_{game}", use_container_width=True)
+                    elif platform == "Applovin":
+                        applovin_ok_placeholder = st.empty()
+                        st.write("")
+                        
+                        # Applovin 업로드 (2개 버튼)
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            cont_applovin_paused = st.button(
+                                "⏸️ Applovin (Paused)",
+                                key=f"applovin_upload_paused_{game}",
+                                use_container_width=True,
+                                type="secondary"
+                            )
+                        
+                        with col2:
+                            cont_applovin_live = st.button(
+                                "▶️ Applovin (Live)",
+                                key=f"applovin_upload_live_{game}",
+                                use_container_width=True,
+                                type="primary"
+                            )
+                        
+                        if cont_applovin_paused or cont_applovin_live:
+                            st.query_params["tab"] = game
+                        
+                        clr_applovin = st.button("전체 초기화 (Applovin)", key=f"applovin_clear_{game}", use_container_width=True)
 
             # =========================
             # RIGHT COLUMN: Settings
@@ -371,6 +554,25 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     except Exception as e:
                         st.error(str(e) if str(e) else "Unity 설정 패널 로드 실패")
                         devtools.record_exception("Unity settings panel load failed", e)
+            
+            elif platform == "Google Ads":
+                with right_col:
+                    google_card = st.container(border=True)
+                    try:
+                        from modules.upload_automation import google_ads as google_module
+                        google_module.render_google_ads_settings_panel(google_card, game, i, is_marketer=is_marketer)
+                    except Exception as e:
+                        st.error(str(e) if str(e) else "Google Ads 설정 패널 로드 실패")
+                        devtools.record_exception("Google Ads settings panel load failed", e)
+            
+            elif platform == "Applovin":
+                with right_col:
+                    applovin_card = st.container(border=True)
+                    try:
+                        applovin_module.render_applovin_settings_panel(applovin_card, game, i, is_marketer=is_marketer)
+                    except Exception as e:
+                        st.error(str(e) if str(e) else "Applovin 설정 패널 로드 실패")
+                        devtools.record_exception("Applovin settings panel load failed", e)
 
             # =========================
             # EXECUTION LOGIC
@@ -786,6 +988,80 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     st.session_state.remote_videos.pop(game, None)
                     st.query_params["tab"] = game  # Preserve current tab
                     st.rerun()
+            
+            # --- GOOGLE ADS ACTIONS ---
+            if platform == "Google Ads":
+                if "cont_google" in locals() and cont_google:
+                    st.query_params["tab"] = game
+                    
+                    remote_list = st.session_state.remote_videos.get(game, [])
+                    ok, msg = validate_count(remote_list)
+                    if not ok:
+                        google_ok_placeholder.error(msg)
+                    else:
+                        try:
+                            from modules.upload_automation import google_ads as google_module
+                            google_settings = google_module.get_google_ads_settings(game)
+                            
+                            result = google_module.upload_to_google_ads(
+                                game=game,
+                                videos=remote_list,
+                                settings=google_settings
+                            )
+                            
+                            if result.get("success"):
+                                google_ok_placeholder.success(f"✅ Google Ads 업로드 완료: {result.get('message', '')}")
+                            else:
+                                google_ok_placeholder.error(f"❌ Google Ads 업로드 실패: {result.get('error', 'Unknown error')}")
+                                
+                            if result.get("errors"):
+                                st.error("\n".join(result["errors"]))
+                        except Exception as e:
+                            st.error(str(e) if str(e) else "Google Ads upload failed")
+                            devtools.record_exception("Google Ads upload failed", e)
+                        finally:
+                            st.query_params["tab"] = game
+                
+                if "clr_google" in locals() and clr_google:
+                    if "google_ads_settings" in st.session_state:
+                        st.session_state.google_ads_settings.pop(game, None)
+                    st.session_state.remote_videos.pop(game, None)
+                    st.query_params["tab"] = game
+                    st.rerun()
+            
+            # --- APPLOVIN ACTIONS ---
+            # --- APPLOVIN ACTIONS ---
+            if platform == "Applovin":
+                # Paused 버튼 클릭 시
+                if "cont_applovin_paused" in locals() and cont_applovin_paused:
+                    st.query_params["tab"] = game
+                    
+                    from modules.upload_automation import applovin as applovin_module
+                    applovin_settings = applovin_module.get_applovin_settings(game)
+                    
+                    if applovin_settings:
+                        applovin_module._upload_creative_set(game, i, status="PAUSED")
+                    else:
+                        applovin_ok_placeholder.warning(f"⚠️ {game}의 Applovin 설정을 먼저 완료해주세요.")
+                
+                # Live 버튼 클릭 시
+                if "cont_applovin_live" in locals() and cont_applovin_live:
+                    st.query_params["tab"] = game
+                    
+                    from modules.upload_automation import applovin as applovin_module
+                    applovin_settings = applovin_module.get_applovin_settings(game)
+                    
+                    if applovin_settings:
+                        applovin_module._upload_creative_set(game, i, status="LIVE")
+                    else:
+                        applovin_ok_placeholder.warning(f"⚠️ {game}의 Applovin 설정을 먼저 완료해주세요.")
+                
+                if "clr_applovin" in locals() and clr_applovin:
+                    if "applovin_settings" in st.session_state:
+                        st.session_state.applovin_settings.pop(game, None)
+                    st.session_state.remote_videos.pop(game, None)
+                    st.query_params["tab"] = game
+                    st.rerun()
 
     # Summary
     st.subheader("Upload Summary")
@@ -913,6 +1189,7 @@ def run():
     """
     Main entry point called by the parent app.
     """
+
     # ========================================================
     # [중요] 필수 초기화 함수들 (이게 없으면 에러 납니다!)
     # ========================================================
@@ -929,7 +1206,7 @@ def run():
         st.session_state["page"] = "Creative 자동 업로드"
 
     # 상단에 모드 전환 버튼 배치
-    st.markdown("#### 🛠️ 모드 선택")
+    st.markdown("#### 모드 선택")
     
     
     # 컬럼을 사용하여 버튼을 가로로 배치

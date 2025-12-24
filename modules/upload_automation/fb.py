@@ -1670,7 +1670,7 @@ def upload_videos_to_library_and_create_single_ads(
         ad_name = item["ad_name"]
         vid_id = item["vid_id"]
         resolution = item["resolution"]
-        thumb_url = item.get("thumb_url")
+        thumb_url = item.get("thumb_url")  # 실제로는 image_hash 값
 
         # Prepare texts (filter empties)
         final_primary_texts = [t.strip() for t in (default_primary_texts or []) if (t or "").strip()]
@@ -1692,9 +1692,18 @@ def upload_videos_to_library_and_create_single_ads(
         if not final_store_url:
             return {"ok": False, "error": f"{ad_name}: Store URL Missing", "item": item}
 
-        # Thumbnail strongly recommended (you already enforce for object_story_spec)
+        # ✅ 수정: image_url 대신 image_hash 사용
+        # thumb_url은 실제로 upload_thumbnail_image에서 반환한 hash 값
         if thumb_url:
-            video_data["image_url"] = thumb_url
+            # thumb_url이 실제로 URL인지 hash인지 확인
+            if thumb_url.startswith(("http://", "https://")):
+                video_data["image_url"] = thumb_url
+            else:
+                # hash 값인 경우
+                video_data["image_hash"] = thumb_url
+        else:
+            # thumb_url이 없으면 에러 반환 (Meta API 요구사항)
+            return {"ok": False, "error": f"{ad_name}: Thumbnail missing (image_hash or image_url required)", "item": item}
 
         video_data["call_to_action"] = {
             "type": final_cta,
@@ -1771,7 +1780,7 @@ def upload_videos_to_library_and_create_single_ads(
     prog = st.progress(0, text=f"🚀 Upload stage... 0/{total}")
 
     # Tune concurrency
-    upload_workers = min(int(max_workers or 6), 6)      # uploading is heavy; don’t go too high
+    upload_workers = min(int(max_workers or 6), 6)      # uploading is heavy; don't go too high
     ready_workers = min(upload_workers, 6)
     create_workers = min(upload_workers, 6)
 
@@ -2415,9 +2424,14 @@ def _upload_dynamic_single_video_ads(
             # ✅ 썸네일 제공
             thumb_url = thumb_urls.get(video_num)
             if thumb_url:
-                inline_video_data["image_url"] = thumb_url
+                # ✅ 수정: image_url 대신 image_hash 사용
+                # thumb_url은 실제로 upload_thumbnail_image에서 반환한 hash 값
+                if thumb_url.startswith(("http://", "https://")):
+                    inline_video_data["image_url"] = thumb_url
+                else:
+                    inline_video_data["image_hash"] = thumb_url
             else:
-                raise RuntimeError("썸네일(image_url) 생성 실패: object_story_spec.video_data에 필요함")
+                raise RuntimeError("썸네일(image_hash) 생성 실패: object_story_spec.video_data에 필요함")
 
             # ✅ Object Story Spec 구성 (Instagram 연결 포함)
             inline_object_story_spec = {
@@ -2891,9 +2905,14 @@ def _upload_dynamic_1x1_ads(
         first_video_num = valid_videos[0]["video_num"]
         thumb_url = thumb_urls.get(first_video_num)
         if thumb_url:
-            inline_video_data["image_url"] = thumb_url
+            # ✅ 수정: image_url 대신 image_hash 사용
+            # thumb_url은 실제로 upload_thumbnail_image에서 반환한 hash 값
+            if thumb_url.startswith(("http://", "https://")):
+                inline_video_data["image_url"] = thumb_url
+            else:
+                inline_video_data["image_hash"] = thumb_url
         else:
-            raise RuntimeError("썸네일(image_url) 생성 실패: object_story_spec.video_data에 필요함")
+            raise RuntimeError("썸네일(image_hash) 생성 실패: object_story_spec.video_data에 필요함")
         
         # Object Story Spec 구성
         inline_object_story_spec = {
@@ -2909,7 +2928,7 @@ def _upload_dynamic_1x1_ads(
         # Multi-advertiser ads 토글
         multi_opt_in = bool(settings.get("multi_advertiser_ads_opt_in", False))
         multi_enroll_status = "OPT_IN" if multi_opt_in else "OPT_OUT"
-        
+
         # Creative 구성
         creative_config = {
             "name": ad_name,
@@ -3344,9 +3363,14 @@ def _upload_dynamic_16x9_ads(
         first_video_num = valid_videos[0]["video_num"]
         thumb_url = thumb_urls.get(first_video_num)
         if thumb_url:
-            inline_video_data["image_url"] = thumb_url
+            # ✅ 수정: image_url 대신 image_hash 사용
+            # thumb_url은 실제로 upload_thumbnail_image에서 반환한 hash 값
+            if thumb_url.startswith(("http://", "https://")):
+                inline_video_data["image_url"] = thumb_url
+            else:
+                inline_video_data["image_hash"] = thumb_url
         else:
-            raise RuntimeError("썸네일(image_url) 생성 실패: object_story_spec.video_data에 필요함")
+            raise RuntimeError("썸네일(image_hash) 생성 실패: object_story_spec.video_data에 필요함")
 
         inline_object_story_spec = {"page_id": str(page_id), "video_data": inline_video_data}
 
@@ -3783,9 +3807,14 @@ def _upload_dynamic_9x16_ads(
         first_video_num = valid_videos[0]["video_num"]
         thumb_url = thumb_urls.get(first_video_num)
         if thumb_url:
-            inline_video_data["image_url"] = thumb_url
+            # ✅ 수정: image_url 대신 image_hash 사용
+            # thumb_url은 실제로 upload_thumbnail_image에서 반환한 hash 값
+            if thumb_url.startswith(("http://", "https://")):
+                inline_video_data["image_url"] = thumb_url
+            else:
+                inline_video_data["image_hash"] = thumb_url
         else:
-            raise RuntimeError("썸네일(image_url) 생성 실패: object_story_spec.video_data에 필요함")
+            raise RuntimeError("썸네일(image_hash) 생성 실패: object_story_spec.video_data에 필요함")
 
         inline_object_story_spec = {"page_id": str(page_id), "video_data": inline_video_data}
 
