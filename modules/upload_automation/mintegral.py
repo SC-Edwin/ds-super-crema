@@ -48,8 +48,15 @@ def _get_api_config():
 def _get_game_mapping(game: str) -> str:
     """Get game short name from secrets.toml mapping."""
     if "mintegral" in st.secrets and "game_mappings" in st.secrets["mintegral"]:
-        return st.secrets["mintegral"]["game_mappings"].get(game, game.lower().replace(" ", ""))
-    
+        mapping = st.secrets["mintegral"]["game_mappings"].get(game)
+        
+        # 리스트면 그대로 반환, 문자열이면 리스트로 변환
+        if isinstance(mapping, list):
+            return mapping
+        elif isinstance(mapping, str):
+            return [mapping]
+        else:
+            return [game.lower().replace(" ", "")]
     # Fallback mapping if not in secrets
     fallback = {
         "XP HERO": "weaponrpg",
@@ -100,16 +107,21 @@ def get_mintegral_settings(game: str) -> Dict:
 # API Functions
 # =========================================================
 @st.cache_data(ttl=300)
-def get_creatives(creative_type: Optional[str] = None, game_filter: Optional[str] = None, max_pages: int = 3) -> List[Dict]:
+def get_creatives(creative_type: Optional[str] = None, game_filter: Optional[List[str]] = None, max_pages: int = 3) -> List[Dict]:
     """
     Fetch creatives from Mintegral API with parallel pagination.
     
     Args:
         creative_type: Type filter (IMAGE, VIDEO, PLAYABLE)
-        game_filter: Game short name to filter creatives
+        game_filter: List of game short names to filter creatives (OR condition)
         max_pages: Maximum number of pages to fetch (default 3 = 600 items)
+    
+    Returns:
+        List of creative dictionaries
+    
+    Note:
+        Results are cached for 5 minutes. Uses parallel requests for faster loading.
     """
-    all_creatives = []
     
     def fetch_page(page: int) -> List[Dict]:
         """Fetch a single page of creatives."""
@@ -130,29 +142,34 @@ def get_creatives(creative_type: Optional[str] = None, game_filter: Optional[str
             
             data = response.json()
             if data.get("code") != 200:
-                logger.error(f"Page {page}: Failed to fetch creatives: {data.get('msg')}")
+                logger.error(f"Page {page}: Failed - {data.get('msg')}")
                 return []
             
             return data.get("data", {}).get("list", [])
         except Exception as e:
-            logger.error(f"Page {page}: Failed to fetch creatives: {e}")
+            logger.error(f"Page {page}: Error - {e}")
             return []
     
     try:
-        # 병렬로 여러 페이지 동시 요청
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        all_creatives = []
+        
+        # 병렬로 여러 페이지 동시 요청 (최대 5개 worker)
+        with ThreadPoolExecutor(max_workers=5) as executor:
             futures = {executor.submit(fetch_page, page): page for page in range(1, max_pages + 1)}
             
             for future in as_completed(futures):
                 creatives = future.result()
                 if creatives:
                     all_creatives.extend(creatives)
-                # 빈 결과가 나와도 계속 진행 (다른 페이지에 있을 수 있음)
         
-        # 필터링
+        logger.info(f"Total creatives before filtering: {len(all_creatives)}")
+        
+        # 필터링: 여러 키워드 중 하나라도 포함되면 OK
         if game_filter:
-            all_creatives = [c for c in all_creatives 
-                           if game_filter.lower() in c.get("creative_name", "").lower()]
+            all_creatives = [
+                c for c in all_creatives 
+                if any(gf.lower() in c.get("creative_name", "").lower() for gf in game_filter)
+            ]
         
         logger.info(f"Fetched {len(all_creatives)} creatives (type: {creative_type}, game: {game_filter})")
         return all_creatives
@@ -163,24 +180,29 @@ def get_creatives(creative_type: Optional[str] = None, game_filter: Optional[str
         return []
 
 @st.cache_data(ttl=300)
-def get_offers(game_filter: Optional[str] = None, max_pages: int = 3) -> List[Dict]:
+def get_offers(game_filter: Optional[List[str]] = None, max_pages: int = 3) -> List[Dict]:
     """
-    Fetch offers from Mintegral API with pagination (limited pages for performance).
+    Fetch offers from Mintegral API with parallel pagination.
     
     Args:
-        game_filter: Game short name to filter offers by offer_name
+        game_filter: List of game short names to filter offers (OR condition)
         max_pages: Maximum number of pages to fetch (default 3 = 600 items)
-    """
-    all_offers = []
     
-    try:
-        for page in range(1, max_pages + 1):
+    Returns:
+        List of offer dictionaries
+    
+    Note:
+        Results are cached for 5 minutes. Uses parallel requests for faster loading.
+    """
+    
+    def fetch_page(page: int, api_filter: Optional[str]) -> List[Dict]:
+        """Fetch a single page of offers."""
+        try:
             headers = _get_auth_headers()
             params = {"page": page, "limit": 200}
             
-            # ✅ API에서 직접 필터링!
-            if game_filter:
-                params["offer_name"] = game_filter
+            if api_filter:
+                params["offer_name"] = api_filter
             
             response = requests.get(
                 f"{MINTEGRAL_BASE_URL}/offers",
@@ -192,18 +214,35 @@ def get_offers(game_filter: Optional[str] = None, max_pages: int = 3) -> List[Di
             
             data = response.json()
             if data.get("code") != 200:
-                logger.error(f"Failed to fetch offers: {data.get('msg')}")
-                break
+                logger.error(f"Page {page}: Failed - {data.get('msg')}")
+                return []
             
-            offers = data.get("data", {}).get("list", [])
-            if not offers:
-                break
+            return data.get("data", {}).get("list", [])
+        except Exception as e:
+            logger.error(f"Page {page}: Error - {e}")
+            return []
+    
+    try:
+        # API 필터링은 첫 번째 키워드만 사용 (API는 단일 검색만 지원)
+        api_filter = game_filter[0] if game_filter and len(game_filter) > 0 else None
+        
+        all_offers = []
+        
+        # 병렬로 여러 페이지 동시 요청 (최대 5개 worker)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(fetch_page, page, api_filter): page for page in range(1, max_pages + 1)}
             
-            all_offers.extend(offers)
-            
-            # Stop if we got fewer results than requested
-            if len(offers) < 200:
-                break
+            for future in as_completed(futures):
+                offers = future.result()
+                if offers:
+                    all_offers.extend(offers)
+        
+        # 클라이언트에서 추가 필터링 (모든 키워드 체크)
+        if game_filter and len(game_filter) > 1:
+            all_offers = [
+                o for o in all_offers 
+                if any(gf.lower() in o.get("offer_name", "").lower() for gf in game_filter)
+            ]
         
         logger.info(f"Fetched {len(all_offers)} offers (game: {game_filter})")
         return all_offers
@@ -215,7 +254,8 @@ def get_offers(game_filter: Optional[str] = None, max_pages: int = 3) -> List[Di
 
 def _get_default_creative_set_name(game: str) -> str:
     """Generate default creative set name: {game_short}_{YYMMDD}"""
-    short_name = _get_game_mapping(game)
+    short_names = _get_game_mapping(game)
+    short_name = short_names[0] if short_names else game.lower().replace(" ", "")  # 첫 번째 이름 사용
     date_str = datetime.now().strftime("%y%m%d")
     return f"{short_name}_{date_str}"
 # =========================================================
@@ -277,10 +317,10 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
     selected_video_md5s = []
     selected_playable_md5s = []
     
-    # Video creatives (제일 중요한 것 먼저)
+    # Video creatives
     with st.expander("🎥 Video Creatives", expanded=False):
         with st.spinner("Loading videos..."):
-            videos = get_creatives(creative_type="VIDEO", game_filter=game_short, max_pages=5)  # 5페이지로 증가
+            videos = get_creatives(creative_type="VIDEO", game_filter=game_short, max_pages=10)  # 10페이지
         if videos:
             video_options = {f"{c['creative_name']} ({c['resolution']})": c['creative_md5'] 
                            for c in videos}
@@ -297,7 +337,7 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
     # Playable creatives
     with st.expander("🎮 Playable Creatives", expanded=False):
         with st.spinner("Loading playables..."):
-            playables = get_creatives(creative_type="PLAYABLE", game_filter=game_short, max_pages=5)  # 5페이지로 증가
+            playables = get_creatives(creative_type="PLAYABLE", game_filter=game_short, max_pages=5)  # 5페이지
         if playables:
             playable_options = {c['creative_name']: c['creative_md5'] for c in playables}
             selected_playables = st.multiselect(
@@ -315,7 +355,7 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
     # Apply in Offer dropdown
     st.markdown("**Apply in Offer**")
     with st.spinner("Loading offers..."):
-        offers = get_offers(game_filter=game_short, max_pages=5)  # 5페이지로 증가
+        offers = get_offers(game_filter=game_short, max_pages=5)  # 5페이지
 
     selected_offer_id = None
     if offers:
