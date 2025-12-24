@@ -1,19 +1,85 @@
 """Marketer-side Mintegral helpers for Creative 자동 업로드.
 
-- Lets the marketer pick:
-  1) Campaign selection
-  2) Ad group selection
-  3) Creative upload settings
+- Creative Set Settings:
+  1) Upload Creative Set - Upload new creatives to new or existing sets
+  2) Copy Creative Set - Copy creative sets to other offers
 
-- TODO: Implement Mintegral API integration
+- Supports:
+  - Creative filtering by game name (via secrets.toml mapping)
+  - Multi-select for Image/Video/Playable creatives
+  - Offer selection with game filtering
+  - Auto-naming: {game}_{YYMMDD}
 """
 
 from __future__ import annotations
-from typing import Dict, List
+from typing import Dict, List, Optional
 import logging
 import streamlit as st
+import requests
+import hashlib
+import time
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+MINTEGRAL_BASE_URL = "https://ss-api.mintegral.com/api/open/v1"
+MINTEGRAL_STORAGE_URL = "https://ss-storage-api.mintegral.com/api/open/v1"
+
+# =========================================================
+# API Configuration
+# =========================================================
+
+def _get_api_config():
+    """Get Mintegral API configuration from secrets."""
+    if "mintegral" not in st.secrets:
+        raise RuntimeError(
+            "Missing [mintegral] section in secrets.toml.\n"
+            "Please add:\n"
+            "[mintegral]\n"
+            "access_key = \"your_access_key\"\n"
+            "api_key = \"your_api_key\""
+        )
+    return {
+        "access_key": st.secrets["mintegral"]["access_key"],
+        "api_key": st.secrets["mintegral"]["api_key"]
+    }
+
+def _get_game_mapping(game: str) -> str:
+    """Get game short name from secrets.toml mapping."""
+    if "mintegral" in st.secrets and "game_mappings" in st.secrets["mintegral"]:
+        return st.secrets["mintegral"]["game_mappings"].get(game, game.lower().replace(" ", ""))
+    
+    # Fallback mapping if not in secrets
+    fallback = {
+        "XP HERO": "weaponrpg",
+        "Dino Universe": "dinouniverse",
+        "Snake Clash": "snakeclash",
+        "Pizza Ready": "pizzaready",
+        "Cafe Life": "cafelife",
+        "Suzy's Restaurant": "suzyrest",
+        "Office Life": "officelife",
+        "Lumber Chopper": "lumberchop",
+        "Burger Please": "burgerplease",
+        "Prison Life": "prisonlife"
+    }
+    return fallback.get(game, game.lower().replace(" ", ""))
+
+def _generate_token(api_key: str) -> tuple[str, int]:
+    """Generate token for Mintegral API authentication."""
+    timestamp = int(time.time())
+    token = hashlib.md5(f"{api_key}{hashlib.md5(str(timestamp).encode()).hexdigest()}".encode()).hexdigest()
+    return token, timestamp
+
+def _get_auth_headers():
+    """Get authentication headers for Mintegral API."""
+    config = _get_api_config()
+    token, timestamp = _generate_token(config["api_key"])
+    return {
+        "access-key": config["access_key"],
+        "token": token,
+        "timestamp": str(timestamp),
+        "Content-Type": "application/json"
+    }
 
 # =========================================================
 # Settings State Management
@@ -29,6 +95,124 @@ def get_mintegral_settings(game: str) -> Dict:
     _ensure_mintegral_settings_state()
     return st.session_state.mintegral_settings.get(game, {})
 
+# =========================================================
+# API Functions
+# =========================================================
+@st.cache_data(ttl=300)
+def get_creatives(creative_type: Optional[str] = None, game_filter: Optional[str] = None, max_pages: int = 3) -> List[Dict]:
+    """
+    Fetch creatives from Mintegral API with pagination (limited pages for performance).
+    
+    Args:
+        creative_type: Type filter (IMAGE, VIDEO, PLAYABLE)
+        game_filter: Game short name to filter creatives
+        max_pages: Maximum number of pages to fetch (default 3 = 600 items)
+    """
+    all_creatives = []
+    
+    try:
+        for page in range(1, max_pages + 1):
+            headers = _get_auth_headers()
+            params = {"page": page, "limit": 200}
+            
+            if creative_type:
+                params["creative_type"] = creative_type
+            
+            # ❌ creative_name은 완전 일치만 지원 - API 필터링 사용 안 함
+            
+            response = requests.get(
+                f"{MINTEGRAL_BASE_URL}/creatives/source",
+                headers=headers,
+                params=params,
+                timeout=15
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            if data.get("code") != 200:
+                logger.error(f"Failed to fetch creatives: {data.get('msg')}")
+                break
+            
+            creatives = data.get("data", {}).get("list", [])
+            if not creatives:
+                break
+            
+            all_creatives.extend(creatives)
+            
+            # Stop if we got fewer results than requested
+            if len(creatives) < 200:
+                break
+        
+        # ✅ 클라이언트에서 부분 매칭 필터링
+        if game_filter:
+            all_creatives = [c for c in all_creatives 
+                           if game_filter.lower() in c.get("creative_name", "").lower()]
+        
+        logger.info(f"Fetched {len(all_creatives)} creatives (type: {creative_type}, game: {game_filter})")
+        return all_creatives
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch Mintegral creatives: {e}", exc_info=True)
+        st.error(f"Mintegral creative 목록을 가져오는데 실패했습니다: {e}")
+        return []
+
+        
+@st.cache_data(ttl=300)
+def get_offers(game_filter: Optional[str] = None, max_pages: int = 3) -> List[Dict]:
+    """
+    Fetch offers from Mintegral API with pagination (limited pages for performance).
+    
+    Args:
+        game_filter: Game short name to filter offers by offer_name
+        max_pages: Maximum number of pages to fetch (default 3 = 600 items)
+    """
+    all_offers = []
+    
+    try:
+        for page in range(1, max_pages + 1):
+            headers = _get_auth_headers()
+            params = {"page": page, "limit": 200}
+            
+            # ✅ API에서 직접 필터링!
+            if game_filter:
+                params["offer_name"] = game_filter
+            
+            response = requests.get(
+                f"{MINTEGRAL_BASE_URL}/offers",
+                headers=headers,
+                params=params,
+                timeout=15
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            if data.get("code") != 200:
+                logger.error(f"Failed to fetch offers: {data.get('msg')}")
+                break
+            
+            offers = data.get("data", {}).get("list", [])
+            if not offers:
+                break
+            
+            all_offers.extend(offers)
+            
+            # Stop if we got fewer results than requested
+            if len(offers) < 200:
+                break
+        
+        logger.info(f"Fetched {len(all_offers)} offers (game: {game_filter})")
+        return all_offers
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch Mintegral offers: {e}", exc_info=True)
+        st.error(f"Mintegral offer 목록을 가져오는데 실패했습니다: {e}")
+        return []
+
+def _get_default_creative_set_name(game: str) -> str:
+    """Generate default creative set name: {game_short}_{YYMMDD}"""
+    short_name = _get_game_mapping(game)
+    date_str = datetime.now().strftime("%y%m%d")
+    return f"{short_name}_{date_str}"
 # =========================================================
 # UI Renderer
 # =========================================================
@@ -49,42 +233,117 @@ def render_mintegral_settings_panel(container, game: str, idx: int, is_marketer:
     with container:
         st.markdown(f"#### {game} Mintegral Settings")
         
-        if is_marketer:
-            st.info("🚧 Mintegral 설정 패널 (구현 예정)")
+        # Creative Set Setting dropdown
+        setting_mode = st.selectbox(
+            "Creative Set Setting",
+            options=["Upload Creative Set", "Copy Creative Set"],
+            key=f"mintegral_setting_mode_{idx}",
+            help="Upload: 새 Creative Set 생성 또는 기존 Creative 추가\nCopy: 다른 Offer로 Creative Set 복사"
+        )
+        
+        if setting_mode == "Upload Creative Set":
+            _render_upload_creative_set(game, idx, cur)
         else:
-            st.info("🚧 Mintegral 설정 패널 (Test Mode)")
-        
-        # Campaign ID 입력
-        campaign_id = st.text_input(
-            "Campaign ID",
-            value=cur.get("campaign_id", ""),
-            key=f"mintegral_campaign_id_{idx}",
-            help="Mintegral Campaign ID를 입력하세요."
+            _render_copy_creative_set(game, idx, cur)
+
+def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
+    """Render Upload Creative Set UI."""
+    
+    # Creative Set Name with auto-generated default
+    default_name = _get_default_creative_set_name(game)
+    creative_set_name = st.text_input(
+        "Creative Set Name",
+        value=cur.get("creative_set_name", default_name),
+        key=f"mintegral_creative_set_name_{idx}",
+        help=f"비워두면 자동으로 {default_name}로 설정됩니다"
+    )
+    
+    # Use default if empty
+    if not creative_set_name.strip():
+        creative_set_name = default_name
+    
+    st.markdown("---")
+    st.markdown("**Add Existing Creatives**")
+    
+    game_short = _get_game_mapping(game)
+    
+    # Initialize selected lists
+    selected_image_md5s = []
+    selected_video_md5s = []
+    selected_playable_md5s = []
+    
+    # Video creatives (제일 중요한 것 먼저)
+    with st.expander("🎥 Video Creatives", expanded=False):
+        with st.spinner("Loading videos..."):
+            videos = get_creatives(creative_type="VIDEO", game_filter=game_short, max_pages=5)  # 5페이지로 증가
+        if videos:
+            video_options = {f"{c['creative_name']} ({c['resolution']})": c['creative_md5'] 
+                           for c in videos}
+            selected_videos = st.multiselect(
+                "Select Videos",
+                options=list(video_options.keys()),
+                key=f"mintegral_videos_{idx}",
+                help=f"Video 크리에이티브 선택 (최대 {len(videos)}개 표시)"
+            )
+            selected_video_md5s = [video_options[name] for name in selected_videos]
+        else:
+            st.info(f"'{game_short}' 필터링된 Video가 없습니다")
+    
+    # Playable creatives
+    with st.expander("🎮 Playable Creatives", expanded=False):
+        with st.spinner("Loading playables..."):
+            playables = get_creatives(creative_type="PLAYABLE", game_filter=game_short, max_pages=5)  # 5페이지로 증가
+        if playables:
+            playable_options = {c['creative_name']: c['creative_md5'] for c in playables}
+            selected_playables = st.multiselect(
+                "Select Playables",
+                options=list(playable_options.keys()),
+                key=f"mintegral_playables_{idx}",
+                help=f"Playable 크리에이티브 선택 (최대 {len(playables)}개 표시)"
+            )
+            selected_playable_md5s = [playable_options[name] for name in selected_playables]
+        else:
+            st.info(f"'{game_short}' 필터링된 Playable이 없습니다")
+    
+    st.markdown("---")
+    
+    # Apply in Offer dropdown
+    st.markdown("**Apply in Offer**")
+    with st.spinner("Loading offers..."):
+        offers = get_offers(game_filter=game_short, max_pages=5)  # 5페이지로 증가
+
+    selected_offer_id = None
+    if offers:
+        offer_options = {f"{o['offer_name']} (ID: {o['offer_id']})": o['offer_id'] 
+                        for o in offers}
+        selected_offer = st.selectbox(
+            "Select Offer",
+            options=list(offer_options.keys()),
+            key=f"mintegral_offer_{idx}",
+            help=f"Creative Set을 적용할 Offer 선택"
         )
-        
-        # Ad Group ID 입력
-        ad_group_id = st.text_input(
-            "Ad Group ID",
-            value=cur.get("ad_group_id", ""),
-            key=f"mintegral_ad_group_id_{idx}",
-            help="Mintegral Ad Group ID를 입력하세요 (선택사항)."
-        )
-        
-        # Creative Type 선택
-        creative_type = st.selectbox(
-            "Creative Type",
-            options=["Video", "Image", "Responsive Display"],
-            index=0 if cur.get("creative_type", "Video") == "Video" else 1,
-            key=f"mintegral_creative_type_{idx}",
-            help="업로드할 크리에이티브 타입을 선택하세요."
-        )
-        
-        # Settings 저장
-        st.session_state.mintegral_settings[game] = {
-            "campaign_id": campaign_id,
-            "ad_group_id": ad_group_id,
-            "creative_type": creative_type,
-        }
+        selected_offer_id = offer_options[selected_offer]
+    else:
+        st.warning(f"'{game_short}' 필터링된 Offer가 없습니다")
+    
+    # Save settings
+    st.session_state.mintegral_settings[game] = {
+        "mode": "upload",
+        "creative_set_name": creative_set_name,
+        "selected_images": selected_image_md5s,
+        "selected_videos": selected_video_md5s,
+        "selected_playables": selected_playable_md5s,
+        "selected_offer_id": selected_offer_id,
+    }
+
+def _render_copy_creative_set(game: str, idx: int, cur: Dict) -> None:
+    """Render Copy Creative Set UI."""
+    st.info("🚧 Copy Creative Set 기능은 구현 예정입니다")
+    
+    # Placeholder settings
+    st.session_state.mintegral_settings[game] = {
+        "mode": "copy",
+    }
 
 # =========================================================
 # Upload Logic
@@ -102,29 +361,60 @@ def upload_to_mintegral(game: str, videos: List[Dict], settings: Dict) -> Dict:
     Returns:
         Dict with success status, message, and errors
     """
-    logger.info(f"Uploading {len(videos)} videos to Mintegral for {game}")
+    logger.info(f"Uploading to Mintegral for {game} with settings: {settings}")
     
-    # TODO: Implement Mintegral API integration
-    # This is a placeholder implementation
+    mode = settings.get("mode", "upload")
     
-    campaign_id = settings.get("campaign_id", "")
-    ad_group_id = settings.get("ad_group_id", "")
-    creative_type = settings.get("creative_type", "Video")
-    
-    if not campaign_id:
+    if mode == "upload":
+        return _upload_creative_set(game, videos, settings)
+    elif mode == "copy":
         return {
             "success": False,
-            "error": "Campaign ID가 필요합니다.",
-            "errors": ["Campaign ID를 입력해주세요."]
+            "error": "Copy Creative Set 기능은 아직 구현되지 않았습니다.",
+            "errors": ["Copy 기능 구현 예정"]
         }
-    
-    # Placeholder: 실제 Mintegral API 호출은 여기에 구현
-    logger.warning(f"Mintegral upload not yet implemented. Would upload {len(videos)} videos to campaign {campaign_id}")
     
     return {
         "success": False,
-        "error": "Mintegral upload 기능은 아직 구현되지 않았습니다.",
-        "errors": ["Mintegral API 통합이 필요합니다."],
-        "message": f"{len(videos)}개의 비디오를 업로드할 준비가 되었습니다."
+        "error": "알 수 없는 모드입니다.",
+        "errors": [f"Unknown mode: {mode}"]
     }
 
+def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
+    """Upload creative set to Mintegral."""
+    
+    # Validate required settings
+    offer_id = settings.get("selected_offer_id")
+    if not offer_id:
+        return {
+            "success": False,
+            "error": "Offer를 선택해주세요.",
+            "errors": ["Offer ID가 필요합니다."]
+        }
+    
+    creative_set_name = settings.get("creative_set_name", "")
+    if not creative_set_name:
+        creative_set_name = _get_default_creative_set_name(game)
+    
+    # Collect all selected creatives
+    all_creatives = []
+    all_creatives.extend(settings.get("selected_images", []))
+    all_creatives.extend(settings.get("selected_videos", []))
+    all_creatives.extend(settings.get("selected_playables", []))
+    
+    if not all_creatives:
+        return {
+            "success": False,
+            "error": "선택된 Creative가 없습니다.",
+            "errors": ["최소 1개 이상의 Creative를 선택해주세요."]
+        }
+    
+    # TODO: Implement actual API call to create creative set
+    logger.warning(f"Mintegral upload not yet fully implemented. Would create set '{creative_set_name}' with {len(all_creatives)} creatives for offer {offer_id}")
+    
+    return {
+        "success": False,
+        "error": "Mintegral Creative Set 생성 API는 아직 구현 중입니다.",
+        "errors": ["API 통합 작업 진행 중"],
+        "message": f"Creative Set '{creative_set_name}'을(를) {len(all_creatives)}개 creative로 생성할 준비가 되었습니다."
+    }
