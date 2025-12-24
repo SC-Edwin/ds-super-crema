@@ -19,6 +19,7 @@ import requests
 import hashlib
 import time
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ def get_mintegral_settings(game: str) -> Dict:
 @st.cache_data(ttl=300)
 def get_creatives(creative_type: Optional[str] = None, game_filter: Optional[str] = None, max_pages: int = 3) -> List[Dict]:
     """
-    Fetch creatives from Mintegral API with pagination (limited pages for performance).
+    Fetch creatives from Mintegral API with parallel pagination.
     
     Args:
         creative_type: Type filter (IMAGE, VIDEO, PLAYABLE)
@@ -110,15 +111,14 @@ def get_creatives(creative_type: Optional[str] = None, game_filter: Optional[str
     """
     all_creatives = []
     
-    try:
-        for page in range(1, max_pages + 1):
+    def fetch_page(page: int) -> List[Dict]:
+        """Fetch a single page of creatives."""
+        try:
             headers = _get_auth_headers()
             params = {"page": page, "limit": 200}
             
             if creative_type:
                 params["creative_type"] = creative_type
-            
-            # ❌ creative_name은 완전 일치만 지원 - API 필터링 사용 안 함
             
             response = requests.get(
                 f"{MINTEGRAL_BASE_URL}/creatives/source",
@@ -130,20 +130,26 @@ def get_creatives(creative_type: Optional[str] = None, game_filter: Optional[str
             
             data = response.json()
             if data.get("code") != 200:
-                logger.error(f"Failed to fetch creatives: {data.get('msg')}")
-                break
+                logger.error(f"Page {page}: Failed to fetch creatives: {data.get('msg')}")
+                return []
             
-            creatives = data.get("data", {}).get("list", [])
-            if not creatives:
-                break
+            return data.get("data", {}).get("list", [])
+        except Exception as e:
+            logger.error(f"Page {page}: Failed to fetch creatives: {e}")
+            return []
+    
+    try:
+        # 병렬로 여러 페이지 동시 요청
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {executor.submit(fetch_page, page): page for page in range(1, max_pages + 1)}
             
-            all_creatives.extend(creatives)
-            
-            # Stop if we got fewer results than requested
-            if len(creatives) < 200:
-                break
+            for future in as_completed(futures):
+                creatives = future.result()
+                if creatives:
+                    all_creatives.extend(creatives)
+                # 빈 결과가 나와도 계속 진행 (다른 페이지에 있을 수 있음)
         
-        # ✅ 클라이언트에서 부분 매칭 필터링
+        # 필터링
         if game_filter:
             all_creatives = [c for c in all_creatives 
                            if game_filter.lower() in c.get("creative_name", "").lower()]
@@ -156,7 +162,6 @@ def get_creatives(creative_type: Optional[str] = None, game_filter: Optional[str
         st.error(f"Mintegral creative 목록을 가져오는데 실패했습니다: {e}")
         return []
 
-        
 @st.cache_data(ttl=300)
 def get_offers(game_filter: Optional[str] = None, max_pages: int = 3) -> List[Dict]:
     """
