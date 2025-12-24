@@ -576,6 +576,9 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             # Template changed - force reset
             st.session_state.pop(f"primary_texts_{idx}", None)
             st.session_state.pop(f"headlines_{idx}", None)
+            # ✅ template signature도 삭제하여 새로 로드되도록 함
+            st.session_state.pop(f"headline_template_sig_{idx}", None)
+            st.session_state.pop(f"primary_text_template_sig_{idx}", None)
             st.session_state[prev_template_key] = selected_template
 
         # ====================================================================
@@ -743,18 +746,25 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         
         # Initialize session state for primary texts
         primary_texts_key = f"primary_texts_{idx}"
-        if primary_texts_key not in st.session_state:
-            # Load from defaults or existing settings
+        
+        # 템플릿이 바뀌었을 때만 defaults로 리셋 (Headlines와 동일한 로직)
+        primary_text_template_sig_key = f"primary_text_template_sig_{idx}"
+        # ✅ Template source만으로 비교 (더 안정적)
+        current_template_source = st.session_state.get(f"template_source_{idx}", "")
+        current_template_sig = current_template_source
+        
+        if st.session_state.get(primary_text_template_sig_key) != current_template_sig:
+            # 템플릿 변경 -> 템플릿 primary texts로 초기화
             if p_texts:
                 st.session_state[primary_texts_key] = p_texts.copy()
-            elif defaults:
-                # Try to split existing text
-                existing = defaults.get("primary_texts", [])
-                if existing:
-                    st.session_state[primary_texts_key] = existing.copy()
-                else:
-                    st.session_state[primary_texts_key] = [""]
+            elif defaults and defaults.get("primary_texts"):
+                st.session_state[primary_texts_key] = defaults["primary_texts"].copy()
             else:
+                st.session_state[primary_texts_key] = [""]
+            st.session_state[primary_text_template_sig_key] = current_template_sig
+        else:
+            # 일반 리런에서는 기존값 유지
+            if primary_texts_key not in st.session_state:
                 st.session_state[primary_texts_key] = [""]
         
         primary_texts_list = st.session_state[primary_texts_key]
@@ -793,12 +803,10 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
 
         # 템플릿이 바뀌었을 때만 defaults로 리셋 (Add/Del/수정 중에는 덮어쓰지 않음)
         template_sig_key = f"headline_template_sig_{idx}"
-        current_template_sig = (
-            st.session_state.get(f"template_source_{idx}", ""),
-            tuple(h_lines or []),
-            defaults.get("source_ad_name") if defaults else None,
-        )
-
+        # ✅ Template source만으로 비교 (더 안정적)
+        current_template_source = st.session_state.get(f"template_source_{idx}", "")
+        current_template_sig = current_template_source
+        
         if st.session_state.get(template_sig_key) != current_template_sig:
             # 템플릿 변경 -> 템플릿 헤드라인으로 초기화
             if h_lines:

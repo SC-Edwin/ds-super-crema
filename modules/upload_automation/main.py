@@ -86,18 +86,23 @@ except ImportError as e:
 from modules.upload_automation import game_manager  # ← 수정
 
 # 2. Operations Modules (Admin/Full Access)
-from modules.upload_automation import facebook_ads as fb_ops  # ← 수정
-from modules.upload_automation import unity_ads as uni_ops  # ← 수정
+# 2. Operations Modules (Admin/Full Access)
+from modules.upload_automation import facebook_ads as fb_ops
+from modules.upload_automation import unity_ads as uni_ops
 
-# 3. Marketer Modules (Simplified/Restricted)
-# 3. Marketer Modules (Simplified/Restricted)
 # 3. Marketer Modules (Simplified/Restricted)
 try:
     from modules.upload_automation import fb as fb_marketer
     from modules.upload_automation import uni as uni_marketer
-    from modules.upload_automation import applovin as applovin_module  # ← 추가!
 except ImportError as e:
     st.error(f"Module Import Error: {e}. Please ensure fb.py and uni.py are in {current_dir}")
+    st.stop()
+
+# 4. Applovin Module (Both Test & Marketer modes)
+try:
+    from modules.upload_automation import applovin as applovin_module
+except ImportError as e:
+    st.error(f"Applovin Module Import Error: {e}")
     st.stop()
 
 # # Optional: safe debug helper (won't crash app even if IDs are missing)
