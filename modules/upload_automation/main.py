@@ -136,10 +136,10 @@ def init_remote_state():
         st.session_state.remote_videos = {}
 
 def validate_count(files: List) -> tuple[bool, str]:
-    """Check there is at least one .mp4/.mpeg4 file."""
+    """Check there is at least one .mp4/.mpeg4/.html file."""
     if not files:
-        return False, "Please upload at least one video (.mp4 or .mpeg4)."
-    allowed = {".mp4", ".mpeg4"}
+        return False, "Please upload at least one file (.mp4, .mpeg4, or .html)."
+    allowed = {".mp4", ".mpeg4", ".html"}
     bad = []
     for u in files:
         name = getattr(u, "name", None) or (u.get("name") if isinstance(u, dict) else None)
@@ -147,8 +147,8 @@ def validate_count(files: List) -> tuple[bool, str]:
         if pathlib.Path(name).suffix.lower() not in allowed:
             bad.append(name)
     if bad:
-        return False, f"Remove non-video files: {', '.join(bad[:5])}..."
-    return True, f"{len(files)} video(s) ready."
+        return False, f"Remove unsupported files: {', '.join(bad[:5])}..."
+    return True, f"{len(files)} file(s) ready."
 
 def _run_drive_import(folder_url_or_id: str, max_workers: int, on_progress=None):
     """Wrapper for Drive import."""
@@ -241,9 +241,9 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
 
                     # --- Platform Radio ---
                     # Test mode: Facebook, Unity Ads
-                    # Marketer mode: Facebook, Unity Ads, Google Ads, Applovin
+                    # Marketer mode: Facebook, Unity Ads, Mintegral, Applovin
                     if is_marketer:
-                        platform_options = ["Facebook", "Unity Ads", "Google Ads", "Applovin"]
+                        platform_options = ["Facebook", "Unity Ads", "Mintegral", "Applovin"]
                     else:
                         platform_options = ["Facebook", "Unity Ads"]
                     
@@ -259,72 +259,11 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         st.markdown("### Facebook")
                     elif platform == "Unity Ads":
                         st.markdown("### Unity Ads")
-                    elif platform == "Google Ads":
-                        st.markdown("### Google Ads")
+                    elif platform == "Mintegral":
+                        st.markdown("### Mintegral")
                     elif platform == "Applovin":
                         st.markdown("### Applovin")
 
-                        # Media Library 업로드 버튼
-                        if is_marketer:
-                            st.write("")
-                            if st.button(
-                                "📤 Media Library에 업로드",
-                                key=f"applovin_media_upload_{game}",
-                                use_container_width=True,
-                                help="Drive/로컬에서 가져온 파일을 Applovin Media Library에 업로드합니다"
-                            ):
-                                remote_list = st.session_state.remote_videos.get(game, [])
-                                if not remote_list:
-                                    st.warning("⚠️ 업로드할 파일이 없습니다. 먼저 파일을 가져오세요.")
-                                else:
-                                    try:
-                                        from modules.upload_automation import applovin as applovin_module
-                                        
-                                        with st.status("📤 Uploading to Applovin Media Library...", expanded=True) as status:
-                                            result = applovin_module._upload_assets_to_media_library(
-                                                files=remote_list,
-                                                max_workers=3
-                                            )
-                                            
-                                            uploaded_count = result["total"]
-                                            failed_count = result["failed"]
-                                            
-                                            if uploaded_count > 0:
-                                                status.update(
-                                                    label=f"✅ Uploaded {uploaded_count} asset(s)",
-                                                    state="complete"
-                                                )
-                                                st.success(
-                                                    f"✅ Media Library 업로드 완료!\n\n"
-                                                    f"- 성공: {uploaded_count}개\n"
-                                                    f"- 실패: {failed_count}개"
-                                                )
-                                                
-                                                # 업로드된 asset 목록 표시
-                                                with st.expander("📋 업로드된 Asset 목록", expanded=False):
-                                                    for asset in result["uploaded_ids"]:
-                                                        st.write(f"✅ {asset['name']} (ID: {asset['id']})")
-                                                
-                                                # Asset 캐시 무효화 (새로 업로드된 asset이 리스트에 나오도록)
-                                                assets_key = f"applovin_assets_{game}"
-                                                if assets_key in st.session_state:
-                                                    del st.session_state[assets_key]
-                                                
-                                                st.info("💡 'Load Applovin Data' 버튼을 다시 클릭하여 새 asset을 확인하세요.")
-                                            else:
-                                                status.update(label="❌ No assets uploaded", state="error")
-                                                st.error("업로드 실패")
-                                            
-                                            # 에러 목록 표시
-                                            if result["errors"]:
-                                                with st.expander("⚠️ Upload Errors", expanded=False):
-                                                    for err in result["errors"]:
-                                                        st.write(f"- {err}")
-                                    except Exception as e:
-                                        st.error(f"❌ Media Library 업로드 실패: {e}")
-                                        devtools.record_exception("Applovin media library upload failed", e)
-                            
-                            st.write("")
 
                     # --- Drive Import Section ---
                     st.markdown("**Creative Videos 가져오기**")
@@ -395,11 +334,11 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     else:  # 로컬 파일
                         st.markdown("**로컬 컴퓨터에서 Creative Videos를 업로드합니다**")
                         uploaded_files = st.file_uploader(
-                            "비디오 파일 선택",
-                            type=["mp4", "mpeg4"],
+                            "파일 선택 (Video 또는 Playable)",
+                            type=["mp4", "mpeg4", "html"],
                             accept_multiple_files=True,
                             key=f"local_upload_{game}",
-                            help="여러 파일을 선택할 수 있습니다. (.mp4, .mpeg4 형식만 지원)"
+                            help="여러 파일을 선택할 수 있습니다. (.mp4, .mpeg4, .html 형식 지원)"
                         )
                         
                         if uploaded_files:
@@ -459,12 +398,69 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         if len(remote_list) > 20: st.write(f"... and {len(remote_list)-20} more")
                     else:
                         st.write("- (None)")
-
+                    
+                    
                     # ✅ 다운로드된 Creatives 초기화 버튼 (remote_videos만 초기화)
                     if st.button("다운로드된 Creatives 초기화", key=f"clearurl_{game}", use_container_width=True):
                         st.session_state.remote_videos[game] = []
                         st.session_state.current_tab_index = i  # Preserve current tab
                         st.rerun()
+                    
+                    # ✅ Applovin Media Library 업로드 (Marketer 모드 + Applovin 플랫폼)
+                    if is_marketer and platform == "Applovin":
+                        if st.button(
+                            "📤 Media Library에 업로드",
+                            key=f"applovin_media_upload_{game}",
+                            use_container_width=True,
+                            help="Drive/로컬에서 가져온 파일을 Applovin Media Library에 업로드합니다"
+                        ):
+                            remote_list = st.session_state.remote_videos.get(game, [])
+                            if not remote_list:
+                                st.warning("⚠️ 업로드할 파일이 없습니다. 먼저 파일을 가져오세요.")
+                            else:
+                                try:
+                                    with st.status("📤 Uploading to Applovin Media Library...", expanded=True) as status:
+                                        result = applovin_module._upload_assets_to_media_library(
+                                            files=remote_list,
+                                            max_workers=3
+                                        )
+                                        
+                                        uploaded_count = result["total"]
+                                        failed_count = result["failed"]
+                                        
+                                        if uploaded_count > 0:
+                                            status.update(
+                                                label=f"✅ Uploaded {uploaded_count} asset(s)",
+                                                state="complete"
+                                            )
+                                            st.success(
+                                                f"✅ Media Library 업로드 완료!\n\n"
+                                                f"- 성공: {uploaded_count}개\n"
+                                                f"- 실패: {failed_count}개"
+                                            )
+                                            
+                                            # 업로드된 asset 목록 표시
+                                            with st.expander("📋 업로드된 Asset 목록", expanded=False):
+                                                for asset in result["uploaded_ids"]:
+                                                    st.write(f"✅ {asset['name']} (ID: {asset['id']})")
+                                            
+                                            # Asset 캐시 무효화
+                                            assets_key = f"applovin_assets_{game}"
+                                            if assets_key in st.session_state:
+                                                del st.session_state[assets_key]
+                                            
+                                            st.info("💡 'Load Applovin Data' 버튼을 다시 클릭하여 새 asset을 확인하세요.")
+                                        else:
+                                            status.update(label="❌ No assets uploaded", state="error")
+                                            st.error("업로드 실패")
+                                        
+                                        if result["errors"]:
+                                            with st.expander("⚠️ Upload Errors", expanded=False):
+                                                for err in result["errors"]:
+                                                    st.write(f"- {err}")
+                                except Exception as e:
+                                    st.error(f"❌ Media Library 업로드 실패: {e}")
+                                    devtools.record_exception("Applovin media library upload failed", e)
 
                     # --- Action Buttons ---
                     if platform == "Facebook":
@@ -500,13 +496,13 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         if cont_unity_create or cont_unity_apply:
                             st.query_params["tab"] = game
                         clr_unity = st.button("전체 초기화 (Unity)", key=f"unity_clear_{game}", use_container_width=True)
-                    elif platform == "Google Ads":
-                        google_ok_placeholder = st.empty()
+                    elif platform == "Mintegral":
+                        mintegral_ok_placeholder = st.empty()
                         st.write("")
-                        cont_google = st.button("Google Ads Creative 업로드하기", key=f"google_upload_{game}", use_container_width=True)
-                        if cont_google:
+                        cont_mintegral = st.button("Mintegral Creative 업로드하기", key=f"mintegral_upload_{game}", use_container_width=True)
+                        if cont_mintegral:
                             st.query_params["tab"] = game
-                        clr_google = st.button("전체 초기화 (Google Ads)", key=f"google_clear_{game}", use_container_width=True)
+                        clr_mintegral = st.button("전체 초기화 (Mintegral)", key=f"mintegral_clear_{game}", use_container_width=True)
                     elif platform == "Applovin":
                         applovin_ok_placeholder = st.empty()
                         st.write("")
@@ -560,15 +556,15 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         st.error(str(e) if str(e) else "Unity 설정 패널 로드 실패")
                         devtools.record_exception("Unity settings panel load failed", e)
             
-            elif platform == "Google Ads":
+            elif platform == "Mintegral":
                 with right_col:
-                    google_card = st.container(border=True)
+                    mintegral_card = st.container(border=True)
                     try:
-                        from modules.upload_automation import google_ads as google_module
-                        google_module.render_google_ads_settings_panel(google_card, game, i, is_marketer=is_marketer)
+                        from modules.upload_automation import mintegral as mintegral_module
+                        mintegral_module.render_mintegral_settings_panel(mintegral_card, game, i, is_marketer=is_marketer)
                     except Exception as e:
-                        st.error(str(e) if str(e) else "Google Ads 설정 패널 로드 실패")
-                        devtools.record_exception("Google Ads settings panel load failed", e)
+                        st.error(str(e) if str(e) else "Mintegral 설정 패널 로드 실패")
+                        devtools.record_exception("Mintegral settings panel load failed", e)
             
             elif platform == "Applovin":
                 with right_col:
@@ -994,54 +990,52 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     st.query_params["tab"] = game  # Preserve current tab
                     st.rerun()
             
-            # --- GOOGLE ADS ACTIONS ---
-            if platform == "Google Ads":
-                if "cont_google" in locals() and cont_google:
+            # --- MINTEGRAL ACTIONS ---
+            if platform == "Mintegral":
+                if "cont_mintegral" in locals() and cont_mintegral:
                     st.query_params["tab"] = game
                     
                     remote_list = st.session_state.remote_videos.get(game, [])
                     ok, msg = validate_count(remote_list)
                     if not ok:
-                        google_ok_placeholder.error(msg)
+                        mintegral_ok_placeholder.error(msg)
                     else:
                         try:
-                            from modules.upload_automation import google_ads as google_module
-                            google_settings = google_module.get_google_ads_settings(game)
+                            from modules.upload_automation import mintegral as mintegral_module
+                            mintegral_settings = mintegral_module.get_mintegral_settings(game)
                             
-                            result = google_module.upload_to_google_ads(
+                            result = mintegral_module.upload_to_mintegral(
                                 game=game,
                                 videos=remote_list,
-                                settings=google_settings
+                                settings=mintegral_settings
                             )
                             
                             if result.get("success"):
-                                google_ok_placeholder.success(f"✅ Google Ads 업로드 완료: {result.get('message', '')}")
+                                mintegral_ok_placeholder.success(f"✅ Mintegral 업로드 완료: {result.get('message', '')}")
                             else:
-                                google_ok_placeholder.error(f"❌ Google Ads 업로드 실패: {result.get('error', 'Unknown error')}")
+                                mintegral_ok_placeholder.error(f"❌ Mintegral 업로드 실패: {result.get('error', 'Unknown error')}")
                                 
                             if result.get("errors"):
                                 st.error("\n".join(result["errors"]))
                         except Exception as e:
-                            st.error(str(e) if str(e) else "Google Ads upload failed")
-                            devtools.record_exception("Google Ads upload failed", e)
+                            st.error(str(e) if str(e) else "Mintegral upload failed")
+                            devtools.record_exception("Mintegral upload failed", e)
                         finally:
                             st.query_params["tab"] = game
                 
-                if "clr_google" in locals() and clr_google:
-                    if "google_ads_settings" in st.session_state:
-                        st.session_state.google_ads_settings.pop(game, None)
+                if "clr_mintegral" in locals() and clr_mintegral:
+                    if "mintegral_settings" in st.session_state:
+                        st.session_state.mintegral_settings.pop(game, None)
                     st.session_state.remote_videos.pop(game, None)
                     st.query_params["tab"] = game
                     st.rerun()
             
-            # --- APPLOVIN ACTIONS ---
             # --- APPLOVIN ACTIONS ---
             if platform == "Applovin":
                 # Paused 버튼 클릭 시
                 if "cont_applovin_paused" in locals() and cont_applovin_paused:
                     st.query_params["tab"] = game
                     
-                    from modules.upload_automation import applovin as applovin_module
                     applovin_settings = applovin_module.get_applovin_settings(game)
                     
                     if applovin_settings:
@@ -1053,7 +1047,6 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 if "cont_applovin_live" in locals() and cont_applovin_live:
                     st.query_params["tab"] = game
                     
-                    from modules.upload_automation import applovin as applovin_module
                     applovin_settings = applovin_module.get_applovin_settings(game)
                     
                     if applovin_settings:
