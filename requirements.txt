@@ -1,6 +1,7 @@
 # 1. Streamlit 및 핵심 데이터 처리
 streamlit==1.51.0
 pandas==2.3.3
+numpy<2.0.0
 db-dtypes==1.4.4
 requests
 
@@ -20,6 +21,10 @@ opencv-python-headless
 # 5. 외부 모듈 및 기타
 facebook-business
 streamlit-extras
+
+
+
+
 
 
 
