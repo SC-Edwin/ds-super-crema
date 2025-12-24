@@ -2424,9 +2424,14 @@ def _upload_dynamic_single_video_ads(
             # ✅ 썸네일 제공
             thumb_url = thumb_urls.get(video_num)
             if thumb_url:
-                inline_video_data["image_url"] = thumb_url
+                # ✅ 수정: image_url 대신 image_hash 사용
+                # thumb_url은 실제로 upload_thumbnail_image에서 반환한 hash 값
+                if thumb_url.startswith(("http://", "https://")):
+                    inline_video_data["image_url"] = thumb_url
+                else:
+                    inline_video_data["image_hash"] = thumb_url
             else:
-                raise RuntimeError("썸네일(image_url) 생성 실패: object_story_spec.video_data에 필요함")
+                raise RuntimeError("썸네일(image_hash) 생성 실패: object_story_spec.video_data에 필요함")
 
             # ✅ Object Story Spec 구성 (Instagram 연결 포함)
             inline_object_story_spec = {
@@ -2900,9 +2905,14 @@ def _upload_dynamic_1x1_ads(
         first_video_num = valid_videos[0]["video_num"]
         thumb_url = thumb_urls.get(first_video_num)
         if thumb_url:
-            inline_video_data["image_url"] = thumb_url
+            # ✅ 수정: image_url 대신 image_hash 사용
+            # thumb_url은 실제로 upload_thumbnail_image에서 반환한 hash 값
+            if thumb_url.startswith(("http://", "https://")):
+                inline_video_data["image_url"] = thumb_url
+            else:
+                inline_video_data["image_hash"] = thumb_url
         else:
-            raise RuntimeError("썸네일(image_url) 생성 실패: object_story_spec.video_data에 필요함")
+            raise RuntimeError("썸네일(image_hash) 생성 실패: object_story_spec.video_data에 필요함")
         
         # Object Story Spec 구성
         inline_object_story_spec = {
@@ -3353,9 +3363,14 @@ def _upload_dynamic_16x9_ads(
         first_video_num = valid_videos[0]["video_num"]
         thumb_url = thumb_urls.get(first_video_num)
         if thumb_url:
-            inline_video_data["image_url"] = thumb_url
+            # ✅ 수정: image_url 대신 image_hash 사용
+            # thumb_url은 실제로 upload_thumbnail_image에서 반환한 hash 값
+            if thumb_url.startswith(("http://", "https://")):
+                inline_video_data["image_url"] = thumb_url
+            else:
+                inline_video_data["image_hash"] = thumb_url
         else:
-            raise RuntimeError("썸네일(image_url) 생성 실패: object_story_spec.video_data에 필요함")
+            raise RuntimeError("썸네일(image_hash) 생성 실패: object_story_spec.video_data에 필요함")
 
         inline_object_story_spec = {"page_id": str(page_id), "video_data": inline_video_data}
 
@@ -3792,9 +3807,14 @@ def _upload_dynamic_9x16_ads(
         first_video_num = valid_videos[0]["video_num"]
         thumb_url = thumb_urls.get(first_video_num)
         if thumb_url:
-            inline_video_data["image_url"] = thumb_url
+            # ✅ 수정: image_url 대신 image_hash 사용
+            # thumb_url은 실제로 upload_thumbnail_image에서 반환한 hash 값
+            if thumb_url.startswith(("http://", "https://")):
+                inline_video_data["image_url"] = thumb_url
+            else:
+                inline_video_data["image_hash"] = thumb_url
         else:
-            raise RuntimeError("썸네일(image_url) 생성 실패: object_story_spec.video_data에 필요함")
+            raise RuntimeError("썸네일(image_hash) 생성 실패: object_story_spec.video_data에 필요함")
 
         inline_object_story_spec = {"page_id": str(page_id), "video_data": inline_video_data}
 
