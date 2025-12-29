@@ -249,8 +249,9 @@ def main():
     # ===================================================
 
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Performance M/L", 
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Performance M/L",
+        "📈 Creative Performance Trend",
         "👁️ Creative Upload",
         "📊 Video M/L", 
         "🌐 Localization", 
@@ -273,15 +274,14 @@ def main():
 
 
     with tab2:
-        st.markdown('<div id="upload-root">', unsafe_allow_html=True)
-        from modules.upload_automation import main as upload_main
-        upload_main.run()
-        st.markdown('</div>', unsafe_allow_html=True)
-
+        st.info("🚧 Comming Soon")  
     
 
     with tab3:
-        st.info("🚧 Comming Soon")  
+        st.markdown('<div id="upload-root">', unsafe_allow_html=True)
+        from modules.upload_automation import main as upload_main
+        upload_main.run()
+        st.markdown('</div>', unsafe_allow_html=True)  
 
 
     with tab4:
@@ -289,6 +289,9 @@ def main():
         
 
     with tab5:
+        st.info("🚧 Comming Soon")  
+
+    with tab6:
         st.info("🚧 Comming Soon")  
              
     
