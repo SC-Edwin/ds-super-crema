@@ -488,20 +488,17 @@ def _render_copy_creative_set(game: str, idx: int, cur: Dict) -> None:
 # =========================================================
 # Upload Logic
 # =========================================================
-def upload_creative_to_library(file_path: str, creative_type: str = "VIDEO") -> Dict:
+def upload_creative_to_library(file_path: str, creative_type: str = "VIDEO", original_filename: str = None) -> Dict:
     """
-    Upload a creative file (image/video/playable) to Mintegral library.
+    Upload a creative file to Mintegral library.
     
     Args:
         file_path: Local path to the file
         creative_type: "VIDEO", "IMAGE", or "PLAYABLE"
-    
-    Returns:
-        Dict with creative_md5 and creative_name
+        original_filename: Original filename (optional, uses file_path basename if not provided)
     """
     try:
         headers = _get_auth_headers()
-        # Remove Content-Type from headers for multipart
         headers_no_content_type = {k: v for k, v in headers.items() if k != "Content-Type"}
         
         # Determine endpoint
@@ -510,15 +507,13 @@ def upload_creative_to_library(file_path: str, creative_type: str = "VIDEO") -> 
         else:
             url = f"{MINTEGRAL_STORAGE_URL}/creatives/upload"
         
+        # Use original filename if provided, otherwise use basename
+        filename = original_filename or os.path.basename(file_path)
+        
         # Open and upload file
         with open(file_path, 'rb') as f:
-            files = {'file': (os.path.basename(file_path), f)}
-            response = requests.post(
-                url,
-                headers=headers_no_content_type,
-                files=files,
-                timeout=300  # 5 minutes for large files
-            )
+            files = {'file': (filename, f)}  # ← 수정: 원본 파일명 사용
+            response = requests.post(url, headers=headers_no_content_type, files=files, timeout=300)
         
         response.raise_for_status()
         data = response.json()
@@ -622,6 +617,84 @@ def batch_upload_from_drive(
             "success": False,
             "error": str(e)
         }
+
+def batch_upload_to_library(files: List[Dict], max_workers: int = 3, on_progress: Optional[Callable] = None) -> Dict:
+    """
+    Upload multiple files to Mintegral library in parallel.
+    
+    Args:
+        files: List of {"name": ..., "path": ...}
+        max_workers: Number of parallel uploads (default 3)
+        on_progress: Optional callback(filename, success, error_msg)
+    """
+    import pathlib
+    
+    def upload_one(file_info: Dict) -> Dict:
+        """Upload a single file."""
+        filename = file_info["name"]
+        filepath = file_info["path"]
+        
+        # Auto-detect type
+        ext = pathlib.Path(filename).suffix.lower()
+        if ext in ['.mp4', '.mov', '.mkv', '.mpeg4']:
+            creative_type = "VIDEO"
+        elif ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
+            creative_type = "IMAGE"
+        elif ext in ['.zip', '.html']:
+            creative_type = "PLAYABLE"
+        else:
+            creative_type = "VIDEO"
+        
+        result = upload_creative_to_library(filepath, creative_type, filename)
+        return {
+            "filename": filename,
+            "success": result.get("success", False),
+            "error": result.get("error")
+        }
+    
+    results = []
+    errors = []
+    success_count = 0
+    failed_count = 0
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(upload_one, f): f for f in files}
+        
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                results.append(result)
+                
+                if result["success"]:
+                    success_count += 1
+                    logger.info(f"✅ Uploaded: {result['filename']}")
+                    if on_progress:
+                        on_progress(result['filename'], True, None)  # ← 추가
+                else:
+                    failed_count += 1
+                    if result["error"]:
+                        errors.append(f"{result['filename']}: {result['error']}")
+                        logger.error(f"❌ Failed: {result['filename']} - {result['error']}")
+                    if on_progress:
+                        on_progress(result['filename'], False, result['error'])  # ← 추가
+            except Exception as e:
+                failed_count += 1
+                file_info = futures[future]
+                error_msg = f"{file_info['name']}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(f"❌ Exception: {error_msg}")
+                if on_progress:
+                    on_progress(file_info['name'], False, str(e))  # ← 추가
+    
+    return {
+        "total": len(files),
+        "success": success_count,
+        "failed": failed_count,
+        "errors": errors,
+        "results": results
+    }
+
+
 def upload_to_mintegral(game: str, videos: List[Dict], settings: Dict) -> Dict:
     """
     Upload videos to Mintegral.
