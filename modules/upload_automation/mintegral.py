@@ -1228,7 +1228,7 @@ def _copy_creative_sets(game: str, settings: Dict) -> Dict:
                     logger.info(f"✅ Copied '{creative_set_name}' to Offer {target_offer_id}")
                 else:
                     failed_count += 1
-                    error_msg = data.get("msg", "Unknown error")
+                    error_msg = data.get("msg") or data.get("message") or "Unknown error"
                     error_detail = data.get("data")  # ← 추가
                     
                     if error_detail:
@@ -1243,6 +1243,63 @@ def _copy_creative_sets(game: str, settings: Dict) -> Dict:
                 failed_count += 1
                 errors.append(f"Offer {target_offer_id}: {str(e)}")
                 logger.error(f"❌ Exception copying to Offer {target_offer_id}: {e}")
+
+# REPLACE THIS BLOCK WITH ABOVE IF WE WANT TO ADD _COPY1,....COPY9 WHEN THERE IS AN EXISTING CREATIVE SET NAME IN THE OFFER WE ARE TRYING TO COPY
+# for target_offer_id in target_offer_ids:
+#     # Try with original name, then auto-rename if duplicate
+#     base_name = creative_set_name
+#     attempt = 0
+#     final_name = base_name
+    
+#     while attempt < 10:
+#         try:
+#             headers = _get_auth_headers()
+#             payload = {
+#                 "creative_set_name": final_name,  # ← Use unique name
+#                 "offer_id": int(target_offer_id),
+#                 "geos": geos,
+#                 "ad_outputs": ad_outputs,
+#                 "creatives": creatives_payload
+#             }
+            
+#             response = requests.post(
+#                 f"{MINTEGRAL_BASE_URL}/creative_set",
+#                 headers=headers,
+#                 json=payload,
+#                 timeout=30
+#             )
+            
+#             response.raise_for_status()
+#             data = response.json()
+            
+#             logger.info(f"📥 API Response for Offer {target_offer_id} (attempt {attempt + 1}):")
+#             logger.info(f"   - Response: {response.text}")
+            
+#             if data.get("code") == 200:
+#                 success_count += 1
+#                 logger.info(f"✅ Copied '{final_name}' to Offer {target_offer_id}")
+#                 break  # Success, exit retry loop
+            
+#             elif data.get("code") == 40002:
+#                 # Duplicate name, try with suffix
+#                 attempt += 1
+#                 final_name = f"{base_name}_copy{attempt}"
+#                 logger.info(f"⚠️ Name conflict, retrying as '{final_name}'")
+#                 continue  # Retry with new name
+            
+#             else:
+#                 # Other error, don't retry
+#                 failed_count += 1
+#                 error_msg = data.get("msg") or data.get("message") or "Unknown error"
+#                 errors.append(f"Offer {target_offer_id}: {error_msg}")
+#                 logger.error(f"❌ Failed to copy to Offer {target_offer_id}: {error_msg}")
+#                 break
+                
+#         except Exception as e:
+#             failed_count += 1
+#             errors.append(f"Offer {target_offer_id}: {str(e)}")
+#             logger.error(f"❌ Exception copying to Offer {target_offer_id}: {e}")
+#             break
     
     if success_count > 0:
         return {
