@@ -315,30 +315,35 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
     
     # 세션 상태에 페이지 수 저장
     if f"mintegral_video_pages_{idx}" not in st.session_state:
-        st.session_state[f"mintegral_video_pages_{idx}"] = 20  # 기본 10페이지
+        st.session_state[f"mintegral_video_pages_{idx}"] = 20
     if f"mintegral_image_pages_{idx}" not in st.session_state:
         st.session_state[f"mintegral_image_pages_{idx}"] = 20  
     if f"mintegral_playable_pages_{idx}" not in st.session_state:
-        st.session_state[f"mintegral_playable_pages_{idx}"] = 5  # 기본 5페이지
+        st.session_state[f"mintegral_playable_pages_{idx}"] = 5
     
     # Initialize selected lists
     selected_image_md5s = []
     selected_video_md5s = []
     selected_playable_md5s = []
 
-    # Image creatives (추가)
+    # ========== Image Creatives ==========
     with st.expander("📷 Image Creatives", expanded=False):
-        image_pages = st.session_state[f"mintegral_image_pages_{idx}"]
+        # Load button
+        if st.button("🔍 Load Images", key=f"load_images_{idx}"):
+            image_pages = st.session_state.get(f"mintegral_image_pages_{idx}", 20)
+            with st.spinner(f"Loading images... ({image_pages}페이지)"):
+                images = get_creatives(
+                    creative_type="IMAGE", 
+                    game_filter=game_short, 
+                    max_pages=image_pages
+                )
+                st.session_state[f"mintegral_images_data_{idx}"] = images
         
-        with st.spinner(f"Loading images... ({image_pages}페이지)"):
-            images = get_creatives(
-                creative_type="IMAGE", 
-                game_filter=game_short, 
-                max_pages=image_pages
-            )
+        # Display loaded data
+        images = st.session_state.get(f"mintegral_images_data_{idx}", [])
         
         if images:
-            st.caption(f"📊 총 {len(images)}개 표시 (최대 {image_pages * 200}개 중 필터링)")
+            st.caption(f"📊 총 {len(images)}개 표시 (최대 {st.session_state.get(f'mintegral_image_pages_{idx}', 20) * 200}개 중 필터링)")
             
             image_options = {f"{c['creative_name']} ({c['resolution']})": c['creative_md5'] 
                         for c in images}
@@ -354,31 +359,41 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
             col1, col2 = st.columns([1, 3])
             with col1:
                 if st.button("➕ 더 보기 (10페이지)", key=f"load_more_images_{idx}"):
-                    st.session_state[f"mintegral_image_pages_{idx}"] += 10
+                    st.session_state[f"mintegral_image_pages_{idx}"] = st.session_state.get(f"mintegral_image_pages_{idx}", 20) + 10
+                    # 즉시 재로드 추가 ← HERE
+                    image_pages = st.session_state[f"mintegral_image_pages_{idx}"]
+                    with st.spinner(f"Loading more images... ({image_pages}페이지)"):
+                        images = get_creatives(
+                            creative_type="IMAGE", 
+                            game_filter=game_short, 
+                            max_pages=image_pages
+                        )
+                        st.session_state[f"mintegral_images_data_{idx}"] = images
                     st.cache_data.clear()
                     st.rerun()
             with col2:
                 st.caption(f"💡 원하는 image가 없으면 '더 보기' 클릭")
         else:
-            st.info(f"'{game_short}' 필터링된 Image가 없습니다")
-            if st.button("🔍 더 많은 페이지 검색 (20페이지)", key=f"search_more_images_{idx}"):
-                st.session_state[f"mintegral_image_pages_{idx}"] += 20
-                st.cache_data.clear()
-                st.rerun()
+            st.info("Click 'Load Images' to see available images")
         
-    # Video creatives
+    # ========== Video Creatives ==========
     with st.expander("🎥 Video Creatives", expanded=False):
-        video_pages = st.session_state[f"mintegral_video_pages_{idx}"]
+        # Load button
+        if st.button("🔍 Load Videos", key=f"load_videos_{idx}"):
+            video_pages = st.session_state.get(f"mintegral_video_pages_{idx}", 20)
+            with st.spinner(f"Loading videos... ({video_pages}페이지)"):
+                videos = get_creatives(
+                    creative_type="VIDEO", 
+                    game_filter=game_short, 
+                    max_pages=video_pages
+                )
+                st.session_state[f"mintegral_videos_data_{idx}"] = videos
         
-        with st.spinner(f"Loading videos... ({video_pages}페이지)"):
-            videos = get_creatives(
-                creative_type="VIDEO", 
-                game_filter=game_short, 
-                max_pages=video_pages
-            )
+        # Display loaded data
+        videos = st.session_state.get(f"mintegral_videos_data_{idx}", [])
         
         if videos:
-            st.caption(f"📊 총 {len(videos)}개 표시 (최대 {video_pages * 200}개 중 필터링)")
+            st.caption(f"📊 총 {len(videos)}개 표시 (최대 {st.session_state.get(f'mintegral_video_pages_{idx}', 20) * 200}개 중 필터링)")
             
             video_options = {f"{c['creative_name']} ({c['resolution']})": c['creative_md5'] 
                             for c in videos}
@@ -394,31 +409,41 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
             col1, col2 = st.columns([1, 3])
             with col1:
                 if st.button("➕ 더 보기 (10페이지)", key=f"load_more_videos_{idx}"):
-                    st.session_state[f"mintegral_video_pages_{idx}"] += 10
+                    st.session_state[f"mintegral_video_pages_{idx}"] = st.session_state.get(f"mintegral_video_pages_{idx}", 20) + 10
+                    # 즉시 재로드 추가 ← HERE
+                    video_pages = st.session_state[f"mintegral_video_pages_{idx}"]
+                    with st.spinner(f"Loading more videos... ({video_pages}페이지)"):
+                        videos = get_creatives(
+                            creative_type="VIDEO", 
+                            game_filter=game_short, 
+                            max_pages=video_pages
+                        )
+                        st.session_state[f"mintegral_videos_data_{idx}"] = videos
                     st.cache_data.clear()
                     st.rerun()
             with col2:
                 st.caption(f"💡 원하는 video가 없으면 '더 보기' 클릭")
         else:
-            st.info(f"'{game_short}' 필터링된 Video가 없습니다")
-            if st.button("🔍 더 많은 페이지 검색 (20페이지)", key=f"search_more_videos_{idx}"):
-                st.session_state[f"mintegral_video_pages_{idx}"] += 20
-                st.cache_data.clear()
-                st.rerun()
+            st.info("Click 'Load Videos' to see available videos")
     
-    # Playable creatives
+    # ========== Playable Creatives ==========
     with st.expander("🎮 Playable Creatives", expanded=False):
-        playable_pages = st.session_state[f"mintegral_playable_pages_{idx}"]
+        # Load button
+        if st.button("🔍 Load Playables", key=f"load_playables_{idx}"):
+            playable_pages = st.session_state.get(f"mintegral_playable_pages_{idx}", 5)
+            with st.spinner(f"Loading playables... ({playable_pages}페이지)"):
+                playables = get_creatives(
+                    creative_type="PLAYABLE", 
+                    game_filter=game_short, 
+                    max_pages=playable_pages
+                )
+                st.session_state[f"mintegral_playables_data_{idx}"] = playables
         
-        with st.spinner(f"Loading playables... ({playable_pages}페이지)"):
-            playables = get_creatives(
-                creative_type="PLAYABLE", 
-                game_filter=game_short, 
-                max_pages=playable_pages
-            )
+        # Display loaded data
+        playables = st.session_state.get(f"mintegral_playables_data_{idx}", [])
         
         if playables:
-            st.caption(f"📊 총 {len(playables)}개 표시 (최대 {playable_pages * 200}개 중 필터링)")
+            st.caption(f"📊 총 {len(playables)}개 표시 (최대 {st.session_state.get(f'mintegral_playable_pages_{idx}', 5) * 200}개 중 필터링)")
             
             playable_options = {c['creative_name']: c['creative_md5'] for c in playables}
             selected_playables = st.multiselect(
@@ -432,27 +457,33 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
             # "더 보기" 버튼
             col1, col2 = st.columns([1, 3])
             with col1:
-                if st.button("➕ 더 보기(5페이지)", key=f"load_more_playables_{idx}"):
-                    st.session_state[f"mintegral_playable_pages_{idx}"] += 5
+                if st.button("➕ 더 보기 (5페이지)", key=f"load_more_playables_{idx}"):
+                    st.session_state[f"mintegral_playable_pages_{idx}"] = st.session_state.get(f"mintegral_playable_pages_{idx}", 5) + 5
+                    # 즉시 재로드 추가 ← HERE
+                    playable_pages = st.session_state[f"mintegral_playable_pages_{idx}"]
+                    with st.spinner(f"Loading more playables... ({playable_pages}페이지)"):
+                        playables = get_creatives(
+                            creative_type="PLAYABLE", 
+                            game_filter=game_short, 
+                            max_pages=playable_pages
+                        )
+                        st.session_state[f"mintegral_playables_data_{idx}"] = playables
                     st.cache_data.clear()
                     st.rerun()
             with col2:
                 st.caption(f"💡 원하는 playable이 없으면 '더 보기' 클릭")
         else:
-            st.info(f"'{game_short}' 필터링된 Playable이 없습니다")
-            if st.button("🔍 더 많은 페이지 검색 (10페이지)", key=f"search_more_playables_{idx}"):
-                st.session_state[f"mintegral_playable_pages_{idx}"] += 10
-                st.cache_data.clear()
-                st.rerun()
+            st.info("Click 'Load Playables' to see available playables")
     
     st.markdown("---")
-    
+
     # Apply in Offer dropdown
     st.markdown("**Apply in Offer**")
     with st.spinner("Loading offers..."):
         offers = get_offers(game_filter=game_short, max_pages=5)
 
     selected_offer_id = None
+    selected_offer_name = None
     if offers:
         offer_options = {f"{o['offer_name']} (ID: {o['offer_id']})": o['offer_id'] 
                         for o in offers}
@@ -463,9 +494,75 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
             help=f"Creative Set을 적용할 Offer 선택"
         )
         selected_offer_id = offer_options[selected_offer]
+        selected_offer_name = selected_offer.split(" (ID:")[0]
     else:
         st.warning(f"'{game_short}' 필터링된 Offer가 없습니다")
-    
+
+    # Add Product Icon button (Offer 선택 후에만 활성화)
+    if selected_offer_id:
+        if st.button(
+            "Add Product Icon",
+            key=f"mintegral_add_icon_{idx}",
+            use_container_width=True,
+            type="primary"
+        ):
+            # Get existing creative sets for this offer to find the icon
+            try:
+                with st.spinner("🔍 Searching for product icon in offer..."):
+                    headers = _get_auth_headers()
+                    params = {"offer_id": selected_offer_id, "page": 1, "limit": 10}
+                    
+                    response = requests.get(
+                        f"{MINTEGRAL_BASE_URL}/creative_sets",
+                        headers=headers,
+                        params=params,
+                        timeout=15
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    if data.get("code") == 200:
+                        creative_sets = data.get("data", {}).get("list", [])
+                        
+                        # Search for 512x512 icon in any creative set
+                        found_icon = None
+                        for creative_set in creative_sets:
+                            for creative in creative_set.get("creatives", []):
+                                if (creative.get("creative_type") == "IMAGE" and 
+                                    creative.get("dimension") == "512x512"):
+                                    found_icon = {
+                                        "md5": creative["creative_md5"],
+                                        "name": creative["creative_name"]
+                                    }
+                                    break
+                            if found_icon:
+                                break
+                        
+                        if found_icon:
+                            # Save to session state
+                            st.session_state[f"mintegral_icon_{idx}"] = found_icon
+                            st.success(f"✅ Found: {found_icon['name']}")
+                        else:
+                            st.warning(f"⚠️ No 512x512 icon found in offer's creative sets")
+                    else:
+                        st.error(f"❌ API Error: {data.get('msg')}")
+                        
+            except Exception as e:
+                st.error(f"❌ Search error: {e}")
+                logger.error(f"Icon search error: {e}", exc_info=True)
+        
+        # Show selected icon with X button
+        if f"mintegral_icon_{idx}" in st.session_state:
+            icon_data = st.session_state[f"mintegral_icon_{idx}"]
+            
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.info(f"📷 **Product Icon:** {icon_data['name']}")
+            with col2:
+                if st.button("❌", key=f"mintegral_remove_icon_{idx}"):
+                    del st.session_state[f"mintegral_icon_{idx}"]
+                    st.rerun()
+
     # Save settings
     st.session_state.mintegral_settings[game] = {
         "mode": "upload",
@@ -474,6 +571,8 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
         "selected_videos": selected_video_md5s,
         "selected_playables": selected_playable_md5s,
         "selected_offer_id": selected_offer_id,
+        "selected_offer_name": selected_offer_name,
+        "product_icon_md5": st.session_state.get(f"mintegral_icon_{idx}", {}).get("md5"),
     }
 
 def _render_copy_creative_set(game: str, idx: int, cur: Dict) -> None:
@@ -742,25 +841,186 @@ def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
     if not creative_set_name:
         creative_set_name = _get_default_creative_set_name(game)
     
-    # Collect all selected creatives
-    all_creatives = []
-    all_creatives.extend(settings.get("selected_images", []))
-    all_creatives.extend(settings.get("selected_videos", []))
-    all_creatives.extend(settings.get("selected_playables", []))
-    
-    if not all_creatives:
+     # Collect all selected creatives (Images, Videos, Playables)
+    all_creatives_md5 = []
+    all_creatives_md5.extend(settings.get("selected_images", []))
+    all_creatives_md5.extend(settings.get("selected_videos", []))
+    all_creatives_md5.extend(settings.get("selected_playables", []))
+
+    # Add Product Icon if provided (already searched and selected in UI)
+    product_icon_md5 = settings.get("product_icon_md5")
+    if product_icon_md5:
+        all_creatives_md5.insert(0, product_icon_md5)  # Add at beginning
+        logger.info(f"Product icon added to creative set: {product_icon_md5}")
+
+    if not all_creatives_md5:
         return {
             "success": False,
             "error": "선택된 Creative가 없습니다.",
             "errors": ["최소 1개 이상의 Creative를 선택해주세요."]
         }
+
+    try:
+        all_images = get_creatives(creative_type="IMAGE", game_filter=None, max_pages=5)
+        all_videos = get_creatives(creative_type="VIDEO", game_filter=None, max_pages=5)
+        all_playables = get_creatives(creative_type="PLAYABLE", game_filter=None, max_pages=5)
+        
+        # Build MD5 -> {name, type} mapping
+        md5_info = {}
+        for creative in all_images:
+            md5_info[creative["creative_md5"]] = {
+                "name": creative["creative_name"],
+                "type": "IMAGE",
+                "dimension": creative.get("dimension", "")
+            }
+        for creative in all_videos:
+            md5_info[creative["creative_md5"]] = {
+                "name": creative["creative_name"],
+                "type": "VIDEO",
+                "dimension": creative.get("dimension", "")
+            }
+        for creative in all_playables:
+            md5_info[creative["creative_md5"]] = {
+                "name": creative["creative_name"],
+                "type": "PLAYABLE",
+                "dimension": creative.get("dimension", "")
+            }
+        
+        # Build creatives array with names
+        creatives_payload = []
+        has_image = False
+        has_video = False
+        has_playable = False
+        
+        for md5 in all_creatives_md5:
+            info = md5_info.get(md5)
+            if not info:
+                logger.warning(f"Creative MD5 not found: {md5}")
+                continue
+            
+            creatives_payload.append({
+                "creative_md5": md5,
+                "creative_name": info["name"]
+            })
+            
+            # Track creative types
+            if info["type"] == "IMAGE":
+                has_image = True
+            elif info["type"] == "VIDEO":
+                has_video = True
+            elif info["type"] == "PLAYABLE":
+                has_playable = True
+        
+        logger.info(f"Built {len(creatives_payload)} creatives with names")
+        logger.info(f"Creative types: IMAGE={has_image}, VIDEO={has_video}, PLAYABLE={has_playable}")
+
+    except Exception as e:
+        logger.error(f"Failed to fetch creative names: {e}")
+        return {
+            "success": False,
+            "error": f"Creative 정보 조회 실패: {str(e)}",
+            "errors": [str(e)]
+        }
     
-    # TODO: Implement actual API call to create creative set
-    logger.warning(f"Mintegral upload not yet fully implemented. Would create set '{creative_set_name}' with {len(all_creatives)} creatives for offer {offer_id}")
+    # Get ad_outputs from existing creative sets in the offer
+    ad_outputs = []
+    try:
+        headers_for_fetch = _get_auth_headers()
+        params = {"offer_id": offer_id, "page": 1, "limit": 10}
+        
+        response = requests.get(
+            f"{MINTEGRAL_BASE_URL}/creative_sets",
+            headers=headers_for_fetch,
+            params=params,
+            timeout=15
+        )
+        response.raise_for_status()
+        data_fetch = response.json()
+        
+        if data_fetch.get("code") == 200:
+            creative_sets = data_fetch.get("data", {}).get("list", [])
+            if creative_sets:
+                # Use ad_outputs from first creative set (guaranteed to work)
+                ad_outputs = creative_sets[0].get("ad_outputs", [])
+                logger.info(f"✅ Using ad_outputs from existing creative set: {ad_outputs}")
+        
+        if not ad_outputs:
+            logger.error("❌ No existing creative sets found in offer. Cannot determine valid ad_outputs.")
+            return {
+                "success": False,
+                "error": "이 Offer에 기존 Creative Set이 없습니다. 먼저 대시보드에서 하나 생성해주세요.",
+                "errors": ["No existing creative sets to copy ad_outputs from"]
+            }
+            
+    except Exception as e:
+        logger.error(f"Failed to fetch ad_outputs: {e}")
+        return {
+            "success": False,
+            "error": f"Ad Outputs 조회 실패: {str(e)}",
+            "errors": [str(e)]
+        }
     
-    return {
-        "success": False,
-        "error": "Mintegral Creative Set 생성 API는 아직 구현 중입니다.",
-        "errors": ["API 통합 작업 진행 중"],
-        "message": f"Creative Set '{creative_set_name}'을(를) {len(all_creatives)}개 creative로 생성할 준비가 되었습니다."
-    }
+    # API Request
+    try:
+        headers = _get_auth_headers()
+        payload = {
+            "creative_set_name": creative_set_name,
+            "offer_id": int(offer_id),
+            "geos": ["ALL"],
+            "ad_outputs": ad_outputs,  # ← 자동 선택된 값
+            "creatives": creatives_payload
+        }
+        
+        logger.info(f"📤 Sending API request:")
+        logger.info(f"   - Payload: {payload}")
+        
+        response = requests.post(
+            f"{MINTEGRAL_BASE_URL}/creative_set",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        # 디버깅: 응답 로깅
+        logger.info(f"📥 API Response:")
+        logger.info(f"   - Status Code: {response.status_code}")
+        logger.info(f"   - Response Text: {response.text}")
+        
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get("code") != 200:
+            error_msg = data.get("msg", "Creative Set 생성 실패")
+            error_detail = data.get("data")  # ← 추가: data 필드 확인
+            logger.error(f"Creative Set creation failed: {error_msg}")
+            logger.error(f"Error details: {error_detail}")  # ← 추가
+            return {
+                "success": False,
+                "error": error_msg,
+                "errors": [f"{error_msg} - {error_detail}" if error_detail else error_msg]
+            }
+            
+        logger.info(f"✅ Creative Set created: {creative_set_name} with {len(creatives_payload)} creatives")
+        
+        return {
+            "success": True,
+            "message": f"Creative Set '{creative_set_name}'이(가) 성공적으로 생성되었습니다! ({len(creatives_payload)}개 creative)",
+            "creative_set_name": creative_set_name,
+            "offer_id": offer_id,
+            "total_creatives": len(creatives_payload)
+        }
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API request failed: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"API 요청 실패: {str(e)}",
+            "errors": [str(e)]
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"예상치 못한 오류: {str(e)}",
+            "errors": [str(e)]
+        }

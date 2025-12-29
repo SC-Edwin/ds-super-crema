@@ -1053,18 +1053,24 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 if "cont_mintegral" in locals() and cont_mintegral:
                     st.query_params["tab"] = game
                     
-                    remote_list = st.session_state.remote_videos.get(game, [])
-                    ok, msg = validate_count(remote_list)
-                    if not ok:
-                        mintegral_ok_placeholder.error(msg)
-                    else:
-                        try:
-                            from modules.upload_automation import mintegral as mintegral_module
-                            mintegral_settings = mintegral_module.get_mintegral_settings(game)
-                            
+                    # Mintegral은 라이브러리의 Creative를 사용하므로 파일 validation 불필요
+                    try:
+                        from modules.upload_automation import mintegral as mintegral_module
+                        mintegral_settings = mintegral_module.get_mintegral_settings(game)
+                        
+                        # Validate settings instead of files
+                        if not mintegral_settings.get("selected_offer_id"):
+                            mintegral_ok_placeholder.error("❌ Offer를 선택해주세요.")
+                        elif not (mintegral_settings.get("selected_images") or 
+                                mintegral_settings.get("selected_videos") or 
+                                mintegral_settings.get("selected_playables") or
+                                mintegral_settings.get("product_icon_md5")):
+                            mintegral_ok_placeholder.error("❌ 최소 1개 이상의 Creative를 선택해주세요.")
+                        else:
+                            # Proceed with upload
                             result = mintegral_module.upload_to_mintegral(
                                 game=game,
-                                videos=remote_list,
+                                videos=[],  # Not used for Mintegral
                                 settings=mintegral_settings
                             )
                             
@@ -1075,11 +1081,11 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                 
                             if result.get("errors"):
                                 st.error("\n".join(result["errors"]))
-                        except Exception as e:
-                            st.error(str(e) if str(e) else "Mintegral upload failed")
-                            devtools.record_exception("Mintegral upload failed", e)
-                        finally:
-                            st.query_params["tab"] = game
+                    except Exception as e:
+                        st.error(str(e) if str(e) else "Mintegral upload failed")
+                        devtools.record_exception("Mintegral upload failed", e)
+                    finally:
+                        st.query_params["tab"] = game
                 
                 if "clr_mintegral" in locals() and clr_mintegral:
                     if "mintegral_settings" in st.session_state:
