@@ -59,18 +59,18 @@ def _get_game_mapping(game: str) -> str:
             return [game.lower().replace(" ", "")]
     # Fallback mapping if not in secrets
     fallback = {
-        "XP HERO": "weaponrpg",
-        "Dino Universe": "dinouniverse",
-        "Snake Clash": "snakeclash",
-        "Pizza Ready": "pizzaready",
-        "Cafe Life": "cafelife",
-        "Suzy's Restaurant": "suzyrest",
-        "Office Life": "officelife",
-        "Lumber Chopper": "lumberchop",
-        "Burger Please": "burgerplease",
-        "Prison Life": "prisonlife"
+    "XP HERO": ["weaponrpg"],
+    "Dino Universe": ["dinouniverse"],
+    "Snake Clash": ["snakeclash"],
+    "Pizza Ready": ["pizzaready"],
+    "Cafe Life": ["cafelife"],
+    "Suzy's Restaurant": ["suzyrest"],
+    "Office Life": ["officelife"],
+    "Lumber Chopper": ["lumberchop"],
+    "Burger Please": ["burgerplease"],
+    "Prison Life": ["prisonlife"]
     }
-    return fallback.get(game, game.lower().replace(" ", ""))
+    return fallback.get(game, [game.lower().replace(" ", "")])
 
 def _generate_token(api_key: str) -> tuple[str, int]:
     """Generate token for Mintegral API authentication."""
@@ -312,6 +312,12 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
     
     game_short = _get_game_mapping(game)
     
+    # 세션 상태에 페이지 수 저장
+    if f"mintegral_video_pages_{idx}" not in st.session_state:
+        st.session_state[f"mintegral_video_pages_{idx}"] = 20  # 기본 10페이지
+    if f"mintegral_playable_pages_{idx}" not in st.session_state:
+        st.session_state[f"mintegral_playable_pages_{idx}"] = 5  # 기본 5페이지
+    
     # Initialize selected lists
     selected_image_md5s = []
     selected_video_md5s = []
@@ -319,43 +325,89 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
     
     # Video creatives
     with st.expander("🎥 Video Creatives", expanded=False):
-        with st.spinner("Loading videos..."):
-            videos = get_creatives(creative_type="VIDEO", game_filter=game_short, max_pages=10)  # 10페이지
+        video_pages = st.session_state[f"mintegral_video_pages_{idx}"]
+        
+        with st.spinner(f"Loading videos... ({video_pages}페이지)"):
+            videos = get_creatives(
+                creative_type="VIDEO", 
+                game_filter=game_short, 
+                max_pages=video_pages
+            )
+        
         if videos:
+            st.caption(f"📊 총 {len(videos)}개 표시 (최대 {video_pages * 200}개 중 필터링)")
+            
             video_options = {f"{c['creative_name']} ({c['resolution']})": c['creative_md5'] 
                            for c in videos}
             selected_videos = st.multiselect(
                 "Select Videos",
                 options=list(video_options.keys()),
                 key=f"mintegral_videos_{idx}",
-                help=f"Video 크리에이티브 선택 (최대 {len(videos)}개 표시)"
+                help=f"Video 크리에이티브 선택"
             )
             selected_video_md5s = [video_options[name] for name in selected_videos]
+            
+            # "더 보기" 버튼
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                if st.button("➕ 더 보기 (10페이지)", key=f"load_more_videos_{idx}"):
+                    st.session_state[f"mintegral_video_pages_{idx}"] += 10
+                    st.cache_data.clear()
+                    st.rerun()
+            with col2:
+                st.caption(f"💡 원하는 video가 없으면 '더 보기' 클릭")
         else:
             st.info(f"'{game_short}' 필터링된 Video가 없습니다")
+            if st.button("🔍 더 많은 페이지 검색 (20페이지)", key=f"search_more_videos_{idx}"):
+                st.session_state[f"mintegral_video_pages_{idx}"] += 20
+                st.cache_data.clear()
+                st.rerun()
     
     # Playable creatives
     with st.expander("🎮 Playable Creatives", expanded=False):
-        with st.spinner("Loading playables..."):
-            playables = get_creatives(creative_type="PLAYABLE", game_filter=game_short, max_pages=5)  # 5페이지
+        playable_pages = st.session_state[f"mintegral_playable_pages_{idx}"]
+        
+        with st.spinner(f"Loading playables... ({playable_pages}페이지)"):
+            playables = get_creatives(
+                creative_type="PLAYABLE", 
+                game_filter=game_short, 
+                max_pages=playable_pages
+            )
+        
         if playables:
+            st.caption(f"📊 총 {len(playables)}개 표시 (최대 {playable_pages * 200}개 중 필터링)")
+            
             playable_options = {c['creative_name']: c['creative_md5'] for c in playables}
             selected_playables = st.multiselect(
                 "Select Playables",
                 options=list(playable_options.keys()),
                 key=f"mintegral_playables_{idx}",
-                help=f"Playable 크리에이티브 선택 (최대 {len(playables)}개 표시)"
+                help=f"Playable 크리에이티브 선택"
             )
             selected_playable_md5s = [playable_options[name] for name in selected_playables]
+            
+            # "더 보기" 버튼
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                if st.button("➕ 더 보기(5페이지)", key=f"load_more_playables_{idx}"):
+                    st.session_state[f"mintegral_playable_pages_{idx}"] += 5
+                    st.cache_data.clear()
+                    st.rerun()
+            with col2:
+                st.caption(f"💡 원하는 playable이 없으면 '더 보기' 클릭")
         else:
             st.info(f"'{game_short}' 필터링된 Playable이 없습니다")
+            if st.button("🔍 더 많은 페이지 검색 (10페이지)", key=f"search_more_playables_{idx}"):
+                st.session_state[f"mintegral_playable_pages_{idx}"] += 10
+                st.cache_data.clear()
+                st.rerun()
     
     st.markdown("---")
     
     # Apply in Offer dropdown
     st.markdown("**Apply in Offer**")
     with st.spinner("Loading offers..."):
-        offers = get_offers(game_filter=game_short, max_pages=5)  # 5페이지
+        offers = get_offers(game_filter=game_short, max_pages=5)
 
     selected_offer_id = None
     if offers:
