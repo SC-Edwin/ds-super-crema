@@ -577,12 +577,154 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
 
 def _render_copy_creative_set(game: str, idx: int, cur: Dict) -> None:
     """Render Copy Creative Set UI."""
-    st.info("🚧 Copy Creative Set 기능은 구현 예정입니다")
     
-    # Placeholder settings
+    st.markdown("**Select Creative Sets to Copy**")
+    
+    game_short = _get_game_mapping(game)
+    
+    # Session state key for creative sets data
+    cache_key = f"mintegral_copy_creative_sets_data_{idx}"
+    
+    # Load button to fetch creative sets
+    if st.button("🔍 Load Creative Sets", key=f"load_copy_creative_sets_{idx}"):
+        with st.spinner("Loading creative sets..."):
+            try:
+                # Get all offers for this game
+                offers = get_offers(game_filter=game_short, max_pages=5)
+                
+                if not offers:
+                    st.warning(f"'{game_short}' 필터링된 Offer가 없습니다")
+                    return
+                
+                # Fetch creative sets from all offers IN PARALLEL
+                def fetch_creative_sets_for_offer(offer: Dict) -> List[Dict]:
+                    """Fetch creative sets for a single offer."""
+                    offer_id = offer["offer_id"]
+                    offer_name = offer["offer_name"]
+                    
+                    try:
+                        headers = _get_auth_headers()
+                        params = {"offer_id": offer_id, "page": 1, "limit": 50}
+                        response = requests.get(
+                            f"{MINTEGRAL_BASE_URL}/creative_sets",
+                            headers=headers,
+                            params=params,
+                            timeout=15
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                        
+                        if data.get("code") == 200:
+                            creative_sets = data.get("data", {}).get("list", [])
+                            # Add offer info to each creative set
+                            for cs in creative_sets:
+                                cs["source_offer_id"] = offer_id
+                                cs["source_offer_name"] = offer_name
+                            return creative_sets
+                        return []
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch creative sets from offer {offer_id}: {e}")
+                        return []
+                
+                all_creative_sets = []
+                
+                # Parallel fetch with ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=5) as executor:
+                    futures = {executor.submit(fetch_creative_sets_for_offer, offer): offer for offer in offers}
+                    
+                    for future in as_completed(futures):
+                        creative_sets = future.result()
+                        if creative_sets:
+                            all_creative_sets.extend(creative_sets)
+                
+                # Save to session state
+                st.session_state[cache_key] = {
+                    "creative_sets": all_creative_sets,
+                    "offers": offers
+                }
+                
+            except Exception as e:
+                st.error(f"Creative Set 목록을 불러오는데 실패했습니다: {e}")
+                logger.error(f"Failed to load creative sets for copy: {e}", exc_info=True)
+    
+    # Display loaded data from session state
+    cached_data = st.session_state.get(cache_key)
+    
+    if not cached_data:
+        st.info("Click 'Load Creative Sets' to see available creative sets")
+        return
+    
+    all_creative_sets = cached_data["creative_sets"]
+    offers = cached_data["offers"]
+    
+    if not all_creative_sets:
+        st.info("이 게임에 생성된 Creative Set이 없습니다")
+        return
+    
+    st.caption(f"📊 총 {len(all_creative_sets)}개 Creative Set 표시")
+    
+    # Create options: "creative_set_name (Offer: offer_name)"
+    creative_set_options = {
+        f"{cs['creative_set_name']} (Offer: {cs['source_offer_name']})": {
+            "creative_set_name": cs["creative_set_name"],
+            "offer_id": cs["source_offer_id"],
+            "ad_outputs": cs.get("ad_outputs", []),
+            "geos": cs.get("geos", ["ALL"]),
+            "creatives": cs.get("creatives", [])
+        }
+        for cs in all_creative_sets
+    }
+    
+    # Multi-select dropdown
+    selected_sets = st.multiselect(
+        "Select Creative Sets",
+        options=list(creative_set_options.keys()),
+        key=f"mintegral_copy_creative_sets_{idx}",
+        help="복사할 Creative Set을 선택하세요 (여러 개 선택 가능)"
+    )
+    
+    # Show selected sets info
+    if selected_sets:
+        st.markdown("**선택된 Creative Sets:**")
+        for set_name in selected_sets:
+            cs_info = creative_set_options[set_name]
+            st.write(f"• {cs_info['creative_set_name']} (Creative 개수: {len(cs_info['creatives'])})")
+    
+    st.markdown("---")
+
+    # Target Offer Selection (Multi-select)
+    st.markdown("**Copy to Offers**")
+    st.caption("Creative Set을 복사할 대상 Offer들을 선택하세요 (여러 개 선택 가능)")
+
+    target_offer_options = {
+        f"{o['offer_name']} (ID: {o['offer_id']})": o['offer_id'] 
+        for o in offers
+    }
+
+    selected_target_offers = st.multiselect(
+        "Target Offers",
+        options=list(target_offer_options.keys()),
+        key=f"mintegral_copy_target_offers_{idx}",
+        help="Creative Set을 복사할 대상 Offer들을 선택하세요"
+    )
+
+    # Convert to list of offer IDs
+    target_offer_ids = [target_offer_options[name] for name in selected_target_offers]
+
+    # Show selected target offers
+    if selected_target_offers:
+        st.markdown("**복사 대상 Offers:**")
+        for offer_name in selected_target_offers:
+            st.write(f"• {offer_name}")
+
+    # Save settings
     st.session_state.mintegral_settings[game] = {
         "mode": "copy",
+        "selected_creative_sets": [creative_set_options[name] for name in selected_sets],
+        "target_offer_ids": target_offer_ids,
+        "target_offer_names": [name.split(" (ID:")[0] for name in selected_target_offers]
     }
+        
 
 # =========================================================
 # Upload Logic
@@ -813,11 +955,7 @@ def upload_to_mintegral(game: str, videos: List[Dict], settings: Dict) -> Dict:
     if mode == "upload":
         return _upload_creative_set(game, videos, settings)
     elif mode == "copy":
-        return {
-            "success": False,
-            "error": "Copy Creative Set 기능은 아직 구현되지 않았습니다.",
-            "errors": ["Copy 기능 구현 예정"]
-        }
+        return _copy_creative_sets(game, settings)
     
     return {
         "success": False,
@@ -1023,4 +1161,101 @@ def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
             "success": False,
             "error": f"예상치 못한 오류: {str(e)}",
             "errors": [str(e)]
+        }
+
+def _copy_creative_sets(game: str, settings: Dict) -> Dict:
+    """Copy creative sets to target offers."""
+    
+    selected_sets = settings.get("selected_creative_sets", [])
+    target_offer_ids = settings.get("target_offer_ids", [])
+    
+    if not selected_sets or not target_offer_ids:
+        return {
+            "success": False,
+            "error": "Creative Set 또는 Target Offer가 선택되지 않았습니다.",
+            "errors": []
+        }
+    
+    total_copies = len(selected_sets) * len(target_offer_ids)
+    success_count = 0
+    failed_count = 0
+    errors = []
+    
+    logger.info(f"Copying {len(selected_sets)} creative set(s) to {len(target_offer_ids)} offer(s)")
+    
+    for creative_set in selected_sets:
+        creative_set_name = creative_set["creative_set_name"]
+        ad_outputs = creative_set["ad_outputs"]
+        geos = creative_set["geos"]
+        creatives = creative_set["creatives"]
+        
+        # Build creatives payload (only MD5 and name)
+        creatives_payload = [
+            {
+                "creative_md5": c["creative_md5"],
+                "creative_name": c["creative_name"]
+            }
+            for c in creatives
+        ]
+        
+        for target_offer_id in target_offer_ids:
+            try:
+                headers = _get_auth_headers()
+                payload = {
+                    "creative_set_name": creative_set_name,
+                    "offer_id": int(target_offer_id),
+                    "geos": geos,
+                    "ad_outputs": ad_outputs,
+                    "creatives": creatives_payload
+                }
+                
+                response = requests.post(
+                    f"{MINTEGRAL_BASE_URL}/creative_set",
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
+                
+                response.raise_for_status()
+                data = response.json()
+
+                logger.info(f"📥 API Response for Offer {target_offer_id}:")
+                logger.info(f"   - Status Code: {response.status_code}")
+                logger.info(f"   - Response: {response.text}")
+
+                if data.get("code") == 200:
+                    success_count += 1
+                    logger.info(f"✅ Copied '{creative_set_name}' to Offer {target_offer_id}")
+                else:
+                    failed_count += 1
+                    error_msg = data.get("msg", "Unknown error")
+                    error_detail = data.get("data")  # ← 추가
+                    
+                    if error_detail:
+                        full_error = f"{error_msg} - {error_detail}"
+                        errors.append(f"Offer {target_offer_id}: {full_error}")
+                        logger.error(f"❌ Failed to copy to Offer {target_offer_id}: {full_error}")
+                    else:
+                        errors.append(f"Offer {target_offer_id}: {error_msg}")
+                        logger.error(f"❌ Failed to copy to Offer {target_offer_id}: {error_msg}")
+                    
+            except Exception as e:
+                failed_count += 1
+                errors.append(f"Offer {target_offer_id}: {str(e)}")
+                logger.error(f"❌ Exception copying to Offer {target_offer_id}: {e}")
+    
+    if success_count > 0:
+        return {
+            "success": True,
+            "message": f"{success_count}/{total_copies} Creative Set(s) 복사 완료",
+            "total": total_copies,
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "errors": errors
+        }
+    else:
+        return {
+            "success": False,
+            "error": f"모든 복사 실패 ({failed_count}/{total_copies})",
+            "errors": errors
         }

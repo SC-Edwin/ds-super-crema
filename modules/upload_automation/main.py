@@ -1053,34 +1053,57 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 if "cont_mintegral" in locals() and cont_mintegral:
                     st.query_params["tab"] = game
                     
-                    # Mintegral은 라이브러리의 Creative를 사용하므로 파일 validation 불필요
                     try:
                         from modules.upload_automation import mintegral as mintegral_module
                         mintegral_settings = mintegral_module.get_mintegral_settings(game)
                         
-                        # Validate settings instead of files
-                        if not mintegral_settings.get("selected_offer_id"):
-                            mintegral_ok_placeholder.error("❌ Offer를 선택해주세요.")
-                        elif not (mintegral_settings.get("selected_images") or 
-                                mintegral_settings.get("selected_videos") or 
-                                mintegral_settings.get("selected_playables") or
-                                mintegral_settings.get("product_icon_md5")):
-                            mintegral_ok_placeholder.error("❌ 최소 1개 이상의 Creative를 선택해주세요.")
-                        else:
-                            # Proceed with upload
-                            result = mintegral_module.upload_to_mintegral(
-                                game=game,
-                                videos=[],  # Not used for Mintegral
-                                settings=mintegral_settings
-                            )
-                            
-                            if result.get("success"):
-                                mintegral_ok_placeholder.success(f"✅ Mintegral 업로드 완료: {result.get('message', '')}")
+                        mode = mintegral_settings.get("mode", "upload")
+                        
+                        # Validate based on mode
+                        if mode == "upload":
+                            # Upload mode validation
+                            if not mintegral_settings.get("selected_offer_id"):
+                                mintegral_ok_placeholder.error("❌ Offer를 선택해주세요.")
+                            elif not (mintegral_settings.get("selected_images") or 
+                                    mintegral_settings.get("selected_videos") or 
+                                    mintegral_settings.get("selected_playables") or
+                                    mintegral_settings.get("product_icon_md5")):
+                                mintegral_ok_placeholder.error("❌ 최소 1개 이상의 Creative를 선택해주세요.")
                             else:
-                                mintegral_ok_placeholder.error(f"❌ Mintegral 업로드 실패: {result.get('error', 'Unknown error')}")
+                                result = mintegral_module.upload_to_mintegral(
+                                    game=game,
+                                    videos=[],
+                                    settings=mintegral_settings
+                                )
                                 
-                            if result.get("errors"):
-                                st.error("\n".join(result["errors"]))
+                                if result.get("success"):
+                                    mintegral_ok_placeholder.success(f"✅ Mintegral 업로드 완료: {result.get('message', '')}")
+                                else:
+                                    mintegral_ok_placeholder.error(f"❌ Mintegral 업로드 실패: {result.get('error', 'Unknown error')}")
+                                    
+                                if result.get("errors"):
+                                    st.error("\n".join(result["errors"]))
+                        
+                        elif mode == "copy":
+                            # Copy mode validation
+                            if not mintegral_settings.get("selected_creative_sets"):
+                                mintegral_ok_placeholder.error("❌ 복사할 Creative Set을 선택해주세요.")
+                            elif not mintegral_settings.get("target_offer_ids"):
+                                mintegral_ok_placeholder.error("❌ 복사 대상 Offer를 선택해주세요.")
+                            else:
+                                result = mintegral_module.upload_to_mintegral(
+                                    game=game,
+                                    videos=[],
+                                    settings=mintegral_settings
+                                )
+                                
+                                if result.get("success"):
+                                    mintegral_ok_placeholder.success(f"✅ Creative Set 복사 완료: {result.get('message', '')}")
+                                else:
+                                    mintegral_ok_placeholder.error(f"❌ Creative Set 복사 실패: {result.get('error', 'Unknown error')}")
+                                    
+                                if result.get("errors"):
+                                    st.error("\n".join(result["errors"]))
                     except Exception as e:
                         st.error(str(e) if str(e) else "Mintegral upload failed")
                         devtools.record_exception("Mintegral upload failed", e)
