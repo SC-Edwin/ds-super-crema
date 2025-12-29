@@ -274,7 +274,10 @@ def main():
 
 
     with tab2:
-        st.info("🚧 Comming Soon")  
+        st.markdown('<div id="trend-root">', unsafe_allow_html=True)
+        from modules.creative_performance_trend import main as trend_main
+        trend_main.run()
+        st.markdown('</div>', unsafe_allow_html=True) 
     
 
     with tab3:
