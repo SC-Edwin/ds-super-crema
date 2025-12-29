@@ -12,12 +12,13 @@
 """
 
 from __future__ import annotations
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable
 import logging
 import streamlit as st
 import requests
 import hashlib
 import time
+import os
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -315,6 +316,8 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
     # 세션 상태에 페이지 수 저장
     if f"mintegral_video_pages_{idx}" not in st.session_state:
         st.session_state[f"mintegral_video_pages_{idx}"] = 20  # 기본 10페이지
+    if f"mintegral_image_pages_{idx}" not in st.session_state:
+        st.session_state[f"mintegral_image_pages_{idx}"] = 20  
     if f"mintegral_playable_pages_{idx}" not in st.session_state:
         st.session_state[f"mintegral_playable_pages_{idx}"] = 5  # 기본 5페이지
     
@@ -322,7 +325,47 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
     selected_image_md5s = []
     selected_video_md5s = []
     selected_playable_md5s = []
-    
+
+    # Image creatives (추가)
+    with st.expander("📷 Image Creatives", expanded=False):
+        image_pages = st.session_state[f"mintegral_image_pages_{idx}"]
+        
+        with st.spinner(f"Loading images... ({image_pages}페이지)"):
+            images = get_creatives(
+                creative_type="IMAGE", 
+                game_filter=game_short, 
+                max_pages=image_pages
+            )
+        
+        if images:
+            st.caption(f"📊 총 {len(images)}개 표시 (최대 {image_pages * 200}개 중 필터링)")
+            
+            image_options = {f"{c['creative_name']} ({c['resolution']})": c['creative_md5'] 
+                        for c in images}
+            selected_images = st.multiselect(
+                "Select Images",
+                options=list(image_options.keys()),
+                key=f"mintegral_images_{idx}",
+                help=f"Image 크리에이티브 선택"
+            )
+            selected_image_md5s = [image_options[name] for name in selected_images]
+            
+            # "더 보기" 버튼
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                if st.button("➕ 더 보기 (10페이지)", key=f"load_more_images_{idx}"):
+                    st.session_state[f"mintegral_image_pages_{idx}"] += 10
+                    st.cache_data.clear()
+                    st.rerun()
+            with col2:
+                st.caption(f"💡 원하는 image가 없으면 '더 보기' 클릭")
+        else:
+            st.info(f"'{game_short}' 필터링된 Image가 없습니다")
+            if st.button("🔍 더 많은 페이지 검색 (20페이지)", key=f"search_more_images_{idx}"):
+                st.session_state[f"mintegral_image_pages_{idx}"] += 20
+                st.cache_data.clear()
+                st.rerun()
+        
     # Video creatives
     with st.expander("🎥 Video Creatives", expanded=False):
         video_pages = st.session_state[f"mintegral_video_pages_{idx}"]
@@ -338,7 +381,7 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
             st.caption(f"📊 총 {len(videos)}개 표시 (최대 {video_pages * 200}개 중 필터링)")
             
             video_options = {f"{c['creative_name']} ({c['resolution']})": c['creative_md5'] 
-                           for c in videos}
+                            for c in videos}
             selected_videos = st.multiselect(
                 "Select Videos",
                 options=list(video_options.keys()),
@@ -445,7 +488,140 @@ def _render_copy_creative_set(game: str, idx: int, cur: Dict) -> None:
 # =========================================================
 # Upload Logic
 # =========================================================
+def upload_creative_to_library(file_path: str, creative_type: str = "VIDEO") -> Dict:
+    """
+    Upload a creative file (image/video/playable) to Mintegral library.
+    
+    Args:
+        file_path: Local path to the file
+        creative_type: "VIDEO", "IMAGE", or "PLAYABLE"
+    
+    Returns:
+        Dict with creative_md5 and creative_name
+    """
+    try:
+        headers = _get_auth_headers()
+        # Remove Content-Type from headers for multipart
+        headers_no_content_type = {k: v for k, v in headers.items() if k != "Content-Type"}
+        
+        # Determine endpoint
+        if creative_type == "PLAYABLE":
+            url = f"{MINTEGRAL_STORAGE_URL}/playable/upload"
+        else:
+            url = f"{MINTEGRAL_STORAGE_URL}/creatives/upload"
+        
+        # Open and upload file
+        with open(file_path, 'rb') as f:
+            files = {'file': (os.path.basename(file_path), f)}
+            response = requests.post(
+                url,
+                headers=headers_no_content_type,
+                files=files,
+                timeout=300  # 5 minutes for large files
+            )
+        
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get("code") != 200:
+            return {
+                "success": False,
+                "error": data.get("msg", "Upload failed")
+            }
+        
+        return {
+            "success": True,
+            "creative_md5": data["data"]["creative_md5"],
+            "creative_name": data["data"]["creative_name"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to upload creative: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
+def batch_upload_from_drive(
+    folder_url: str,
+    game: str,
+    creative_type: str = "VIDEO",
+    on_progress: Optional[Callable] = None
+) -> Dict:
+    """
+    Import videos from Google Drive and upload to Mintegral library.
+    
+    Args:
+        folder_url: Google Drive folder URL
+        game: Game name
+        creative_type: "VIDEO", "IMAGE", or "PLAYABLE"
+        on_progress: Callback function(current, total, filename, status)
+    
+    Returns:
+        Dict with success count, failed count, and errors
+    """
+    from modules.upload_automation import drive_import
+    
+    try:
+        # Download from Drive
+        st.info("📥 Downloading files from Google Drive...")
+        files = drive_import.import_drive_folder_videos_parallel(
+            folder_url,
+            max_workers=4
+        )
+        
+        if not files:
+            return {
+                "success": False,
+                "error": "No files found in Drive folder"
+            }
+        
+        # Upload to Mintegral
+        total = len(files)
+        success_count = 0
+        failed_count = 0
+        errors = []
+        
+        for idx, file_info in enumerate(files, 1):
+            filename = file_info["name"]
+            filepath = file_info["path"]
+            
+            if on_progress:
+                on_progress(idx, total, filename, "uploading")
+            
+            result = upload_creative_to_library(filepath, creative_type)
+            
+            if result.get("success"):
+                success_count += 1
+                if on_progress:
+                    on_progress(idx, total, filename, "success")
+            else:
+                failed_count += 1
+                error_msg = result.get("error", "Unknown error")
+                errors.append(f"{filename}: {error_msg}")
+                if on_progress:
+                    on_progress(idx, total, filename, f"failed: {error_msg}")
+            
+            # Clean up temp file
+            try:
+                os.unlink(filepath)
+            except:
+                pass
+        
+        return {
+            "success": True,
+            "total": total,
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "errors": errors
+        }
+        
+    except Exception as e:
+        logger.error(f"Batch upload failed: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
 def upload_to_mintegral(game: str, videos: List[Dict], settings: Dict) -> Dict:
     """
     Upload videos to Mintegral.

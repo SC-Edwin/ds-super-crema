@@ -499,6 +499,123 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     elif platform == "Mintegral":
                         mintegral_ok_placeholder = st.empty()
                         st.write("")
+                        with st.expander("📤 라이브러리에 업로드하기", expanded=False):
+                            st.markdown("""
+                            Google Drive 또는 로컬 파일을 Mintegral 라이브러리로 업로드합니다.
+                            업로드 후 Creative Set에서 선택 가능합니다.
+                            """)
+                            
+                            upload_type = st.selectbox(
+                                "Upload Type",
+                                ["Video", "Image", "Playable"],
+                                key=f"mintegral_library_type_{game}"
+                            )
+                            
+                            # Drive URL 입력
+                            lib_drive_url = st.text_input(
+                                "Google Drive Folder URL (Optional)",
+                                placeholder="https://drive.google.com/drive/folders/...",
+                                key=f"mintegral_lib_drive_{game}"
+                            )
+                            
+                            # 로컬 파일 업로드
+                            lib_local_files = st.file_uploader(
+                                "또는 로컬 파일 선택",
+                                type=["mp4", "mov", "png", "jpg", "jpeg", "zip", "html"],
+                                accept_multiple_files=True,
+                                key=f"mintegral_lib_local_{game}"
+                            )
+                            
+                            if st.button("🚀 라이브러리에 업로드", key=f"mintegral_lib_upload_{game}"):
+                                files_to_upload = []
+                                
+                                # Drive 파일 처리
+                                if lib_drive_url:
+                                    try:
+                                        with st.spinner("📥 Downloading from Drive..."):
+                                            from modules.upload_automation import drive_import
+                                            files_to_upload = drive_import.import_drive_folder_files_parallel(
+                                                lib_drive_url,
+                                                file_type=upload_type.upper(),
+                                                max_workers=4
+                                            )
+                                    except Exception as e:
+                                        st.error(f"Drive import failed: {e}")
+                                
+                                # 로컬 파일 처리
+                                if lib_local_files:
+                                    import tempfile
+                                    for uploaded_file in lib_local_files:
+                                        suffix = pathlib.Path(uploaded_file.name).suffix
+                                        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                                            tmp.write(uploaded_file.getvalue())
+                                            files_to_upload.append({
+                                                "name": uploaded_file.name,
+                                                "path": tmp.name
+                                            })
+                                
+                                # 업로드 실행
+                                if files_to_upload:
+                                    try:
+                                        from modules.upload_automation import mintegral as mintegral_module
+                                        
+                                        progress_bar = st.progress(0)
+                                        status_text = st.empty()
+                                        
+                                        total = len(files_to_upload)
+                                        success_count = 0
+                                        failed_count = 0
+                                        errors = []
+                                        
+                                        for idx, file_info in enumerate(files_to_upload, 1):
+                                            filename = file_info["name"]
+                                            filepath = file_info["path"]
+                                            
+                                            status_text.info(f"⬆️ Uploading {filename} ({idx}/{total})...")
+                                            progress_bar.progress(idx / total)
+                                            
+                                            result = mintegral_module.upload_creative_to_library(
+                                                filepath, 
+                                                upload_type.upper()
+                                            )
+                                            
+                                            if result.get("success"):
+                                                success_count += 1
+                                                status_text.success(f"✅ {filename} uploaded!")
+                                            else:
+                                                failed_count += 1
+                                                error_msg = result.get("error", "Unknown error")
+                                                errors.append(f"{filename}: {error_msg}")
+                                                status_text.error(f"❌ {filename}: {error_msg}")
+                                            
+                                            # Clean up temp file
+                                            try:
+                                                os.unlink(filepath)
+                                            except:
+                                                pass
+                                        
+                                        # Final summary
+                                        st.success(f"""
+                                        ✅ Upload Complete!
+                                        - Total: {total}
+                                        - Success: {success_count}
+                                        - Failed: {failed_count}
+                                        """)
+                                        
+                                        if errors:
+                                            with st.expander("⚠️ Errors"):
+                                                for err in errors:
+                                                    st.error(err)
+                                        
+                                        # Clear cache
+                                        st.cache_data.clear()
+                                        
+                                    except Exception as e:
+                                        st.error(f"Upload failed: {e}")
+                                else:
+                                    st.warning("Please provide Drive URL or select local files")
+                        
+                        st.write("")
                         cont_mintegral = st.button("Mintegral Creative 업로드하기", key=f"mintegral_upload_{game}", use_container_width=True)
                         if cont_mintegral:
                             st.query_params["tab"] = game
