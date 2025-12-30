@@ -1092,43 +1092,83 @@ def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
             "errors": [str(e)]
         }
     
-    # Get ad_outputs from existing creative sets in the offer
+    # Build ad_outputs dynamically based on selected creatives
     ad_outputs = []
-    try:
-        headers_for_fetch = _get_auth_headers()
-        params = {"offer_id": offer_id, "page": 1, "limit": 10}
+
+    # Collect available dimensions
+    available_images = {}  # dimension -> count
+    available_videos = {}  # dimension -> count
+    has_playable = False
+
+    for md5 in all_creatives_md5:
+        info = md5_info.get(md5)
+        if not info:
+            continue
         
-        response = requests.get(
-            f"{MINTEGRAL_BASE_URL}/creative_sets",
-            headers=headers_for_fetch,
-            params=params,
-            timeout=15
-        )
-        response.raise_for_status()
-        data_fetch = response.json()
+        if info["type"] == "IMAGE":
+            dim = info["dimension"]
+            available_images[dim] = available_images.get(dim, 0) + 1
+        elif info["type"] == "VIDEO":
+            dim = info["dimension"]
+            available_videos[dim] = available_videos.get(dim, 0) + 1
+        elif info["type"] == "PLAYABLE":
+            has_playable = True
+
+    logger.info(f"📊 Available creatives:")
+    logger.info(f"   - Images: {available_images}")
+    logger.info(f"   - Videos: {available_videos}")
+    logger.info(f"   - Playable: {has_playable}")
+
+    # Ad Output mapping (based on Mintegral documentation)
+    # 111: Native - Image + Icon (any size)
+    # 121: Interstitial - Image (any size)
+    # 122: Interstitial - Image (768x1024 or 1200x627/628)
+    # 131: Banner - Image (320x50 or 640x120)
+    # 132: Banner - Image (768x1024 or 1200x627/628)
+    # 211: Native - Video Portrait (1080x1920)
+    # 212: Native - Video Landscape (1920x1080)
+    # 213: Native - Video Square (1080x1080)
+    # 221: Interstitial - Video (any)
+    # 231: Banner - Video (any)
+    # 311: Playable
+
+    # Auto-generate ad_outputs based on available creatives
+    if available_images:
+        ad_outputs.append(111)  # Native always supported
+        ad_outputs.append(121)  # Interstitial always supported
         
-        if data_fetch.get("code") == 200:
-            creative_sets = data_fetch.get("data", {}).get("list", [])
-            if creative_sets:
-                # Use ad_outputs from first creative set (guaranteed to work)
-                ad_outputs = creative_sets[0].get("ad_outputs", [])
-                logger.info(f"✅ Using ad_outputs from existing creative set: {ad_outputs}")
+        # Banner 131 (320x50 or 640x120)
+        if "320x50" in available_images or "640x120" in available_images:
+            ad_outputs.append(131)
         
-        if not ad_outputs:
-            logger.error("❌ No existing creative sets found in offer. Cannot determine valid ad_outputs.")
-            return {
-                "success": False,
-                "error": "이 Offer에 기존 Creative Set이 없습니다. 먼저 대시보드에서 하나 생성해주세요.",
-                "errors": ["No existing creative sets to copy ad_outputs from"]
-            }
-            
-    except Exception as e:
-        logger.error(f"Failed to fetch ad_outputs: {e}")
+        # Banner 132 and Interstitial 122 (768x1024 or 1200x627/628)
+        if any(dim in available_images for dim in ["768x1024", "1200x627", "1200x628"]):
+            ad_outputs.append(122)
+            ad_outputs.append(132)
+
+    if available_videos:
+        ad_outputs.append(221)  # Interstitial video
+        ad_outputs.append(231)  # Banner video
+        
+        # Native video based on dimensions
+        if "1080x1920" in available_videos:
+            ad_outputs.append(211)
+        if "1920x1080" in available_videos:
+            ad_outputs.append(212)
+        if "1080x1080" in available_videos:
+            ad_outputs.append(213)
+
+    if has_playable:
+        ad_outputs.append(311)
+
+    if not ad_outputs:
         return {
             "success": False,
-            "error": f"Ad Outputs 조회 실패: {str(e)}",
-            "errors": [str(e)]
+            "error": "선택된 Creative로는 ad_output을 생성할 수 없습니다.",
+            "errors": ["No valid ad_outputs can be generated from selected creatives"]
         }
+
+    logger.info(f"✅ Auto-generated ad_outputs: {ad_outputs}")
     
     # API Request
     try:
