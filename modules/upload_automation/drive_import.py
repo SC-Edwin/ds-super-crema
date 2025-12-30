@@ -17,6 +17,11 @@ from google.oauth2.service_account import Credentials
 #export GOOGLE_APPLICATION_CREDENTIALS="/Users/eader/Downloads/roas-test-456808-321ce7426bfb.json"
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
+# File type extensions
+VIDEO_EXTS = {".mp4", ".mpeg4", ".mov", ".mkv"}
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+PLAYABLE_EXTS = {".zip", ".html"}
+
 def get_drive_service_from_secrets():
     """
     Create an authenticated Drive API client using service-account credentials.
@@ -113,14 +118,34 @@ def extract_drive_folder_id(url_or_id: str) -> str:
         return s.split("/folders/")[1].split("?")[0].split("/")[0]
     return s  # assume already an ID
 
-VIDEO_EXTS = {".mp4", ".mpeg4", ".mov", ".mkv"}  # add more if you want
-
-def list_drive_videos_in_folder(service, folder_id: str) -> List[Dict]:
+def list_drive_files_in_folder(service, folder_id: str, file_type: str = "VIDEO") -> List[Dict]:
     """
     List *all* files in a folder (with pagination, supports shared drives),
-    keep items that are (mimeType starts with 'video/') or have a known video extension.
-    Returns [{'id': ..., 'name': ...}, ...]
+    keep items that match the file_type.
+    
+    Args:
+        service: Drive API service
+        folder_id: Drive folder ID
+        file_type: "VIDEO", "IMAGE", or "PLAYABLE"
+    
+    Returns:
+        [{'id': ..., 'name': ...}, ...]
     """
+    # Determine which extensions to look for
+    if file_type == "VIDEO":
+        allowed_exts = VIDEO_EXTS
+        mime_prefix = "video/"
+    elif file_type == "IMAGE":
+        allowed_exts = IMAGE_EXTS
+        mime_prefix = "image/"
+    elif file_type == "PLAYABLE":
+        allowed_exts = PLAYABLE_EXTS
+        mime_prefix = None  # No specific mime type
+    else:
+        # Default to VIDEO
+        allowed_exts = VIDEO_EXTS
+        mime_prefix = "video/"
+    
     items: List[Dict] = []
     page_token = None
     q = f"'{folder_id}' in parents and trashed=false"
@@ -141,12 +166,30 @@ def list_drive_videos_in_folder(service, folder_id: str) -> List[Dict]:
         for f in resp.get("files", []):
             name = f.get("name") or ""
             ext = pathlib.Path(name).suffix.lower()
-            if (f.get("mimeType","").startswith("video/")) or (ext in VIDEO_EXTS):
+            mime_type = f.get("mimeType", "")
+            
+            # Check if file matches type
+            is_match = False
+            if mime_prefix and mime_type.startswith(mime_prefix):
+                is_match = True
+            elif ext in allowed_exts:
+                is_match = True
+            
+            if is_match:
                 items.append({"id": f["id"], "name": name})
+        
         page_token = resp.get("nextPageToken")
         if not page_token:
             break
     return items
+
+
+def list_drive_videos_in_folder(service, folder_id: str) -> List[Dict]:
+    """
+    List *all* video files in a folder (backward compatibility).
+    Returns [{'id': ..., 'name': ...}, ...]
+    """
+    return list_drive_files_in_folder(service, folder_id, file_type="VIDEO")
 
 
 def download_drive_file_to_tmp(service, file_id: str, filename_hint: Optional[str] = None, *, max_retries: int = 5) -> Dict:
@@ -157,16 +200,12 @@ def download_drive_file_to_tmp(service, file_id: str, filename_hint: Optional[st
     # We first query the metadata to get the name (cheaper than guessing)
     try:
         meta = service.files().get(fileId=file_id, fields="name", supportsAllDrives=True).execute()
-        name = meta.get("name") or filename_hint or f"{file_id}.mp4"
+        name = meta.get("name") or filename_hint or f"{file_id}.tmp"
     except Exception:
-        name = filename_hint or f"{file_id}.mp4"
+        name = filename_hint or f"{file_id}.tmp"
 
-    # Ensure extension
-    ext = pathlib.Path(name).suffix.lower()
-    if ext == "" or ext not in VIDEO_EXTS:
-        name = f"{name}.mp4"
-
-    suffix = pathlib.Path(name).suffix or ".mp4"
+    # Determine suffix
+    suffix = pathlib.Path(name).suffix or ".tmp"
 
     # Request media
     request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
@@ -200,20 +239,28 @@ def download_drive_file_to_tmp(service, file_id: str, filename_hint: Optional[st
 
     return {"name": pathlib.Path(name).name, "path": path}
 
-def import_drive_folder_videos_parallel(
+def import_drive_folder_files_parallel(
     folder_url_or_id: str,
+    file_type: str = "VIDEO",
     max_workers: int = 6,
     on_progress: Optional[Callable[[int, int, str, Optional[str]], None]] = None,
 ) -> List[Dict]:
     """
-    List & download all videos in parallel.
-    Calls on_progress(done, total, file_name, error_message_or_None) after each file finishes.
-    Returns successfully downloaded [{'name','path'}, ...].
+    List & download all files of specified type in parallel.
+    
+    Args:
+        folder_url_or_id: Drive folder URL or ID
+        file_type: "VIDEO", "IMAGE", or "PLAYABLE"
+        max_workers: Number of parallel download workers
+        on_progress: Callback(done, total, file_name, error_message_or_None)
+    
+    Returns:
+        Successfully downloaded [{'name','path'}, ...]
     """
     # Enumerate first with a single service (cheap calls)
     svc_list = get_drive_service_from_secrets()
     folder_id = extract_drive_folder_id(folder_url_or_id)
-    files = list_drive_videos_in_folder(svc_list, folder_id)
+    files = list_drive_files_in_folder(svc_list, folder_id, file_type=file_type)
     total = len(files)
     done = 0
     results: List[Dict] = []
@@ -250,3 +297,20 @@ def import_drive_folder_videos_parallel(
         logging.warning("Some Drive downloads failed: %s", errors)
 
     return results
+
+
+def import_drive_folder_videos_parallel(
+    folder_url_or_id: str,
+    max_workers: int = 6,
+    on_progress: Optional[Callable[[int, int, str, Optional[str]], None]] = None,
+) -> List[Dict]:
+    """
+    Backward compatibility wrapper for video import.
+    Calls import_drive_folder_files_parallel with file_type="VIDEO".
+    """
+    return import_drive_folder_files_parallel(
+        folder_url_or_id,
+        file_type="VIDEO",
+        max_workers=max_workers,
+        on_progress=on_progress
+    )

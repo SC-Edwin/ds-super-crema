@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 APPLOVIN_BASE_URL = "https://api.ads.axon.ai/manage/v1"
-
+  
 def _get_api_config():
     """Get Applovin API configuration from secrets."""
     return {
@@ -757,7 +757,33 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
     cur = get_applovin_settings(game) or {}
     
     with container:
-        st.markdown(f"#### {game} Applovin Settings")
+        # 제목과 Reload 버튼을 같은 줄에 배치
+        title_col, reload_col = st.columns([3, 1])
+        with title_col:
+            st.markdown(f"#### {game} Applovin Settings")
+        with reload_col:
+            if st.button("🔄 Reload", key=f"applovin_reload_{idx}", use_container_width=True):
+                with st.spinner("Reloading campaigns and assets..."):
+                    # Lazy loading: 버튼으로 명시적 로드
+                    campaigns_key = f"applovin_campaigns_{game}"
+                    assets_key = f"applovin_assets_{game}"
+                    
+                    # Fetch campaigns
+                    campaigns = get_campaigns(game=game)
+                    st.session_state[campaigns_key] = campaigns
+                    
+                    if campaigns:
+                        st.success(f"✅ Reloaded {len(campaigns)} campaigns")
+                    else:
+                        st.warning("⚠️ No campaigns found")
+                    
+                    # Fetch assets (Create 모드에서 필요)
+                    assets = get_assets(game=game)
+                    st.session_state[assets_key] = assets
+                    st.success(f"✅ Reloaded {len(assets['videos'])} videos, {len(assets['playables'])} playables")
+                    
+                    # 강제 리렌더링
+                    st.rerun()
         
         # Lazy loading: 버튼으로 명시적 로드
         campaigns_key = f"applovin_campaigns_{game}"
@@ -1054,26 +1080,4 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
                 "custom_name": custom_name.strip() if custom_name else "",
                 "generated_name": creative_name,
             }
-        
-        st.markdown("---")
-        
-        # Upload buttons (양옆 배치)
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button(
-                "⏸️ Save as Paused",
-                key=f"applovin_upload_paused_{idx}",
-                use_container_width=True,
-                type="secondary"
-            ):
-                _upload_creative_set(game, idx, status="PAUSED")
-        
-        with col2:
-            if st.button(
-                "▶️ Save as Live",
-                key=f"applovin_upload_live_{idx}",
-                use_container_width=True,
-                type="primary"
-            ):
-                _upload_creative_set(game, idx, status="LIVE")
+    

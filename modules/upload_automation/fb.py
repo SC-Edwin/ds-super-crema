@@ -221,9 +221,9 @@ def fetch_active_adsets_cached(account_id: str, campaign_id: str) -> list[dict]:
         return []
 
 @st.cache_data(ttl=600, show_spinner=False)
-def fetch_latest_ad_creative_defaults(adset_id: str) -> dict:
+def fetch_latest_ad_creative_defaults(adset_id: str, force_refresh: float = 0.0) -> dict:
     """
-    Fetches the highest numbered ad and extracts Text, Headline, CTA, AND Store URL.
+    _force_refresh는 캐시를 무시하기 위한 더미 파라미터
     """
     try:
         adset = AdSet(adset_id)
@@ -390,10 +390,9 @@ def fetch_ads_in_adset(adset_id: str) -> list[dict]:
         logger.error(f"Error fetching ads: {e}")
         return []
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_ad_creative_by_ad_id(ad_id: str) -> dict:
+def fetch_ad_creative_by_ad_id(ad_id: str, force_refresh: float = 0.0) -> dict:
     """
-    Fetch creative data for a specific ad ID.
-    Returns same format as fetch_latest_ad_creative_defaults.
+    _force_refresh는 캐시를 무시하기 위한 더미 파라미터
     """
     try:
         ad = Ad(ad_id)
@@ -571,11 +570,27 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         )
 
         st.session_state[template_key] = selected_template
+
+
         prev_template_key = f"prev_template_{idx}"
+        tpl_ver_key = f"tpl_ver_{idx}"
+
+        # init
+        if tpl_ver_key not in st.session_state:
+            st.session_state[tpl_ver_key] = 0
+
         if st.session_state.get(prev_template_key) != selected_template:
-            # Template changed - force reset
+            # Template changed -> bump version so widget keys change (forces UI refresh)
+            st.session_state[tpl_ver_key] += 1
+
+            # Reset stored lists (so they re-seed from new defaults)
             st.session_state.pop(f"primary_texts_{idx}", None)
             st.session_state.pop(f"headlines_{idx}", None)
+
+            # (optional legacy) clear any signatures if you still use them
+            st.session_state.pop(f"headline_template_sig_{idx}", None)
+            st.session_state.pop(f"primary_text_template_sig_{idx}", None)
+
             st.session_state[prev_template_key] = selected_template
 
         # ====================================================================
@@ -611,7 +626,9 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             
             if not st.session_state.get(defaults_flag, False):
                 with st.spinner("Loading template from highest ad..."):
-                    defaults = fetch_latest_ad_creative_defaults(sel_a_id)
+                    # ✅ 템플릿이 바뀌면 캐시 무시
+                    import time
+                    defaults = fetch_latest_ad_creative_defaults(sel_a_id, force_refresh=time.time())
                     st.session_state[f"mimic_data_auto_{idx}"] = defaults
                 st.session_state[defaults_flag] = True
             else:
@@ -627,7 +644,9 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
                 
                 if not st.session_state.get(defaults_flag, False):
                     with st.spinner(f"Loading template from {ad_name}..."):
-                        defaults = fetch_ad_creative_by_ad_id(selected_ad['id'])
+                        # ✅ 템플릿이 바뀌면 캐시 무시
+                        import time
+                        defaults = fetch_ad_creative_by_ad_id(selected_ad['id'], force_refresh=time.time())
                         st.session_state[f"mimic_data_{selected_ad['id']}_{idx}"] = defaults
                         st.session_state[defaults_flag] = True
                 else:
@@ -673,7 +692,6 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
                 #             st.json(spec)
                 #         else:
                 #             st.code(str(spec), language='text')
-
         # 2. Ad Setup
         st.caption("Ad Setup")
         
@@ -740,33 +758,33 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
 
         # ✅ Primary Text - 태그 형태로 개별 관리
         st.markdown("**Primary Text**")
-        
-        # Initialize session state for primary texts
+
         primary_texts_key = f"primary_texts_{idx}"
-        if primary_texts_key not in st.session_state:
-            # Load from defaults or existing settings
+
+        # 템플릿이 바뀌었는지 확인
+        current_template = st.session_state.get(f"template_source_{idx}", "")
+        stored_template = st.session_state.get(f"loaded_template_for_pt_{idx}", "")
+
+        # 조건: 템플릿이 바뀌었거나 Session State가 비어있으면 초기화
+        if stored_template != current_template or primary_texts_key not in st.session_state:
             if p_texts:
                 st.session_state[primary_texts_key] = p_texts.copy()
-            elif defaults:
-                # Try to split existing text
-                existing = defaults.get("primary_texts", [])
-                if existing:
-                    st.session_state[primary_texts_key] = existing.copy()
-                else:
-                    st.session_state[primary_texts_key] = [""]
             else:
                 st.session_state[primary_texts_key] = [""]
-        
+            st.session_state[f"loaded_template_for_pt_{idx}"] = current_template
+
         primary_texts_list = st.session_state[primary_texts_key]
-        
+                
         # Display each primary text as editable tag
         for i, text in enumerate(primary_texts_list):
             col_text, col_del = st.columns([10, 1])
             with col_text:
+                tpl_ver = st.session_state.get(f"tpl_ver_{idx}", 0)
+
                 updated_text = st.text_input(
                     f"Primary Text {i+1}",
                     value=text,
-                    key=f"pt_{idx}_{i}",
+                    key=f"pt_{idx}_{tpl_ver}_{i}",
                     label_visibility="collapsed",
                     placeholder="Tell people what your ad is about" if not text else None
                 )
@@ -778,7 +796,8 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
                     st.rerun()
         
         # Add new primary text button
-        if st.button("➕ Add Primary Text", key=f"pt_add_{idx}"):
+        tpl_ver = st.session_state.get(f"tpl_ver_{idx}", 0)
+        if st.button("➕ Add Primary Text", key=f"pt_add_{idx}_{tpl_ver}"):
             primary_texts_list.append("")
             st.session_state[primary_texts_key] = primary_texts_list.copy()
             st.rerun()
@@ -787,42 +806,35 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         primary_text = "\n\n".join([t.strip() for t in primary_texts_list if t.strip()])
 
         # ✅ Headlines - 태그 형태로 개별 관리
+        # ✅ Headlines
         st.markdown("**Headlines**")
-        
+
         headlines_key = f"headlines_{idx}"
 
-        # 템플릿이 바뀌었을 때만 defaults로 리셋 (Add/Del/수정 중에는 덮어쓰지 않음)
-        template_sig_key = f"headline_template_sig_{idx}"
-        current_template_sig = (
-            st.session_state.get(f"template_source_{idx}", ""),
-            tuple(h_lines or []),
-            defaults.get("source_ad_name") if defaults else None,
-        )
+        # 템플릿이 바뀌었는지 확인
+        current_template = st.session_state.get(f"template_source_{idx}", "")
+        stored_template = st.session_state.get(f"loaded_template_for_hl_{idx}", "")
 
-        if st.session_state.get(template_sig_key) != current_template_sig:
-            # 템플릿 변경 -> 템플릿 헤드라인으로 초기화
+        # 조건: 템플릿이 바뀌었거나 Session State가 비어있으면 초기화
+        if stored_template != current_template or headlines_key not in st.session_state:
             if h_lines:
                 st.session_state[headlines_key] = h_lines.copy()
-            elif defaults and defaults.get("headlines"):
-                st.session_state[headlines_key] = defaults["headlines"].copy()
             else:
                 st.session_state[headlines_key] = [""]
-            st.session_state[template_sig_key] = current_template_sig
-        else:
-            # 일반 리런에서는 기존값 유지
-            if headlines_key not in st.session_state:
-                st.session_state[headlines_key] = [""]
-        
+            st.session_state[f"loaded_template_for_hl_{idx}"] = current_template
+
         headlines_list = st.session_state[headlines_key]
         
         # Display each headline as editable tag
         for i, headline_text in enumerate(headlines_list):
             col_head, col_del = st.columns([10, 1])
             with col_head:
+                tpl_ver = st.session_state.get(f"tpl_ver_{idx}", 0)
+
                 updated_headline = st.text_input(
                     f"Headline {i+1}",
                     value=headline_text,
-                    key=f"hl_{idx}_{i}",
+                    key=f"hl_{idx}_{tpl_ver}_{i}",
                     label_visibility="collapsed",
                     placeholder="Write a short headline" if not headline_text else None
                 )
@@ -834,7 +846,8 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
                     st.rerun()
         
         # Add new headline button
-        if st.button("➕ Add Headline", key=f"hl_add_{idx}"):
+        tpl_ver = st.session_state.get(f"tpl_ver_{idx}", 0)
+        if st.button("➕ Add Headline", key=f"hl_add_{idx}_{tpl_ver}"):
             st.session_state[headlines_key].append("")
             st.rerun()
         
