@@ -965,7 +965,24 @@ def upload_to_mintegral(game: str, videos: List[Dict], settings: Dict) -> Dict:
 
 def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
     """Upload creative set to Mintegral."""
-    
+    try:
+        config = _get_api_config()
+        logger.info(f"🔑 API Config check:")
+        logger.info(f"   - access_key exists: {bool(config.get('access_key'))}")
+        logger.info(f"   - api_key exists: {bool(config.get('api_key'))}")
+        logger.info(f"   - access_key length: {len(config.get('access_key', ''))}")
+    except Exception as e:
+        logger.error(f"❌ Failed to load API config: {e}")
+        return {
+            "success": False,
+            "error": f"API 설정 로드 실패: {str(e)}",
+            "errors": [str(e)]
+        }
+    try:
+        test_response = requests.get("https://ss-api.mintegral.com", timeout=5)
+        logger.info(f"Network test: {test_response.status_code}")
+    except Exception as e:
+        logger.error(f"Cannot reach Mintegral API: {e}")
     # Validate required settings
     offer_id = settings.get("selected_offer_id")
     if not offer_id:
