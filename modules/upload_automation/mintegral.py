@@ -188,6 +188,7 @@ def get_offers(game_filter: Optional[List[str]] = None, max_pages: int = 3) -> L
     Args:
         game_filter: List of game short names to filter offers (OR condition)
         max_pages: Maximum number of pages to fetch (default 3 = 600 items)
+        only_running: If True, only return offers with status="RUNNING" (default True)
     
     Returns:
         List of offer dictionaries
@@ -245,7 +246,13 @@ def get_offers(game_filter: Optional[List[str]] = None, max_pages: int = 3) -> L
                 if any(gf.lower() in o.get("offer_name", "").lower() for gf in game_filter)
             ]
         
-        logger.info(f"Fetched {len(all_offers)} offers (game: {game_filter})")
+        # ✅ Running 상태 필터링
+        if only_running:
+            before_count = len(all_offers)
+            all_offers = [o for o in all_offers if o.get("status") == "RUNNING"]
+            logger.info(f"Filtered to RUNNING offers: {len(all_offers)}/{before_count}")
+        
+        logger.info(f"Fetched {len(all_offers)} offers (game: {game_filter}, running_only: {only_running})")
         return all_offers
         
     except Exception as e:
@@ -480,7 +487,7 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
     # Apply in Offer dropdown
     st.markdown("**Apply in Offer**")
     with st.spinner("Loading offers..."):
-        offers = get_offers(game_filter=game_short, max_pages=5)
+        offers = get_offers(game_filter=game_short, max_pages=5, only_running=True)
 
     selected_offer_id = None
     selected_offer_name = None
@@ -590,7 +597,7 @@ def _render_copy_creative_set(game: str, idx: int, cur: Dict) -> None:
         with st.spinner("Loading creative sets..."):
             try:
                 # Get all offers for this game
-                offers = get_offers(game_filter=game_short, max_pages=5)
+                offers = get_offers(game_filter=game_short, max_pages=5, only_running=True)
                 
                 if not offers:
                     st.warning(f"'{game_short}' 필터링된 Offer가 없습니다")
