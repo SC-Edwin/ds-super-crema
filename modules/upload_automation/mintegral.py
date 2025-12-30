@@ -181,7 +181,7 @@ def get_creatives(creative_type: Optional[str] = None, game_filter: Optional[Lis
         return []
 
 @st.cache_data(ttl=300)
-def get_offers(game_filter: Optional[List[str]] = None, max_pages: int = 3) -> List[Dict]:
+def get_offers(game_filter: Optional[List[str]] = None, max_pages: int = 3, only_running: bool = True) -> List[Dict]:
     """
     Fetch offers from Mintegral API with parallel pagination.
     
