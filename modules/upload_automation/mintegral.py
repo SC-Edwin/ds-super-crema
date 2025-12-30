@@ -965,6 +965,8 @@ def upload_to_mintegral(game: str, videos: List[Dict], settings: Dict) -> Dict:
 
 def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
     """Upload creative set to Mintegral."""
+    
+    # Step 1: API Config 체크
     try:
         config = _get_api_config()
         logger.info(f"🔑 API Config check:")
@@ -972,11 +974,24 @@ def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
         logger.info(f"   - api_key exists: {bool(config.get('api_key'))}")
         logger.info(f"   - access_key length: {len(config.get('access_key', ''))}")
     except Exception as e:
-        logger.error(f"❌ Failed to load API config: {e}")
+        logger.error(f"❌ Failed to load API config: {e}", exc_info=True)
         return {
             "success": False,
-            "error": f"API 설정 로드 실패: {str(e)}",
+            "error": f"❌ API 설정 로드 실패: {str(e)}",
             "errors": [str(e)]
+        }
+    
+    # Step 2: 네트워크 연결 테스트
+    try:
+        logger.info("🌐 Testing network connection to Mintegral API...")
+        test_response = requests.get("https://ss-api.mintegral.com", timeout=5)
+        logger.info(f"✅ Network test OK: {test_response.status_code}")
+    except Exception as e:
+        logger.error(f"❌ Cannot reach Mintegral API: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"❌ Mintegral API 접속 실패: {str(e)}",
+            "errors": [f"Network error: {str(e)}"]
         }
     try:
         test_response = requests.get("https://ss-api.mintegral.com", timeout=5)
@@ -1165,11 +1180,25 @@ def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
             "total_creatives": len(creatives_payload)
         }
         
-    except requests.exceptions.RequestException as e:
-        logger.error(f"API request failed: {e}", exc_info=True)
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"❌ Connection Error: {e}", exc_info=True)
         return {
             "success": False,
-            "error": f"API 요청 실패: {str(e)}",
+            "error": f"❌ API 연결 실패 (네트워크 차단 가능성): {str(e)}",
+            "errors": [str(e)]
+        }
+    except requests.exceptions.Timeout as e:
+        logger.error(f"❌ Timeout: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"❌ API 타임아웃 (30초 초과): {str(e)}",
+            "errors": [str(e)]
+        }
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Request Error: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"❌ API 요청 실패: {str(e)}",
             "errors": [str(e)]
         }
     except Exception as e:
