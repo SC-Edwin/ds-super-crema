@@ -1011,17 +1011,31 @@ def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
     if not creative_set_name:
         creative_set_name = _get_default_creative_set_name(game)
     
-     # Collect all selected creatives (Images, Videos, Playables)
+    # Collect all selected creatives (Images, Videos, Playables)
     all_creatives_md5 = []
     all_creatives_md5.extend(settings.get("selected_images", []))
     all_creatives_md5.extend(settings.get("selected_videos", []))
     all_creatives_md5.extend(settings.get("selected_playables", []))
 
-    # Add Product Icon if provided (already searched and selected in UI)
+    # ✅ 중복 제거 (순서 유지)
+    seen = set()
+    unique_md5 = []
+    for md5 in all_creatives_md5:
+        if md5 not in seen:
+            seen.add(md5)
+            unique_md5.append(md5)
+    all_creatives_md5 = unique_md5
+
+    # Add Product Icon if provided (and not duplicate)
     product_icon_md5 = settings.get("product_icon_md5")
     if product_icon_md5:
-        all_creatives_md5.insert(0, product_icon_md5)  # Add at beginning
-        logger.info(f"Product icon added to creative set: {product_icon_md5}")
+        if product_icon_md5 not in seen:
+            all_creatives_md5.insert(0, product_icon_md5)
+            logger.info(f"Product icon added to creative set: {product_icon_md5}")
+        else:
+            logger.info(f"Product icon already selected, skipping duplicate")
+
+    logger.info(f"📊 Total unique creatives: {len(all_creatives_md5)}")
 
     if not all_creatives_md5:
         return {
