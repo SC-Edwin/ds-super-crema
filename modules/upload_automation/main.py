@@ -1070,19 +1070,29 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                     mintegral_settings.get("product_icon_md5")):
                                 mintegral_ok_placeholder.error("❌ 최소 1개 이상의 Creative를 선택해주세요.")
                             else:
-                                result = mintegral_module.upload_to_mintegral(
-                                    game=game,
-                                    videos=[],
-                                    settings=mintegral_settings
-                                )
+                                # ✅ 상세 에러 표시
+                                with st.spinner("⏳ Uploading to Mintegral..."):
+                                    result = mintegral_module.upload_to_mintegral(
+                                        game=game,
+                                        videos=[],
+                                        settings=mintegral_settings
+                                    )
                                 
                                 if result.get("success"):
-                                    mintegral_ok_placeholder.success(f"✅ Mintegral 업로드 완료: {result.get('message', '')}")
+                                    mintegral_ok_placeholder.success(f"✅ {result.get('message', 'Upload complete')}")
                                 else:
-                                    mintegral_ok_placeholder.error(f"❌ Mintegral 업로드 실패: {result.get('error', 'Unknown error')}")
+                                    # ✅ 에러 메시지 상세 표시
+                                    error_msg = result.get('error', 'Unknown error')
+                                    mintegral_ok_placeholder.error(f"❌ {error_msg}")
                                     
-                                if result.get("errors"):
-                                    st.error("\n".join(result["errors"]))
+                                    # ✅ errors 리스트도 표시
+                                    if result.get("errors"):
+                                        with st.expander("🔍 상세 에러 로그", expanded=True):
+                                            for err in result["errors"]:
+                                                st.error(f"• {err}")
+                                    
+                                    # ✅ 로그 파일 확인 안내
+                                    st.info("💡 더 자세한 로그는 Streamlit Cloud → Logs 탭에서 확인하세요")
                         
                         elif mode == "copy":
                             # Copy mode validation
@@ -1091,19 +1101,25 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             elif not mintegral_settings.get("target_offer_ids"):
                                 mintegral_ok_placeholder.error("❌ 복사 대상 Offer를 선택해주세요.")
                             else:
-                                result = mintegral_module.upload_to_mintegral(
-                                    game=game,
-                                    videos=[],
-                                    settings=mintegral_settings
-                                )
+                                with st.spinner("⏳ Copying Creative Sets..."):
+                                    result = mintegral_module.upload_to_mintegral(
+                                        game=game,
+                                        videos=[],
+                                        settings=mintegral_settings
+                                    )
                                 
                                 if result.get("success"):
-                                    mintegral_ok_placeholder.success(f"✅ Creative Set 복사 완료: {result.get('message', '')}")
+                                    mintegral_ok_placeholder.success(f"✅ {result.get('message', 'Copy complete')}")
                                 else:
-                                    mintegral_ok_placeholder.error(f"❌ Creative Set 복사 실패: {result.get('error', 'Unknown error')}")
+                                    error_msg = result.get('error', 'Unknown error')
+                                    mintegral_ok_placeholder.error(f"❌ {error_msg}")
                                     
-                                if result.get("errors"):
-                                    st.error("\n".join(result["errors"]))
+                                    if result.get("errors"):
+                                        with st.expander("🔍 상세 에러 로그", expanded=True):
+                                            for err in result["errors"]:
+                                                st.error(f"• {err}")
+                                    
+                                    st.info("💡 더 자세한 로그는 Streamlit Cloud → Logs 탭에서 확인하세요")
                     except Exception as e:
                         st.error(str(e) if str(e) else "Mintegral upload failed")
                         devtools.record_exception("Mintegral upload failed", e)
