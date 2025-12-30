@@ -53,7 +53,8 @@ def load_creative_trend_data(start_date, end_date, selected_app=None, selected_o
     
     # 동적 WHERE 조건 생성
     where_conditions = [
-        f"DATE(day) BETWEEN '{start_date}' AND '{end_date}'"
+        f"DATE(day) BETWEEN '{start_date}' AND '{end_date}'",
+        "campaign NOT LIKE '%test%'"
     ]
     
     if selected_app and selected_app != 'All':
@@ -110,6 +111,8 @@ def get_filter_options():
       locality
     FROM `roas-test-456808.marketing_datascience.creative_performance`
     WHERE DATE(day) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+     AND os != 'rebound'
+     AND app != '0'
     ORDER BY app, os, locality
     """
     
