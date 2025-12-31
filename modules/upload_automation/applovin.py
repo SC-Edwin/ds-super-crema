@@ -803,17 +803,10 @@ def get_playables_used_in_campaign(campaign_id: str) -> set:
     logger.info(f"Found {len(playable_ids)} unique playables used in campaign {campaign_id}")
     return playable_ids
 
-@st.cache_data(ttl=300)  # 5분 캐시
-def get_playable_performance(campaign_id: str) -> Dict[str, float]:
+@st.cache_data(ttl=300)
+def get_playable_performance(campaign_id: str, campaign_name: str = "") -> Dict[str, float]:
     """
     Fetch playable spend data from Asset Reporting API.
-    Gets spend for selected campaign only (last 7 days).
-    
-    Args:
-        campaign_id: Campaign ID
-        
-    Returns:
-        Dict mapping asset_id to spend amount
     """
     try:
         config = _get_api_config()
@@ -823,47 +816,25 @@ def get_playable_performance(campaign_id: str) -> Dict[str, float]:
             logger.warning("Reporting API key not found")
             return {}
         
-        # 먼저 campaign_id 형식 확인 (필터 없이 샘플 조회)
-        test_params = {
-            "api_key": reporting_key,
-            "range": "last_7d",
-            "columns": "asset_id,campaign,campaign_id,cost",
-            "format": "json",
-            "limit": 5
-        }
-        
-        test_response = requests.get(
-            "https://r.applovin.com/assetReport",
-            params=test_params,
-            timeout=60
-        )
-        
-        if test_response.status_code == 200:
-            test_data = test_response.json()
-            test_results = test_data.get("results", [])
-            if test_results:
-                for row in test_results[:3]:
-                    logger.info(f"DEBUG: campaign={row.get('campaign')}, campaign_id={row.get('campaign_id')}")
-        
-        # 먼저 캠페인 이름 가져오기
-        campaigns = get_campaigns()
-        campaign_name = None
-        for c in campaigns:
-            if str(c.get("id")) == str(campaign_id):
-                campaign_name = c.get("name", "")
-                break
+        # 캠페인 이름이 없으면 조회
+        if not campaign_name:
+            campaigns = get_campaigns()
+            for c in campaigns:
+                if str(c.get("id")) == str(campaign_id):
+                    campaign_name = c.get("name", "")
+                    break
         
         if not campaign_name:
             logger.warning(f"Campaign {campaign_id} not found")
             return {}
         
-        logger.info(f"Looking for campaign: {campaign_name}")
+        logger.info(f"Fetching spend for campaign: {campaign_name}")
         
-        # Asset Reporting API 호출 (캠페인 이름으로 필터링)
+        # Asset Reporting API 호출
         params = {
             "api_key": reporting_key,
             "range": "last_7d",
-            "columns": "asset_id,asset_name,campaign,cost",
+            "columns": "asset_id,cost",
             "filter_campaign": campaign_name,
             "format": "json"
         }
@@ -871,33 +842,18 @@ def get_playable_performance(campaign_id: str) -> Dict[str, float]:
         response = requests.get(
             "https://r.applovin.com/assetReport",
             params=params,
-            timeout=120  # 타임아웃 늘림
+            timeout=120
         )
         
         if response.status_code != 200:
-            logger.error(f"Asset Reporting API error: {response.status_code} - {response.text}")
+            logger.error(f"Asset Reporting API error: {response.status_code}")
             return {}
         
         data = response.json()
         results = data.get("results", [])
-        logger.info(f"Asset Reporting API returned {len(results)} total rows")
+        logger.info(f"Returned {len(results)} rows")
         
-        # 수동으로 campaign_id 필터링
-        # 먼저 캠페인 이름 가져오기
-        campaigns = get_campaigns()
-        campaign_name = None
-        for c in campaigns:
-            if str(c.get("id")) == str(campaign_id):
-                campaign_name = c.get("name", "").lower()
-                break
-        
-        logger.info(f"Looking for campaign: {campaign_name}")
-        
-        if not campaign_name:
-            logger.warning(f"Campaign {campaign_id} not found")
-            return {}
-        
-        # Asset별 spend 집계 (이미 캠페인 필터링됨)
+        # Asset별 spend 집계
         asset_spend = {}
         for row in results:
             asset_id = str(row.get("asset_id", ""))
@@ -906,18 +862,10 @@ def get_playable_performance(campaign_id: str) -> Dict[str, float]:
             if asset_id and spend > 0:
                 asset_spend[asset_id] = asset_spend.get(asset_id, 0) + spend
         
-        logger.info(f"Found spend data for {len(asset_spend)} assets in campaign {campaign_name}")
-        
-        # 디버깅: 상위 3개 asset spend
-        if asset_spend:
-            top_3 = sorted(asset_spend.items(), key=lambda x: x[1], reverse=True)[:3]
-            for aid, spend in top_3:
-                logger.info(f"Top asset: {aid} = ${spend:.2f}")
-        
         return asset_spend
         
     except Exception as e:
-        logger.error(f"Failed to fetch asset reporting data: {e}", exc_info=True)
+        logger.error(f"Failed to fetch asset reporting data: {e}")
         return {}
 
 # =========================================================
@@ -1180,8 +1128,14 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
                     if p.get("id") in used_playable_ids
                 ]
                 
-                # Playable spend 데이터 가져오기
-                playable_spend = get_playable_performance(campaign_id)
+                # 캠페인 이름 가져오기 (이미 campaigns 리스트 있음)
+                campaign_name = next(
+                    (c.get("name", "") for c in campaigns if str(c.get("id")) == str(campaign_id)),
+                    ""
+                )
+                
+                # Playable spend 데이터 가져오기 (캠페인 이름 직접 전달)
+                playable_spend = get_playable_performance(campaign_id, campaign_name)
                 
                 # Spend 기준 내림차순 정렬
                 sorted_playables = sorted(
