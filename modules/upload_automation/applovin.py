@@ -643,11 +643,11 @@ def get_assets(game: str = None) -> Dict[str, List[Dict]]:
                 return data if isinstance(data, list) else data.get("results", [])
             
             # 최대 60페이지까지 병렬 요청 (5~10개씩 동시)
-            with ThreadPoolExecutor(max_workers=5) as executor:
+            with ThreadPoolExecutor(max_workers=10) as executor:
                 page = 2
                 while page <= 60:  # 최대 6000개
                     # 5페이지씩 묶어서 병렬 요청
-                    batch_pages = range(page, min(page + 5, 61))
+                    batch_pages = range(page, min(page + 10, 61))
                     futures = {executor.submit(fetch_page, p): p for p in batch_pages}
                     
                     batch_results = []
