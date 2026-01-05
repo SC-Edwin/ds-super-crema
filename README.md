@@ -8,6 +8,9 @@ Creative Intelligence Automation Platform
 - 업로드 자동화: (개발 예정)
 - 동영상 자동화: (개발 예정)
 
+## 📚 Docs
+- 업로드 자동화(페이스북/유니티): `modules/upload_automation/README.md`
+
 ## 🚀 실행
 ```bash
 pip install -r requirements.txt

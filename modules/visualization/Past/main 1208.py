@@ -109,6 +109,7 @@ def load_prediction_data():
           SELECT MAX(prediction_timestamp)
           FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
         )
+        AND rank != 'nan'
     ),
     LatestSnapshot AS (
       SELECT *
@@ -179,85 +180,11 @@ def create_plotly_theme():
 
 
 
-
+# ================================
+# 메인 시각화
+# ================================
 def run():
     """시각화 모듈 메인"""
-    
-    st.markdown("""
-        <style>
-        /* 🔥 viz 탭 한눈에 보기 버튼 - 초강력 격리 (우선순위 9999) */
-        body div[id="viz-root"] .st-key-ai_btn button,
-        body .st-key-ai_btn button[data-testid="stBaseButton-secondary"],
-        body .st-key-ai_btn button[kind="secondary"] {
-            /* 배경 & 색상 */
-            background: rgba(26, 26, 26, 0.8) !important;
-            color: #ffffff !important;
-            
-            /* 테두리 & 그림자 */
-            border: 2px solid #ff006e !important;
-            border-radius: 8px !important;
-            box-shadow: 
-                0 0 10px rgba(255, 0, 110, 0.4),
-                0 0 20px rgba(255, 0, 110, 0.2),
-                inset 0 0 10px rgba(255, 0, 110, 0.1) !important;
-            
-            /* 크기 & 패딩 */
-            width: auto !important;
-            max-width: 120px !important;
-            min-width: 0 !important;
-            height: auto !important;
-            min-height: 0 !important;
-            padding: 0.4rem 1rem !important;
-            
-            /* 폰트 */
-            font-size: 0.9rem !important;
-            font-weight: 600 !important;
-            
-            /* 애니메이션 */
-            transition: all 0.3s ease !important;
-            transform: none !important;
-        }
-
-        /* 호버 */
-        body div[id="viz-root"] .st-key-ai_btn button:hover,
-        body .st-key-ai_btn button[data-testid="stBaseButton-secondary"]:hover,
-        body .st-key-ai_btn button[kind="secondary"]:hover {
-            background: rgba(26, 26, 26, 0.95) !important;
-            border-color: #ff4d8f !important;
-            box-shadow: 
-                0 0 15px rgba(255, 0, 110, 0.6),
-                0 0 30px rgba(255, 77, 143, 0.4),
-                0 0 45px rgba(255, 0, 110, 0.2),
-                inset 0 0 15px rgba(255, 0, 110, 0.15) !important;
-            transform: translateY(-2px) !important;
-        }
-        
-        /* 텍스트 스타일 강제 */
-        body .st-key-ai_btn button p {
-            font-size: 0.9rem !important;
-            font-weight: 600 !important;
-            color: #ffffff !important;
-            text-shadow: none !important;
-            letter-spacing: 0 !important;
-            line-height: 1.4 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            white-space: nowrap !important;
-        }
-        
-        /* 여백 */
-        body .st-key-ai_btn {
-            margin-top: -0.5rem !important;
-        }
-        
-        /* 🚨 업로드 탭 스타일 무효화 (최고 우선순위) */
-        body #upload-root .st-key-ai_btn button {
-            all: revert !important;
-        }
-        </style>
-
-    """, unsafe_allow_html=True)
-        
     
     st.markdown("## 🥇 Top Creatives by Network")
     
@@ -294,29 +221,48 @@ def run():
     col1, col2, col3, col_spacer = st.columns([1.2, 1.2, 1.5, 4])
 
 
-
     with col1:
-            all_apps = ['All'] + sorted(df['app'].unique().tolist())
-            selected_app = st.selectbox("📱 App", all_apps)
+        all_apps = ['All'] + sorted(df['app'].unique().tolist())
+        selected_app = st.selectbox("📱 App", all_apps)
 
-                        
-            clicked_hk = st.button(
-                "One Click View",
-                key="ai_btn",
-                help="AI-powered quick insights"
-            )
-                        
+        # 버튼 전용 wrapper 시작
+        st.markdown('<div id="viz-btn-area">', unsafe_allow_html=True)
 
-            if clicked_hk:
-                st.session_state['show_ai_recommendation'] = True
-                        
+        clicked_hk = st.button(
+            "한눈에 보기",
+            key="ai_btn",
+            help="한눈에 보는 AI 추천"
+        )
+
+        # wrapper 닫기
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        if clicked_hk:
+            st.session_state['show_ai_recommendation'] = True
+
+
+    # with col1:
+    #     all_apps = ['All'] + sorted(df['app'].unique().tolist())
+    #     selected_app = st.selectbox("📱 App", all_apps)
+
+    #     # 🔥 Anchor 추가 (CSS가 버튼을 조절하기 위한 기준점)
+    #     st.markdown('<div id="hk-btn-anchor"></div>', unsafe_allow_html=True)
+
+    #     clicked_hk = st.button(
+    #         "한눈에 보기",
+    #         key="ai_btn",
+    #         help="한눈에 보는 AI 추천"
+    #     )
+    #     if clicked_hk:
+    #         st.session_state['show_ai_recommendation'] = True
+
 
 
     with col2:
         all_localities = ['All'] + sorted(df['locality'].unique().tolist())
         selected_locality = st.selectbox("🌍 Locality", all_localities)
 
-    with col3:
+    with col3:  # ← 새로 추가!
         # 주차 목록 (최신순, None 제외)
         available_weeks = sorted(
             [w for w in df['upload_week'].unique() if w is not None], 
@@ -338,6 +284,19 @@ def run():
             import re
             match = re.search(r'\((.*?)\)', selected_week_label)
             selected_week = match.group(1) if match else selected_week_label
+                    
+
+
+
+
+
+    # btn_col1, btn_col2, btn_col3, btn_spacer = st.columns([1.2, 1.2, 1.5, 4])
+
+    # with btn_col1:
+    #     clicked_hk = st.button("한눈에 보기", key="ai_btn", help="한눈에 보는 AI 추천", use_container_width=True)
+    #     if clicked_hk:
+    #         st.session_state['show_ai_recommendation'] = True
+
 
 
     # 필터 적용
@@ -348,7 +307,7 @@ def run():
     if selected_locality != 'All':
         filtered_df = filtered_df[filtered_df['locality'] == selected_locality]
     
-    if selected_week != 'All':
+    if selected_week != 'All':  # ← 새로 추가!
         filtered_df = filtered_df[filtered_df['upload_week'] == selected_week]
 
     if len(filtered_df) == 0:
@@ -359,133 +318,75 @@ def run():
 
 
     # ========== 팝업 모달 (Dialog) ==========
-    
-    @st.dialog("One Click View - AI Recommendations", width="large")
-    def show_ai_modal(filtered_df, selected_app, selected_locality, selected_week_label):
-
-        
+    @st.dialog("🤖 Henry & Kyle AI 추천", width="large")
+    def show_ai_modal(filtered_df, selected_app, selected_locality, selected_week_label):  # ← 파라미터 추가
         """AI 추천 모달"""
         
         app_text = selected_app if selected_app != 'All' else '전체'
         loc_text = selected_locality if selected_locality != 'All' else '전체'
-        week_text = selected_week_label if selected_week_label != 'All' else '전체 주차'
+        week_text = selected_week_label if selected_week_label != 'All' else '전체 주차'  # ← 추가
         
-        st.markdown(f"**{app_text}** × **{loc_text}** × **{week_text}** - {len(filtered_df)}개 소재 분析")
+        st.markdown(f"**{app_text}** × **{loc_text}** × **{week_text}** - {len(filtered_df)}개 소재 분析")  # ← 수정
         
         st.markdown("---")
-
         
+        # 소재별 최적 경로 계산
+        best_per_creative = filtered_df.loc[
+            filtered_df.groupby('subject_label')['ranking_score'].idxmax()
+        ]
         
-        # # 소재별 최적 경로 계산
-        # best_per_creative = filtered_df.loc[
-        #     filtered_df.groupby('subject_label')['ranking_score'].idxmax()
-        # ]
-        
-        # best_per_creative['path'] = (
-        #     best_per_creative['past_network'] + ' → ' + 
-        #     best_per_creative['network']
-        # )
-        
-        # # 2등과의 차이 계산
-        # def get_score_gap(row):
-        #     same_creative = filtered_df[filtered_df['subject_label'] == row['subject_label']]
-        #     sorted_scores = same_creative['ranking_score'].sort_values(ascending=False)
-        #     if len(sorted_scores) >= 2:
-        #         return sorted_scores.iloc[0] - sorted_scores.iloc[1]
-        #     return 0
-        
-        # best_per_creative['gap'] = best_per_creative.apply(get_score_gap, axis=1)
-
-        # 모든 데이터 사용 (네트워크별 전체 소재)
-        best_per_creative = filtered_df.copy()
-
         best_per_creative['path'] = (
             best_per_creative['past_network'] + ' → ' + 
             best_per_creative['network']
         )
-
-        # gap 계산 (필요 없지만 컬럼 유지)
-        best_per_creative['gap'] = 0.0
-
+        
+        # 2등과의 차이 계산
+        def get_score_gap(row):
+            same_creative = filtered_df[filtered_df['subject_label'] == row['subject_label']]
+            sorted_scores = same_creative['ranking_score'].sort_values(ascending=False)
+            if len(sorted_scores) >= 2:
+                return sorted_scores.iloc[0] - sorted_scores.iloc[1]
+            return 0
+        
+        best_per_creative['gap'] = best_per_creative.apply(get_score_gap, axis=1)
+        
+        # 아이콘 추가
+        def add_icon(row):
+            rank = row['rank_per_network']
+            if rank <= 3:
+                return '🏆'
+            elif rank <= 10:
+                return '⭐'
+            return ''
+        
+        best_per_creative['icon'] = best_per_creative.apply(add_icon, axis=1)
+        
         # 테이블
         st.markdown("### 📊 소재별 최적 투자 경로")
+        
+        # 확률(%) 계산
+        best_per_creative['probability_pct'] = (best_per_creative['prediction_score'] * 100).round(1)
 
-        # 모든 네트워크 데이터 사용
-        all_data = filtered_df.copy()
-        all_data['path'] = all_data['past_network'] + ' → ' + all_data['network']
-        all_data['probability_pct'] = (all_data['prediction_score'] * 100).round(1)
+        display_df = best_per_creative[[
+            'icon', 'subject_label', 'path', 'probability_pct',  # ← ranking_score 대신!
+            'rank_per_network', 'sum_CPI', 'gap'
+        ]].sort_values('probability_pct', ascending=False).reset_index(drop=True)  # ← 정렬 기준도 변경
 
-
-        # 네트워크 목록
-        networks = sorted(all_data['network'].unique())
-
-        # 병렬 배치 (최대 3개씩)
-        num_networks = len(networks)
-        if num_networks <= 3:
-            cols = st.columns(num_networks)
-            network_groups = [networks]
-        else:
-            # 3개씩 묶어서 행으로 나눔
-            cols = st.columns(3)
-            network_groups = [networks[i:i+3] for i in range(0, num_networks, 3)]
-
-        # 첫 번째 행 (최대 3개)
-        for idx, net in enumerate(networks[:min(3, num_networks)]):
-            with cols[idx]:
-                network_data = all_data[all_data['network'] == net].copy()
-                network_data = network_data.sort_values('probability_pct', ascending=False)
-                
-                st.markdown(f"#### 🎯 {net.upper()}")
-                st.caption(f"{len(network_data)}개 소재")
-                
-                # display_df에서 rank_per_network 제거
-                display_df = network_data[[
-                    'subject_label', 'probability_pct', 'sum_CPI'
-                ]].head(10)
-
-                st.dataframe(
-                    display_df,
-                    column_config={
-                        'subject_label': st.column_config.TextColumn('소재', width='small'),
-                        'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small'),
-                        'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small')
-                    },
-                    hide_index=True,
-                    use_container_width=True,
-                    height=400
-                )
-
-        # 두 번째 행 (4개 이상일 경우)
-        if num_networks > 3:
-            st.markdown("---")
-            remaining_networks = networks[3:]
-            cols2 = st.columns(min(3, len(remaining_networks)))
-            
-            for idx, net in enumerate(remaining_networks):
-                with cols2[idx]:
-                    network_data = all_data[all_data['network'] == net].copy()
-                    network_data = network_data.sort_values('probability_pct', ascending=False)
-                    
-                    st.markdown(f"#### 🎯 {net.upper()}")
-                    st.caption(f"{len(network_data)}개 소재")
-
-                    
-                    # display_df에서 rank_per_network 제거
-                    display_df = network_data[[
-                         'subject_label', 'probability_pct', 'sum_CPI'  # ← 'icon' 제거 필요
-                    ]].head(10)
-                    
-                    st.dataframe(
-                        display_df,
-                        column_config={
-                            'subject_label': st.column_config.TextColumn('소재', width='small'),
-                            'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small'),
-                            'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small')
-                        },
-                        hide_index=True,
-                        use_container_width=True,
-                        height=400
-                    )
+        st.dataframe(
+            display_df,
+            column_config={
+                'icon': st.column_config.TextColumn('', width='small'),
+                'subject_label': st.column_config.TextColumn('소재', width='small'),
+                'path': st.column_config.TextColumn('최적 경로', width='medium'),
+                'probability_pct': st.column_config.NumberColumn('확률', format="%.1f%%", width='small'),  # ← 추가!
+                'rank_per_network': st.column_config.TextColumn('순위', width='small'),
+                'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small'),
+                'gap': st.column_config.NumberColumn('차이', format="+%.2f", width='small')
+            },
+            hide_index=True,
+            use_container_width=True,
+            height=400
+        )
         
         # 인사이트 시각화
         st.markdown("---")
@@ -515,7 +416,7 @@ def run():
                 showlegend=True
             )
             
-            st.plotly_chart(fig_pie, use_container_width=True, key='ai_modal_pie')
+            st.plotly_chart(fig_pie, use_container_width=True)
         
         with col_viz2:
             # Past 네트워크별 평균 스코어
@@ -548,7 +449,7 @@ def run():
                 showlegend=False
             )
             
-            st.plotly_chart(fig_bar, use_container_width=True, key='ai_modal_bar')
+            st.plotly_chart(fig_bar, use_container_width=True)  # ← 이게 누락됐었음!
         
         # 핵심 인사이트 요약
         st.markdown("---")
@@ -587,6 +488,9 @@ def run():
         show_ai_modal(filtered_df, selected_app, selected_locality, selected_week_label)
         st.session_state['show_ai_recommendation'] = False  # 리셋
     
+    # 네트워크 조합 (Past → Future)
+    # ========== 새로운 탭 구조: Future Network 중심 ==========
+    # Future Network별로 그룹화
     # ========== 새로운 탭 구조: Future Network 중심 ==========
     future_networks = sorted(filtered_df['network'].unique())
 
@@ -686,7 +590,7 @@ def run():
                             showlegend=False
                         )
                         
-                        st.plotly_chart(fig_bubble, use_container_width=True, key=f'bubble_{future_net}_{past_net}_{col_idx}')
+                        st.plotly_chart(fig_bubble, use_container_width=True)
                         
                         # 6개 차트 (2x3 그리드로 축소)
                         st.markdown("##### 📊 주요 지표")
@@ -734,7 +638,7 @@ def run():
                                 text="sum_impressions", theme=theme, height=chart_height,
                                 color="#0096ff", texttemplate="%{text:,.0f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'imp_{future_net}_{past_net}_{col_idx}')
+                            st.plotly_chart(fig, use_container_width=True)
                         
                         with row1_col2:
                             st.markdown("###### 📲 Installs")
@@ -743,7 +647,7 @@ def run():
                                 text="sum_installs", theme=theme, height=chart_height,
                                 color="#a855f7", texttemplate="%{text:,.0f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'inst_{future_net}_{past_net}_{col_idx}')
+                            st.plotly_chart(fig, use_container_width=True)
                         
                         # Row 2
                         row2_col1, row2_col2 = st.columns(2)
@@ -755,7 +659,7 @@ def run():
                                 text="sum_CPI", theme=theme, height=chart_height,
                                 color="#ff006e", texttemplate="$%{text:.2f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'cpi_{future_net}_{past_net}_{col_idx}')
+                            st.plotly_chart(fig, use_container_width=True)
                         
                         with row2_col2:
                             st.markdown("###### 📈 IPM")
@@ -764,7 +668,7 @@ def run():
                                 text="IPM", theme=theme, height=chart_height,
                                 color="#ff4d8f", texttemplate="%{text:.2f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'ipm_{future_net}_{past_net}_{col_idx}')
+                            st.plotly_chart(fig, use_container_width=True)
                         
                         # Row 3
                         row3_col1, row3_col2 = st.columns(2)
@@ -776,7 +680,7 @@ def run():
                                 text="CTR", theme=theme, height=chart_height,
                                 color="#ff77a0", texttemplate="%{text:.2f}%"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'ctr_{future_net}_{past_net}_{col_idx}')
+                            st.plotly_chart(fig, use_container_width=True)
                         
                         with row3_col2:
                             st.markdown("###### 💎 ROAS")
@@ -785,7 +689,7 @@ def run():
                                 text="roas_sum_1to3", theme=theme, height=chart_height,
                                 color="#8b00ff", texttemplate="%{text:.2f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'roas_{future_net}_{past_net}_{col_idx}')
+                            st.plotly_chart(fig, use_container_width=True)
                         
                         # 테이블
                         st.markdown("---")
@@ -874,7 +778,7 @@ def run():
                             showlegend=False
                         )
                         
-                        st.plotly_chart(fig_bubble, use_container_width=True, key=f'bubble_{future_net}_{past_net}_{past_idx}')
+                        st.plotly_chart(fig_bubble, use_container_width=True)
                     
                     with col_charts:
                         row1_col1, row1_col2, row1_col3 = st.columns(3)
@@ -920,7 +824,7 @@ def run():
                                 text="sum_impressions", theme=theme, height=chart_height,
                                 color="#0096ff", texttemplate="%{text:,.0f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'imp_{future_net}_{past_net}_{past_idx}')
+                            st.plotly_chart(fig, use_container_width=True)
                         
                         with row1_col2:
                             st.markdown("##### 📲 Installs")
@@ -929,7 +833,7 @@ def run():
                                 text="sum_installs", theme=theme, height=chart_height,
                                 color="#a855f7", texttemplate="%{text:,.0f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'inst_{future_net}_{past_net}_{past_idx}')
+                            st.plotly_chart(fig, use_container_width=True)
                         
                         with row1_col3:
                             st.markdown("##### 💰 CPI")
@@ -938,7 +842,7 @@ def run():
                                 text="sum_CPI", theme=theme, height=chart_height,
                                 color="#ff006e", texttemplate="$%{text:.2f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'cpi_{future_net}_{past_net}_{past_idx}')
+                            st.plotly_chart(fig, use_container_width=True)
                         
                         with row2_col1:
                             st.markdown("##### 📈 IPM")
@@ -947,7 +851,7 @@ def run():
                                 text="IPM", theme=theme, height=chart_height,
                                 color="#ff4d8f", texttemplate="%{text:.2f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'ipm_{future_net}_{past_net}_{past_idx}')
+                            st.plotly_chart(fig, use_container_width=True)
                         
                         with row2_col2:
                             st.markdown("##### 🎯 CTR")
@@ -956,7 +860,7 @@ def run():
                                 text="CTR", theme=theme, height=chart_height,
                                 color="#ff77a0", texttemplate="%{text:.2f}%"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'ctr_{future_net}_{past_net}_{past_idx}')
+                            st.plotly_chart(fig, use_container_width=True)
                         
                         with row2_col3:
                             st.markdown("##### 💎 ROAS")
@@ -965,7 +869,7 @@ def run():
                                 text="roas_sum_1to3", theme=theme, height=chart_height,
                                 color="#8b00ff", texttemplate="%{text:.2f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'roas_{future_net}_{past_net}_{past_idx}')
+                            st.plotly_chart(fig, use_container_width=True)
                     
                     # 테이블
                     st.markdown("---")
@@ -1006,21 +910,37 @@ def run():
     st.markdown("---")
     st.caption(f"🕐 Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} KST")
 
+    st.markdown("""
+        <style>
+        #viz-btn-area button,
+        #viz-btn-area .stButton > button {
+            background: #0a0a0a !important;
+            color: #ffffff !important;
+            border: 1px solid #ff008c !important;
+            border-radius: 6px !important;
+            padding: 0.32rem 0.75rem !important;
+            font-size: 0.82rem !important;
+            box-shadow: 0 0 8px #ff008c55 !important;
+            transition: all 0.15s ease-in-out !important;
+        }
+
+        #viz-btn-area button:hover,
+        #viz-btn-area .stButton > button:hover {
+            background: #1a0015 !important;
+            border-color: #ff4dbb !important;
+            box-shadow:
+                0 0 12px #ff008c88,
+                0 0 22px #ff4dbb88,
+                0 0 30px #ff4dbb55 !important;
+            transform: translateY(-2px);
+        }
+        </style>
+
+    """, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
     run()
-
-
-
-
-
-
-
-
-
-
-
 
 
 

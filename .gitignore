@@ -13,3 +13,4 @@ venv/
 *.json
 gcp-key.json
 .streamlit/secrets.toml
+ds-super-crema.code-workspace
