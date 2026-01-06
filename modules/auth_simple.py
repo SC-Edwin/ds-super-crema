@@ -201,11 +201,6 @@ def load_users():
             "name": "Luca",
             "role": "user",
         },
-        "elin": {
-            "password_hash": h("elin83"),
-            "name": "Elin",
-            "role": "user",
-        },
         "zino": {
             "password_hash": h("zino46"),
             "name": "Zino",
