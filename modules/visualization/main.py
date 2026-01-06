@@ -95,6 +95,8 @@ def get_bigquery_client():
     return bigquery.Client(project='roas-test-456808')  # ← 로컬 인증 사용
 
 
+
+
 @st.cache_data(ttl=300)
 def load_prediction_data():
     """최신 예측 결과 데이터 로드"""
@@ -411,9 +413,26 @@ def run():
         st.markdown("### 📊 소재별 최적 투자 경로")
 
         # 모든 네트워크 데이터 사용
+        # 수정: 확률에 패널티 적용
         all_data = filtered_df.copy()
         all_data['path'] = all_data['past_network'] + ' → ' + all_data['network']
-        all_data['probability_pct'] = (all_data['prediction_score'] * 100).round(1)
+
+        # 패널티 적용된 확률 계산
+        # 패널티 적용된 확률 계산
+        all_data['probability_pct'] = all_data['prediction_score'] * 100
+        all_data.loc[all_data['sum_installs'] == 0, 'probability_pct'] *= 0.1
+        all_data.loc[all_data['sum_impressions'] == 0, 'probability_pct'] *= 0.05
+        all_data['probability_pct'] = all_data['probability_pct'].round(1)
+
+
+        # # 디버그: 593 소재 확인
+        # debug_593 = all_data[all_data['subject_label'] == '593']
+
+        # print("🐛 DEBUG 593:", debug_593[['subject_label', 'sum_impressions', 'sum_installs', 'prediction_score', 'probability_pct']].to_dict())
+
+
+        # if len(debug_593) > 0:
+        #     st.write("🐛 DEBUG 593:", debug_593[['subject_label', 'sum_impressions', 'sum_installs', 'prediction_score', 'probability_pct']].to_dict())
 
 
         # 네트워크 목록
@@ -433,7 +452,10 @@ def run():
         for idx, net in enumerate(networks[:min(3, num_networks)]):
             with cols[idx]:
                 network_data = all_data[all_data['network'] == net].copy()
+                
                 network_data = network_data.sort_values('probability_pct', ascending=False)
+
+
                 
                 st.markdown(f"#### 🎯 {net.upper()}")
                 st.caption(f"{len(network_data)}개 소재")
@@ -464,7 +486,10 @@ def run():
             for idx, net in enumerate(remaining_networks):
                 with cols2[idx]:
                     network_data = all_data[all_data['network'] == net].copy()
+            
                     network_data = network_data.sort_values('probability_pct', ascending=False)
+
+
                     
                     st.markdown(f"#### 🎯 {net.upper()}")
                     st.caption(f"{len(network_data)}개 소재")
