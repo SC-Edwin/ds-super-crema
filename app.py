@@ -282,7 +282,6 @@ def main():
     #     st.session_state.user_role = 'admin'
     #     st.session_state.authenticated = True  # 추가!
     
-    ========== 인증 체크 (임시 주석) ==========
     if not check_authentication():
         if 'logout' in st.query_params:
             st.query_params.clear()
