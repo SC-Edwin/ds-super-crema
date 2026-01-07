@@ -805,16 +805,31 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
         raise RuntimeError(f"Playable path does not exist: {playable_path!r}")
 
     file_name = os.path.basename(playable_path)
-    creative_info = {"name": name, "language": language, "playable": {"fileName": file_name}}
+    creative_info = {
+        "name": name, 
+        "language": language, 
+        "playable": {
+            "fileName": file_name,
+            "orientation": "both"  # landscape, portrait, both 중 하나
+        }
+    }
+
+    logger.info(f"Unity playable creativeInfo: {json.dumps(creative_info)}")
     url = f"{UNITY_BASE_URL.rstrip('/')}/organizations/{org_id}/apps/{title_id}/creatives"
     headers = {"Authorization": UNITY_AUTH_HEADER_DEFAULT}
+    
+    # MIME type 결정 (zip vs html)
+    if file_name.lower().endswith(".zip"):
+        mime_type = "application/zip"
+    else:
+        mime_type = "text/html"
 
     for attempt in range(8):
         try:
             with open(playable_path, "rb") as f:
                 files = {
                     "creativeInfo": (None, json.dumps(creative_info), "application/json"),
-                    "playableFile": (file_name, f, "text/html"),
+                    "playableFile": (file_name, f, mime_type),
                 }
                 resp = requests.post(url, headers=headers, files=files, timeout=300)
 
@@ -823,7 +838,8 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
                 continue
 
             if not resp.ok:
-                error_text = resp.text[:400] if resp.text else ""
+                error_text = resp.text[:800] if resp.text else ""
+                logger.error(f"Unity playable upload failed: status={resp.status_code}, file={file_name}, response={error_text}")
                 # Check if error is related to capacity/limit
                 error_lower = error_text.lower()
                 if any(keyword in error_lower for keyword in ["limit", "maximum", "exceeded", "full", "capacity", "quota"]):
@@ -833,15 +849,21 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
             body = resp.json()
             return str(body.get("id") or body.get("creativeId"))
         except Exception as e:
+            logger.error(f"Unity playable upload exception: file={file_name}, attempt={attempt+1}, error={str(e)}")
             time.sleep(3)
 
-    raise RuntimeError("Unity create playable creative failed after retries.")
+    raise RuntimeError(f"Unity create playable creative failed after retries. File: {file_name}")
 
 def _unity_create_creative_pack(*, org_id: str, title_id: str, pack_name: str, creative_ids: List[str], pack_type: str = "video") -> str:
     clean_ids = [str(x) for x in creative_ids if x]
     
-    if len(clean_ids) < 2:
-        raise RuntimeError(f"Not enough creative IDs to create a pack: {clean_ids}")
+    # Playable만 생성 시 1개 허용, 그 외에는 2개 이상 필요
+    if pack_type == "playable":
+        if len(clean_ids) < 1:
+            raise RuntimeError(f"Not enough creative IDs to create a playable pack: {clean_ids}")
+    else:
+        if len(clean_ids) < 2:
+            raise RuntimeError(f"Not enough creative IDs to create a pack: {clean_ids}")
 
     payload = {
         "name": pack_name,
