@@ -359,24 +359,27 @@ def main():
 
 
     with tab4:
-        # https://weapon-rpg.web.app/를 iframe으로 표시
+        # https://weapon-rpg.web.app/로 이동하는 링크 버튼
         st.markdown("""
-        <style>
-            iframe {
-                width: 100%;
-                height: calc(100vh - 200px);
-                border: none;
-                border-radius: 12px;
-            }
-        </style>
+        <div style="text-align: center; padding: 3rem;">
+            <h2 style="color: #ffffff; margin-bottom: 1rem;">
+                🌐 Weapon RPG Dashboard
+            </h2>
+            <p style="color: #cccccc; font-size: 1rem; margin-bottom: 2rem;">
+                Weapon RPG 대시보드를 확인하려면 아래 버튼을 클릭하세요.
+            </p>
+        </div>
         """, unsafe_allow_html=True)
         
-        # iframe을 사용하여 외부 사이트를 임베드
-        st.components.v1.iframe(
-            src="https://weapon-rpg.web.app/",
-            height=700,
-            scrolling=True
-        )  
+        col1, col2, col3 = st.columns([2, 2, 2])
+        with col2:
+            # Streamlit의 link_button 사용 (새 탭에서 열림)
+            st.link_button(
+                "🌐 다른 App으로 이동",
+                "https://weapon-rpg.web.app/",
+                use_container_width=True,
+                type="primary"
+            )  
         
 
     with tab5:
