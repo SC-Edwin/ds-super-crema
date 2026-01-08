@@ -359,7 +359,23 @@ def main():
 
 
     with tab4:
-        st.info("🚧 Comming Soon")  
+        # https://weapon-rpg.web.app/로 리다이렉트
+        st.markdown("""
+        <script>
+            window.location.href = "https://weapon-rpg.web.app/";
+        </script>
+        <div style="text-align: center; padding: 2rem;">
+            <p style="color: #ffffff; font-size: 1.2rem;">
+                리다이렉트 중...
+            </p>
+            <p style="color: #cccccc; font-size: 0.9rem; margin-top: 1rem;">
+                자동으로 이동하지 않으면 
+                <a href="https://weapon-rpg.web.app/" style="color: #ff006e; text-decoration: none;">
+                    여기를 클릭하세요
+                </a>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)  
         
 
     with tab5:
