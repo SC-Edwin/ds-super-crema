@@ -363,10 +363,10 @@ def main():
         st.markdown("""
         <div style="text-align: center; padding: 3rem;">
             <h2 style="color: #ffffff; margin-bottom: 1rem;">
-                🌐 Weapon RPG Dashboard
+                🌐 Localization 리다이렉팅
             </h2>
             <p style="color: #cccccc; font-size: 1rem; margin-bottom: 2rem;">
-                Weapon RPG 대시보드를 확인하려면 아래 버튼을 클릭하세요.
+                동영상 편집, 생성 서버와 연결하려면 아래 버튼을 클릭하세요.
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -375,7 +375,7 @@ def main():
         with col2:
             # Streamlit의 link_button 사용 (새 탭에서 열림)
             st.link_button(
-                "🌐 다른 App으로 이동",
+                "🌐 이동",
                 "https://weapon-rpg.web.app/",
                 use_container_width=True,
                 type="primary"
