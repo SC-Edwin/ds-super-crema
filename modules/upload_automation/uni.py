@@ -795,37 +795,43 @@ def render_unity_settings_panel(container, game: str, idx: int, is_marketer: boo
                 st.info(f"{plat_upper}: 사용 가능한 Creative Pack이 없습니다. 먼저 '크리에이티브/팩 생성'을 실행하세요.")
                 continue
             
-            st.markdown(f"**{plat_upper}** ({len(all_packs)}개 pack 사용 가능)")
+            # 비디오 번호 기준 내림차순 정렬
+            import re
+            def extract_video_num(pack):
+                name = pack.get("name", "")
+                match = re.search(r'video(\d+)', name.lower())
+                return int(match.group(1)) if match else 0
             
-            # 각 캠페인별로 pack 선택
+            all_packs_sorted = sorted(all_packs, key=extract_video_num, reverse=True)
+            
+            st.markdown(f"**{plat_upper}** ({len(all_packs_sorted)}개 pack 사용 가능)")
+            
+            # 각 캠페인별로 pack 선택 (expander 없이 바로 표시)
             for cid in campaign_ids:
                 campaign_name = campaign_id_to_name.get(cid, cid)
                 
-                pack_labels = [f"{p['name']} ({p['id'][:8]}...)" for p in all_packs]
-                pack_ids = [p["id"] for p in all_packs]
+                pack_labels = [f"{p['name']} ({p['id'][:8]}...)" for p in all_packs_sorted]
+                pack_ids = [p["id"] for p in all_packs_sorted]
                 label_to_pack_id = dict(zip(pack_labels, pack_ids))
                 
                 # 이전 선택값 복원
                 prev_selected = cur.get(f"{plat}_{cid}_packs", [])
                 default_labels = [l for l, pid in label_to_pack_id.items() if pid in prev_selected]
                 
-                with st.expander(f"📁 {campaign_name}", expanded=False):
-                    selected_labels = st.multiselect(
-                        "Assign할 Pack 선택",
-                        options=pack_labels,
-                        default=default_labels,
-                        key=f"unity_packs_{idx}_{plat}_{cid}",
-                    )
-                    selected_pack_ids = [label_to_pack_id[l] for l in selected_labels]
-                    
-                    if selected_pack_ids:
-                        st.caption(f"✅ {len(selected_pack_ids)}개 pack 선택됨")
-                    
-                    packs_per_campaign[f"{plat}_{cid}"] = {
-                        "plat": plat,
-                        "cid": cid,
-                        "pack_ids": selected_pack_ids,
-                    }
+                # Expander 없이 바로 표시
+                selected_labels = st.multiselect(
+                    f"📁 {campaign_name}",
+                    options=pack_labels,
+                    default=default_labels,
+                    key=f"unity_packs_{idx}_{plat}_{cid}",
+                )
+                selected_pack_ids = [label_to_pack_id[l] for l in selected_labels]
+                
+                packs_per_campaign[f"{plat}_{cid}"] = {
+                    "plat": plat,
+                    "cid": cid,
+                    "pack_ids": selected_pack_ids,
+                }
         # 4) 상태 저장
         cur.update({
             "platforms": selected_platforms,
