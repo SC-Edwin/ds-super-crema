@@ -462,15 +462,14 @@ def run():
                 
                 # display_df에서 rank_per_network 제거
                 display_df = network_data[[
-                    'subject_label', 'probability_pct', 'sum_CPI'
+                    'subject_label', 'probability_pct'
                 ]].head(10)
 
                 st.dataframe(
                     display_df,
                     column_config={
                         'subject_label': st.column_config.TextColumn('소재', width='small'),
-                        'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small'),
-                        'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small')
+                        'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small')
                     },
                     hide_index=True,
                     use_container_width=True,
@@ -497,15 +496,14 @@ def run():
                     
                     # display_df에서 rank_per_network 제거
                     display_df = network_data[[
-                         'subject_label', 'probability_pct', 'sum_CPI'  # ← 'icon' 제거 필요
+                         'subject_label', 'probability_pct'  # ← 'icon' 제거 필요
                     ]].head(10)
                     
                     st.dataframe(
                         display_df,
                         column_config={
                             'subject_label': st.column_config.TextColumn('소재', width='small'),
-                            'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small'),
-                            'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small')
+                            'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small')
                         },
                         hide_index=True,
                         use_container_width=True,

@@ -17,6 +17,10 @@ def get_random_animal_emoji():
     return random.choice(animal_emojis)
 
 
+
+
+
+
 st.set_page_config(
     page_title="Super Crema",
     page_icon="🎬",
@@ -269,16 +273,25 @@ def render_header():
     </div>
     """, unsafe_allow_html=True)
 
+
+
 def main():
     apply_theme()
-
-    # ========== 인증 체크 (유지) ==========
+    
+    # # 임시: 로컬 테스트용 세션 초기화
+    # if 'login_method' not in st.session_state:
+    #     st.session_state.login_method = 'password'
+    #     st.session_state.user_name = 'Test'
+    #     st.session_state.user_email = 'test@test.com'
+    #     st.session_state.user_role = 'admin'
+    #     st.session_state.authenticated = True  # 추가!
+    
     if not check_authentication():
-        # 인증 실패 시, URL에 'logout' 파라미터가 있다면 제거하고 로그인 페이지 표시
         if 'logout' in st.query_params:
             st.query_params.clear()
         show_login_page()
         return
+
         
     render_header()
     
@@ -318,8 +331,14 @@ def main():
             </div>
         """, unsafe_allow_html=True)
 
+
+
+
     st.markdown("---") 
     # ===================================================
+
+
+    
 
     
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -347,10 +366,13 @@ def main():
 
 
     with tab2:
-        st.markdown('<div id="upload-root">', unsafe_allow_html=True)
-        from modules.upload_automation import main as upload_main
-        upload_main.run()
-        st.markdown('</div>', unsafe_allow_html=True)
+        try:
+            from modules.upload_automation import main as upload_main
+            upload_main.run()
+        except Exception as e:
+            st.error(f"소재 업로드 모듈 로드 실패: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
 
     
 
