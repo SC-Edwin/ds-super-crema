@@ -17,6 +17,10 @@ def get_random_animal_emoji():
     return random.choice(animal_emojis)
 
 
+
+
+
+
 st.set_page_config(
     page_title="Super Crema",
     page_icon="🎬",
@@ -327,8 +331,14 @@ def main():
             </div>
         """, unsafe_allow_html=True)
 
+
+
+
     st.markdown("---") 
     # ===================================================
+
+
+    
 
     
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
