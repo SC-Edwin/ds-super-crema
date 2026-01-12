@@ -1113,83 +1113,22 @@ def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
             "errors": [str(e)]
         }
     
-    # Build ad_outputs dynamically based on selected creatives
-    ad_outputs = []
+    # ✅ 모든 Ad Output 고정 선택
+    ad_outputs = [
+        111,  # Native - Image
+        121,  # Interstitial - Full Screen Image
+        122,  # Interstitial - Image (Large)
+        131,  # Banner - Standard Image
+        132,  # Banner - Large Image
+        211,  # Native - Video Portrait
+        212,  # Native - Video Landscape
+        213,  # Native - Video Square
+        221,  # Interstitial - Video
+        231,  # Banner - Video
+        311,  # Playable
+    ]
 
-    # Collect available dimensions
-    available_images = {}  # dimension -> count
-    available_videos = {}  # dimension -> count
-    has_playable = False
-
-    for md5 in all_creatives_md5:
-        info = md5_info.get(md5)
-        if not info:
-            continue
-        
-        if info["type"] == "IMAGE":
-            dim = info["dimension"]
-            available_images[dim] = available_images.get(dim, 0) + 1
-        elif info["type"] == "VIDEO":
-            dim = info["dimension"]
-            available_videos[dim] = available_videos.get(dim, 0) + 1
-        elif info["type"] == "PLAYABLE":
-            has_playable = True
-
-    logger.info(f"📊 Available creatives:")
-    logger.info(f"   - Images: {available_images}")
-    logger.info(f"   - Videos: {available_videos}")
-    logger.info(f"   - Playable: {has_playable}")
-
-    # Ad Output mapping (based on Mintegral documentation)
-    # 111: Native - Image + Icon (any size)
-    # 121: Interstitial - Image (any size)
-    # 122: Interstitial - Image (768x1024 or 1200x627/628)
-    # 131: Banner - Image (320x50 or 640x120)
-    # 132: Banner - Image (768x1024 or 1200x627/628)
-    # 211: Native - Video Portrait (1080x1920)
-    # 212: Native - Video Landscape (1920x1080)
-    # 213: Native - Video Square (1080x1080)
-    # 221: Interstitial - Video (any)
-    # 231: Banner - Video (any)
-    # 311: Playable
-
-    # Auto-generate ad_outputs based on available creatives
-    if available_images:
-        ad_outputs.append(111)  # Native always supported
-        ad_outputs.append(121)  # Interstitial always supported
-        
-        # Banner 131 (320x50 or 640x120)
-        if "320x50" in available_images or "640x120" in available_images:
-            ad_outputs.append(131)
-        
-        # Banner 132 and Interstitial 122 (768x1024 or 1200x627/628)
-        if any(dim in available_images for dim in ["768x1024", "1200x627", "1200x628"]):
-            ad_outputs.append(122)
-            ad_outputs.append(132)
-
-    if available_videos:
-        ad_outputs.append(221)  # Interstitial video
-        ad_outputs.append(231)  # Banner video
-        
-        # Native video based on dimensions
-        if "1080x1920" in available_videos:
-            ad_outputs.append(211)
-        if "1920x1080" in available_videos:
-            ad_outputs.append(212)
-        if "1080x1080" in available_videos:
-            ad_outputs.append(213)
-
-    if has_playable:
-        ad_outputs.append(311)
-
-    if not ad_outputs:
-        return {
-            "success": False,
-            "error": "선택된 Creative로는 ad_output을 생성할 수 없습니다.",
-            "errors": ["No valid ad_outputs can be generated from selected creatives"]
-        }
-
-    logger.info(f"✅ Auto-generated ad_outputs: {ad_outputs}")
+    logger.info(f"✅ Using all ad_outputs: {ad_outputs}")
     
     # API Request
     try:

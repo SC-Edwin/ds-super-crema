@@ -139,7 +139,7 @@ def validate_count(files: List) -> tuple[bool, str]:
     """Check there is at least one .mp4/.mpeg4/.html file."""
     if not files:
         return False, "Please upload at least one file (.mp4, .mpeg4, or .html)."
-    allowed = {".mp4", ".mpeg4", ".html"}
+    allowed = {".mp4", ".mpeg4", ".html", ".zip"}
     bad = []
     for u in files:
         name = getattr(u, "name", None) or (u.get("name") if isinstance(u, dict) else None)
@@ -487,9 +487,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         clr = st.button("전체 초기화", key=f"clear_{game}", use_container_width=True)
                     elif platform == "Unity Ads":
                         unity_ok_placeholder = st.empty()
-                        # Unity 버튼들도 동일하게 적용
                         st.write("")
-                        # Test mode와 Marketer mode 모두에서 "크리에이티브/팩 생성" 버튼 표시
                         cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{game}", use_container_width=True)
                         cont_unity_apply = st.button("캠페인에 적용", key=f"unity_apply_{game}", use_container_width=True)
                         # Store current tab in query params when Unity buttons are clicked
@@ -989,16 +987,41 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             summary = unity_module.upload_unity_creatives_to_campaign(
                                 game=game, videos=remote_list, settings=unity_settings
                             )
-                            pack_ids = summary.get("creative_ids", [])
-                            st.session_state.unity_created_packs[game] = pack_ids
                             
-                            if pack_ids:
-                                unity_ok_placeholder.success(f"Created {len(pack_ids)} Creative Packs.")
+                            # 플랫폼별 결과 처리
+                            if summary.get("results_per_platform"):
+                                # 새 구조: 플랫폼별 pack IDs
+                                pack_ids_by_platform = {}
+                                total_packs = 0
+                                
+                                for plat, plat_result in summary["results_per_platform"].items():
+                                    plat_pack_ids = plat_result.get("creative_ids", [])
+                                    pack_ids_by_platform[plat] = plat_pack_ids
+                                    total_packs += len(plat_pack_ids)
+                                    
+                                    if plat_result.get("errors"):
+                                        for err in plat_result["errors"]:
+                                            st.warning(f"[{plat.upper()}] {err}")
+                                
+                                st.session_state.unity_created_packs[game] = pack_ids_by_platform
+                                
+                                if total_packs > 0:
+                                    unity_ok_placeholder.success(f"Created {total_packs} Creative Packs across {len(pack_ids_by_platform)} platform(s).")
+                                else:
+                                    unity_ok_placeholder.warning("No packs created.")
                             else:
-                                unity_ok_placeholder.warning("No packs created.")
+                                # 하위 호환: 기존 단일 플랫폼 구조
+                                pack_ids = summary.get("creative_ids", [])
+                                st.session_state.unity_created_packs[game] = pack_ids
+                                
+                                if pack_ids:
+                                    unity_ok_placeholder.success(f"Created {len(pack_ids)} Creative Packs.")
+                                else:
+                                    unity_ok_placeholder.warning("No packs created.")
                             
                             if summary.get("errors"):
                                 st.error("\n".join(summary["errors"]))
+                            
                         except Exception as e:
                             st.error(str(e) if str(e) else "Unity upload failed")
                             devtools.record_exception("Unity upload failed", e)
@@ -1007,34 +1030,55 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             st.query_params["tab"] = game
 
                 # 2. Apply Logic
+                # 2. Apply Logic
                 if "cont_unity_apply" in locals() and cont_unity_apply:
                     # Preserve current tab
                     st.query_params["tab"] = game
                     
-                    pack_ids = st.session_state.unity_created_packs.get(game, [])
-                    if not pack_ids:
-                        unity_ok_placeholder.error("No packs found. Create them first.")
+                    # 오른쪽 패널에서 선택한 pack 확인
+                    packs_per_campaign = unity_settings.get("packs_per_campaign", {})
+                    has_selected_packs = any(v.get("pack_ids") for v in packs_per_campaign.values())
+                    
+                    # 방금 생성한 pack 확인
+                    created_packs = st.session_state.unity_created_packs.get(game, [])
+                    
+                    if not has_selected_packs and not created_packs:
+                        unity_ok_placeholder.error("No packs selected. Select packs from the right panel first.")
                     else:
                         try:
-                            # Test Mode: unassign + assign 실행
-                            # Marketer Mode: assign만 실행 (unassign 안 함)
+                            # pack_ids는 apply 함수 내부에서 packs_per_campaign을 우선 사용함
                             res = unity_module.apply_unity_creative_packs_to_campaign(
-                                game=game, creative_pack_ids=pack_ids, settings=unity_settings, is_marketer=is_marketer
+                                game=game, creative_pack_ids=created_packs, settings=unity_settings, is_marketer=is_marketer
                             )
-                            assigned = res.get("assigned_packs", [])
-                            removed = res.get("removed_assignments", [])
                             
-                            if not is_marketer and removed:
-                                # Test Mode: unassign 결과 표시
-                                unity_ok_placeholder.success(f"✅ Unassigned {len(removed)} existing pack(s).")
-                            
-                            if assigned:
-                                unity_ok_placeholder.success(f"✅ Assigned {len(assigned)} new pack(s).")
+                            # 플랫폼별 결과 처리
+                            if res.get("results_per_campaign"):
+                                # 새 구조: 플랫폼별 + 캠페인별 결과
+                                total_assigned = 0
+                                for key, campaign_res in res["results_per_campaign"].items():
+                                    assigned_count = len(campaign_res.get("assigned_packs", []))
+                                    total_assigned += assigned_count
+                                
+                                if total_assigned > 0:
+                                    unity_ok_placeholder.success(f"✅ Assigned packs to {len(res['results_per_campaign'])} campaign(s).")
+                                else:
+                                    unity_ok_placeholder.warning("No packs assigned.")
                             else:
-                                unity_ok_placeholder.warning("No packs assigned.")
+                                # 하위 호환
+                                assigned = res.get("assigned_packs", [])
+                                removed = res.get("removed_assignments", [])
+                                
+                                if not is_marketer and removed:
+                                    unity_ok_placeholder.success(f"✅ Unassigned {len(removed)} existing pack(s).")
+                                
+                                if assigned:
+                                    unity_ok_placeholder.success(f"✅ Assigned {len(assigned)} new pack(s).")
+                                else:
+                                    unity_ok_placeholder.warning("No packs assigned.")
                             
                             if res.get("errors"):
                                 st.error("\n".join(res["errors"]))
+
                         except Exception as e:
                             st.error(str(e) if str(e) else "Unity apply failed")
                             devtools.record_exception("Unity apply failed", e)
