@@ -485,28 +485,37 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
     st.markdown("---")
 
     # Apply in Offer dropdown
-    st.markdown("**Apply in Offer**")
+    # Apply in Offer dropdown (Multi-select)
+    st.markdown("**Apply in Offers**")
+    st.caption("Creative Set을 적용할 Offer들을 선택하세요 (여러 개 선택 가능)")
+
     with st.spinner("Loading offers..."):
         offers = get_offers(game_filter=game_short, max_pages=5, only_running=True)
 
-    selected_offer_id = None
-    selected_offer_name = None
+    selected_offer_ids = []
+    selected_offer_names = []
     if offers:
         offer_options = {f"{o['offer_name']} (ID: {o['offer_id']})": o['offer_id'] 
                         for o in offers}
-        selected_offer = st.selectbox(
-            "Select Offer",
+        selected_offers = st.multiselect(
+            "Select Offers",
             options=list(offer_options.keys()),
-            key=f"mintegral_offer_{idx}",
-            help=f"Creative Set을 적용할 Offer 선택"
+            key=f"mintegral_offers_{idx}",
+            help=f"Creative Set을 적용할 Offer들을 선택하세요 (여러 개 선택 가능)"
         )
-        selected_offer_id = offer_options[selected_offer]
-        selected_offer_name = selected_offer.split(" (ID:")[0]
+        selected_offer_ids = [offer_options[name] for name in selected_offers]
+        selected_offer_names = [name.split(" (ID:")[0] for name in selected_offers]
+        
+        # Show selected offers
+        if selected_offers:
+            st.markdown("**선택된 Offers:**")
+            for name in selected_offers:
+                st.write(f"• {name}")
     else:
         st.warning(f"'{game_short}' 필터링된 Offer가 없습니다")
 
     # Add Product Icon button (Offer 선택 후에만 활성화)
-    if selected_offer_id:
+    if selected_offer_ids:
         if st.button(
             "Add Product Icon",
             key=f"mintegral_add_icon_{idx}",
@@ -517,7 +526,7 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
             try:
                 with st.spinner("🔍 Searching for product icon in offer..."):
                     headers = _get_auth_headers()
-                    params = {"offer_id": selected_offer_id, "page": 1, "limit": 10}
+                    params = {"offer_id": selected_offer_ids[0], "page": 1, "limit": 10}
                     
                     response = requests.get(
                         f"{MINTEGRAL_BASE_URL}/creative_sets",
@@ -577,8 +586,8 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
         "selected_images": selected_image_md5s,
         "selected_videos": selected_video_md5s,
         "selected_playables": selected_playable_md5s,
-        "selected_offer_id": selected_offer_id,
-        "selected_offer_name": selected_offer_name,
+        "selected_offer_ids": selected_offer_ids,  # ← 복수형
+        "selected_offer_names": selected_offer_names,  # ← 복수형
         "product_icon_md5": st.session_state.get(f"mintegral_icon_{idx}", {}).get("md5"),
     }
 
@@ -1006,12 +1015,13 @@ def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
     except Exception as e:
         logger.error(f"Cannot reach Mintegral API: {e}")
     # Validate required settings
-    offer_id = settings.get("selected_offer_id")
-    if not offer_id:
+    # Validate required settings
+    offer_ids = settings.get("selected_offer_ids", [])
+    if not offer_ids:
         return {
             "success": False,
             "error": "Offer를 선택해주세요.",
-            "errors": ["Offer ID가 필요합니다."]
+            "errors": ["최소 1개 이상의 Offer를 선택해주세요."]
         }
     
     creative_set_name = settings.get("creative_set_name", "")
@@ -1130,84 +1140,73 @@ def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
 
     logger.info(f"✅ Using all ad_outputs: {ad_outputs}")
     
-    # API Request
-    try:
-        headers = _get_auth_headers()
-        payload = {
-            "creative_set_name": creative_set_name,
-            "offer_id": int(offer_id),
-            "geos": ["ALL"],
-            "ad_outputs": ad_outputs,  # ← 자동 선택된 값
-            "creatives": creatives_payload
-        }
-        
-        logger.info(f"📤 Sending API request:")
-        logger.info(f"   - Payload: {payload}")
-        
-        response = requests.post(
-            f"{MINTEGRAL_BASE_URL}/creative_set",
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
-        
-        # 디버깅: 응답 로깅
-        logger.info(f"📥 API Response:")
-        logger.info(f"   - Status Code: {response.status_code}")
-        logger.info(f"   - Response Text: {response.text}")
-        
-        response.raise_for_status()
-        data = response.json()
-        
-        if data.get("code") != 200:
-            error_msg = data.get("msg", "Creative Set 생성 실패")
-            error_detail = data.get("data")  # ← 추가: data 필드 확인
-            logger.error(f"Creative Set creation failed: {error_msg}")
-            logger.error(f"Error details: {error_detail}")  # ← 추가
-            return {
-                "success": False,
-                "error": error_msg,
-                "errors": [f"{error_msg} - {error_detail}" if error_detail else error_msg]
+    # API Request - 여러 Offer에 업로드
+    success_count = 0
+    failed_count = 0
+    errors = []
+
+    for offer_id in offer_ids:
+        try:
+            headers = _get_auth_headers()
+            payload = {
+                "creative_set_name": creative_set_name,
+                "offer_id": int(offer_id),
+                "geos": ["ALL"],
+                "ad_outputs": ad_outputs,
+                "creatives": creatives_payload
             }
             
-        logger.info(f"✅ Creative Set created: {creative_set_name} with {len(creatives_payload)} creatives")
-        
+            logger.info(f"📤 Sending API request to Offer {offer_id}:")
+            logger.info(f"   - Payload: {payload}")
+            
+            response = requests.post(
+                f"{MINTEGRAL_BASE_URL}/creative_set",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            
+            logger.info(f"📥 API Response for Offer {offer_id}:")
+            logger.info(f"   - Status Code: {response.status_code}")
+            logger.info(f"   - Response Text: {response.text}")
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get("code") == 200:
+                success_count += 1
+                logger.info(f"✅ Created '{creative_set_name}' in Offer {offer_id}")
+            else:
+                failed_count += 1
+                error_msg = data.get("msg") or data.get("message") or "Unknown error"
+                errors.append(f"Offer {offer_id}: {error_msg}")
+                logger.error(f"❌ Failed for Offer {offer_id}: {error_msg}")
+                
+        except Exception as e:
+            failed_count += 1
+            errors.append(f"Offer {offer_id}: {str(e)}")
+            logger.error(f"❌ Exception for Offer {offer_id}: {e}")
+
+    # Return results
+    total = len(offer_ids)
+    if success_count > 0:
         return {
             "success": True,
-            "message": f"Creative Set '{creative_set_name}'이(가) 성공적으로 생성되었습니다! ({len(creatives_payload)}개 creative)",
+            "message": f"Creative Set '{creative_set_name}' 생성 완료! ({success_count}/{total} Offer)",
             "creative_set_name": creative_set_name,
-            "offer_id": offer_id,
-            "total_creatives": len(creatives_payload)
+            "total_offers": total,
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "total_creatives": len(creatives_payload),
+            "errors": errors
+        }
+    else:
+        return {
+            "success": False,
+            "error": f"모든 Offer에서 실패 ({failed_count}/{total})",
+            "errors": errors
         }
         
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f"❌ Connection Error: {e}", exc_info=True)
-        return {
-            "success": False,
-            "error": f"❌ API 연결 실패 (네트워크 차단 가능성): {str(e)}",
-            "errors": [str(e)]
-        }
-    except requests.exceptions.Timeout as e:
-        logger.error(f"❌ Timeout: {e}", exc_info=True)
-        return {
-            "success": False,
-            "error": f"❌ API 타임아웃 (30초 초과): {str(e)}",
-            "errors": [str(e)]
-        }
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Request Error: {e}", exc_info=True)
-        return {
-            "success": False,
-            "error": f"❌ API 요청 실패: {str(e)}",
-            "errors": [str(e)]
-        }
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
-        return {
-            "success": False,
-            "error": f"예상치 못한 오류: {str(e)}",
-            "errors": [str(e)]
-        }
 
 def _copy_creative_sets(game: str, settings: Dict) -> Dict:
     """Copy creative sets to target offers."""
