@@ -454,21 +454,23 @@ def run():
                 network_data = all_data[all_data['network'] == net].copy()
                 
                 network_data = network_data.sort_values('probability_pct', ascending=False)
-
-
+                
+                # 중복 제거: 같은 소재는 가장 높은 확률만 유지
+                network_data = network_data.drop_duplicates(subset=['subject_label'], keep='first')
                 
                 st.markdown(f"#### 🎯 {net.upper()}")
                 st.caption(f"{len(network_data)}개 소재")
                 
-                # display_df에서 rank_per_network 제거
+                # past_network 추가
                 display_df = network_data[[
-                    'subject_label', 'probability_pct'
-                ]].head(10)
+                    'subject_label', 'past_network', 'probability_pct'
+                ]]
 
                 st.dataframe(
                     display_df,
                     column_config={
                         'subject_label': st.column_config.TextColumn('소재', width='small'),
+                        'past_network': st.column_config.TextColumn('Past', width='small'),
                         'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small')
                     },
                     hide_index=True,
@@ -487,24 +489,26 @@ def run():
                     network_data = all_data[all_data['network'] == net].copy()
             
                     network_data = network_data.sort_values('probability_pct', ascending=False)
-
-
+                    
+                    # 중복 제거: 같은 소재는 가장 높은 확률만 유지
+                    network_data = network_data.drop_duplicates(subset=['subject_label'], keep='first')
                     
                     st.markdown(f"#### 🎯 {net.upper()}")
                     st.caption(f"{len(network_data)}개 소재")
 
                     
-                    # display_df에서 rank_per_network 제거
+                    # past_network 추가
                     display_df = network_data[[
-                         'subject_label', 'probability_pct'  # ← 'icon' 제거 필요
-                    ]].head(10)
+                         'subject_label', 'past_network', 'probability_pct'
+                    ]]
                     
                     st.dataframe(
                         display_df,
-                        column_config={
-                            'subject_label': st.column_config.TextColumn('소재', width='small'),
-                            'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small')
-                        },
+                    column_config={
+                        'subject_label': st.column_config.TextColumn('소재', width='small'),
+                        'past_network': st.column_config.TextColumn('Past', width='small'),
+                        'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small')
+                    },
                         hide_index=True,
                         use_container_width=True,
                         height=400
@@ -658,9 +662,16 @@ def run():
                     with col:
                         # 해당 조합 데이터
                         combo_df = future_net_df[future_net_df['past_network'] == past_net].copy()
-                        combo_df = combo_df.sort_values(['app', 'rank_per_network']).reset_index(drop=True)
+                        combo_df = combo_df.sort_values('ranking_score', ascending=False).reset_index(drop=True)
                         
-                        top_10_bubble = combo_df.head(10)
+                        # 필터링 후 rank 재계산 (1부터 시작)
+                        combo_df['rank_per_network'] = range(1, len(combo_df) + 1)
+                        
+                        top_10_bubble = combo_df
+
+
+
+
                         all_data_df = combo_df
                         
                         if len(top_10_bubble) == 0:
@@ -844,9 +855,14 @@ def run():
                 for past_idx, past_net in enumerate(past_networks):
                     # 해당 조합 데이터
                     combo_df = future_net_df[future_net_df['past_network'] == past_net].copy()
-                    combo_df = combo_df.sort_values(['app', 'rank_per_network']).reset_index(drop=True)
+                    combo_df = combo_df.sort_values('ranking_score', ascending=False).reset_index(drop=True)
                     
-                    top_10_bubble = combo_df.head(10)
+                    # 필터링 후 rank 재계산 (1부터 시작)
+                    combo_df['rank_per_network'] = range(1, len(combo_df) + 1)
+                    
+                    top_10_bubble = combo_df
+
+
                     all_data_df = combo_df
                     
                     if len(top_10_bubble) == 0:

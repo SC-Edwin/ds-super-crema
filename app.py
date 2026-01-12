@@ -357,7 +357,7 @@ def main():
     #     st.markdown('</div>', unsafe_allow_html=True)
 
     with tab1:
-        log_action(st.session_state.user_email, st.session_state.login_method, 'access_performance_ml')  # ← 이 줄 추가
+        log_action(st.session_state.user_email, st.session_state.login_method, 'access_performance_ml')  
         st.markdown('<div id="viz-root">', unsafe_allow_html=True)
         from modules.visualization import main as viz_main
         viz_main.run()
