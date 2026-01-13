@@ -1103,9 +1103,10 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         
                         mode = mintegral_settings.get("mode", "upload")
                         
+                        # Validate based on mode
                         if mode == "upload":
                             # Upload mode validation
-                            if not mintegral_settings.get("selected_offer_ids"):
+                            if not mintegral_settings.get("selected_offer_id"):
                                 mintegral_ok_placeholder.error("❌ Offer를 선택해주세요.")
                             elif not (mintegral_settings.get("selected_images") or 
                                     mintegral_settings.get("selected_videos") or 

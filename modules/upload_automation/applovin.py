@@ -671,11 +671,10 @@ def get_assets(game: str = None) -> Dict[str, List[Dict]]:
                 data = resp.json()
                 return data if isinstance(data, list) else data.get("results", [])
             
-            # 최대 60페이지까지 병렬 요청 (5~10개씩 동시)
+            # 최대 60페이지까지 병렬 요청 (10개씩 동시)
             with ThreadPoolExecutor(max_workers=10) as executor:
                 page = 2
-                while page <= 60:  # 최대 6000개
-                    # 5페이지씩 묶어서 병렬 요청
+                while page <= 60:
                     batch_pages = range(page, min(page + 10, 61))
                     futures = {executor.submit(fetch_page, p): p for p in batch_pages}
                     
@@ -688,10 +687,8 @@ def get_assets(game: str = None) -> Dict[str, List[Dict]]:
                         except Exception as e:
                             logger.error(f"Page {futures[future]} failed: {e}")
                     
-                    # 페이지 순서대로 정렬
                     batch_results.sort(key=lambda x: x[0])
                     
-                    # 결과 추가
                     has_more = False
                     for page_num, result in batch_results:
                         all_assets.extend(result)
@@ -701,7 +698,7 @@ def get_assets(game: str = None) -> Dict[str, List[Dict]]:
                     if not has_more:
                         break
                     
-                    page += 5
+                    page += 10
                     logger.info(f"Fetched up to page {page-1}, total: {len(all_assets)}")
         
         logger.info(f"Total assets fetched: {len(all_assets)}")
@@ -709,43 +706,42 @@ def get_assets(game: str = None) -> Dict[str, List[Dict]]:
         # ACTIVE만 필터링
         all_assets = [a for a in all_assets if a.get("status") == "ACTIVE"]
         
-        
-        # 전체 Playables 먼저 저장 (게임 필터 전)
-        all_playables = [a for a in all_assets if a.get("resource_type") == "HTML"]
-        logger.info(f"Total playables (before filter): {len(all_playables)}")
-        
-        # 게임별 필터링 (Video만)
+        # 게임별 필터링 (Video + Playable 둘 다)
         if game and "game_mapping" in config:
             package_keyword = config["game_mapping"].get(game, "").lower()
             if package_keyword:
-                # Video만 name으로 필터링
                 filtered_videos = [
                     a for a in all_assets
                     if a.get("resource_type") == "VIDEO" and package_keyword in a.get("name", "").lower()
                 ]
                 
-                logger.info(f"Filtered to {len(filtered_videos)} videos for {game}")
+                filtered_playables = [
+                    a for a in all_assets
+                    if a.get("resource_type") == "HTML" and package_keyword in a.get("name", "").lower()
+                ]
+                
+                logger.info(f"Filtered to {len(filtered_videos)} videos, {len(filtered_playables)} playables for {game}")
                 
                 return {
                     "videos": filtered_videos,
-                    "playables": all_playables  # 전체 playable (Campaign에서 필터링)
+                    "playables": filtered_playables
                 }
         
         # 게임 필터가 없는 경우
         videos = [a for a in all_assets if a.get("resource_type") == "VIDEO"]
+        playables = [a for a in all_assets if a.get("resource_type") == "HTML"]
         
-        logger.info(f"Split: {len(videos)} videos, {len(all_playables)} playables")
+        logger.info(f"Split: {len(videos)} videos, {len(playables)} playables")
         
         return {
             "videos": videos,
-            "playables": all_playables
+            "playables": playables
         }
         
     except Exception as e:
         logger.error(f"Failed to fetch Applovin assets: {e}", exc_info=True)
         st.error(f"Applovin asset 목록을 가져오는데 실패했습니다: {e}")
         return {"videos": [], "playables": []}
-
 @st.cache_data(ttl=300)  # 5분 캐시
 def get_creative_sets_by_campaign(campaign_id: str) -> List[Dict]:
     """
@@ -1156,14 +1152,8 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
             st.markdown("##### 🎮 Playables (최대 10개)")
             
             if assets["playables"]:
-                # Campaign에서 실제 사용된 playable ID 가져오기
-                used_playable_ids = get_playables_used_in_campaign(campaign_id)
-                
-                # 사용된 playable만 필터링
-                campaign_playables = [
-                    p for p in assets["playables"]
-                    if p.get("id") in used_playable_ids
-                ]
+                # 게임 키워드로 이미 필터링됨 (get_assets에서)
+                campaign_playables = assets["playables"]
                 
                 # 캠페인 이름 가져오기 (이미 campaigns 리스트 있음)
                 campaign_name = next(
