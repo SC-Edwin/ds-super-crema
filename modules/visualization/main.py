@@ -103,65 +103,67 @@ def load_prediction_data():
     client = get_bigquery_client()
     
     query = """
-    WITH WeekendData AS (
-      SELECT *
-      FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
-      WHERE 
-        prediction_timestamp = (
-          SELECT MAX(prediction_timestamp)
-          FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
+        WITH WeekendData AS (
+        SELECT *
+        FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
+        WHERE 
+            prediction_timestamp = (
+            SELECT MAX(prediction_timestamp)
+            FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
+            )
+        ),
+        LatestSnapshot AS (
+        SELECT *
+        FROM (
+            SELECT
+            *,
+            impressions_1 + impressions_2 + impressions_3 as sum_impressions,
+            installs_1 + installs_2 + installs_3 as sum_installs,
+            clicks_1 + clicks_2 + clicks_3 as sum_clicks,
+            ROUND(cost_1 + cost_2 + cost_3,2) as sum_costs,
+            COALESCE(ROUND(SAFE_DIVIDE((cost_1 + cost_2 + cost_3), (installs_1 + installs_2 + installs_3)),2),0) as sum_CPI,
+            ROW_NUMBER() OVER (
+                PARTITION BY subject, network, app, past_network, future_locality
+                ORDER BY SAFE_CAST(prediction_timestamp AS TIMESTAMP) DESC
+            ) AS row_num
+            FROM WeekendData
         )
-    ),
-    LatestSnapshot AS (
-      SELECT *
-      FROM (
+        WHERE row_num = 1
+        )
         SELECT
-          *,
-        impressions_1 + impressions_2 + impressions_3 as sum_impressions,
-        installs_1 + installs_2 + installs_3 as sum_installs,
-        clicks_1 + clicks_2 + clicks_3 as sum_clicks,
-        ROUND(cost_1 + cost_2 + cost_3,2) as sum_costs,
-        COALESCE(ROUND(SAFE_DIVIDE((cost_1 + cost_2 + cost_3), (installs_1 + installs_2 + installs_3)),2),0) as sum_CPI,
-          ROW_NUMBER() OVER (
-            PARTITION BY subject, network, app, past_network
-            ORDER BY SAFE_CAST(prediction_timestamp AS TIMESTAMP) DESC) AS row_num
-        FROM WeekendData
-      )
-      WHERE row_num = 1
-    )
-    SELECT
-      subject,
-      COALESCE(
-        REGEXP_EXTRACT(subject, r'(-?\\d+)'),
-        subject
-      ) AS subject_label,
-      network,
-      app,
-      locality,
-      day_1,
-      day_2,
-      day_3,
-      prediction_score,  
-      ranking_score,
-      past_network,
-      sum_impressions,
-      sum_installs,
-      sum_clicks,
-      sum_costs,
-      sum_CPI,
-      roas_sum_1to3,
-      ROUND(SAFE_DIVIDE(sum_installs * 1000, sum_impressions), 2) as IPM,
-      ROUND(SAFE_DIVIDE(sum_clicks * 100, sum_impressions), 2) as CTR,
-      ROUND(SAFE_DIVIDE(sum_installs * 100, sum_clicks), 2) as CVR,
-      ROUND(SAFE_DIVIDE(sum_installs * 100, sum_impressions), 2) as CVR_IMP,
-      retention_rate_sum_1to3,
-      engagement_quality_2,
-      ROW_NUMBER() OVER (
-        PARTITION BY app, past_network, network
-        ORDER BY ranking_score DESC
-      ) AS rank_per_network
-    FROM LatestSnapshot
-    """
+        subject,
+        COALESCE(
+            REGEXP_EXTRACT(subject, r'(-?\\d+)'),
+            subject
+        ) AS subject_label,
+        network,
+        app,
+        locality,
+        future_locality,
+        day_1,
+        day_2,
+        day_3,
+        prediction_score,  
+        ranking_score,
+        past_network,
+        sum_impressions,
+        sum_installs,
+        sum_clicks,
+        sum_costs,
+        sum_CPI,
+        roas_sum_1to3,
+        ROUND(SAFE_DIVIDE(sum_installs * 1000, sum_impressions), 2) as IPM,
+        ROUND(SAFE_DIVIDE(sum_clicks * 100, sum_impressions), 2) as CTR,
+        ROUND(SAFE_DIVIDE(sum_installs * 100, sum_clicks), 2) as CVR,
+        ROUND(SAFE_DIVIDE(sum_installs * 100, sum_impressions), 2) as CVR_IMP,
+        retention_rate_sum_1to3,
+        engagement_quality_2,
+        ROW_NUMBER() OVER (
+            PARTITION BY app, past_network, network, future_locality
+            ORDER BY ranking_score DESC
+        ) AS rank_per_network
+        FROM LatestSnapshot
+        """
     
     df = client.query(query).to_dataframe()
     return df
@@ -315,8 +317,8 @@ def run():
 
 
     with col2:
-        all_localities = ['All'] + sorted(df['locality'].unique().tolist())
-        selected_locality = st.selectbox("🌍 Locality", all_localities)
+            all_future_localities = ['All'] + sorted(df['future_locality'].dropna().unique().tolist())
+            selected_future_locality = st.selectbox("🎯 투자 지역", all_future_localities)
 
     with col3:
         # 주차 목록 (최신순, None 제외)
@@ -347,8 +349,8 @@ def run():
     if selected_app != 'All':
         filtered_df = filtered_df[filtered_df['app'] == selected_app]
 
-    if selected_locality != 'All':
-        filtered_df = filtered_df[filtered_df['locality'] == selected_locality]
+    if selected_future_locality != 'All':
+            filtered_df = filtered_df[filtered_df['future_locality'] == selected_future_locality]
     
     if selected_week != 'All':
         filtered_df = filtered_df[filtered_df['upload_week'] == selected_week]
@@ -611,8 +613,8 @@ def run():
 
     # 버튼 클릭 시 팝업 호출
     if st.session_state.get('show_ai_recommendation', False):
-        show_ai_modal(filtered_df, selected_app, selected_locality, selected_week_label)
-        st.session_state['show_ai_recommendation'] = False  # 리셋
+        show_ai_modal(filtered_df, selected_app, selected_future_locality, selected_week_label)
+        st.session_state['show_ai_recommendation'] = False  
     
     # ========== 새로운 탭 구조: Future Network 중심 ==========
     future_networks = sorted(filtered_df['network'].unique())
