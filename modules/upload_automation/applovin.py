@@ -1112,9 +1112,25 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
             st.markdown("##### 📹 Videos (최대 10개)")
             
             if assets["videos"]:
+                # 캠페인 이름 가져오기
+                campaign_name = next(
+                    (c.get("name", "") for c in campaigns if str(c.get("id")) == str(campaign_id)),
+                    ""
+                )
+                
+                # Video spend 데이터 가져오기
+                video_spend = get_playable_performance(campaign_id, campaign_name)
+                
+                # Spend 기준 내림차순 정렬
+                sorted_videos = sorted(
+                    assets["videos"],
+                    key=lambda v: video_spend.get(v['id'], 0),
+                    reverse=True
+                )
+                
                 video_options = {
-                    f"{v['name']} (ID: {v['id']})": v['id']
-                    for v in assets["videos"]
+                    f"{v['name']} (ID: {v['id']}) [${video_spend.get(v['id'], 0):.2f}]": v['id']
+                    for v in sorted_videos
                 }
                 
                 default_video_labels = [
@@ -1155,14 +1171,8 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
                 # 게임 키워드로 이미 필터링됨 (get_assets에서)
                 campaign_playables = assets["playables"]
                 
-                # 캠페인 이름 가져오기 (이미 campaigns 리스트 있음)
-                campaign_name = next(
-                    (c.get("name", "") for c in campaigns if str(c.get("id")) == str(campaign_id)),
-                    ""
-                )
-                
-                # Playable spend 데이터 가져오기 (캠페인 이름 직접 전달)
-                playable_spend = get_playable_performance(campaign_id, campaign_name)
+                # spend 데이터는 위에서 이미 가져옴 (video_spend와 동일)
+                playable_spend = video_spend
                 
                 # Spend 기준 내림차순 정렬
                 sorted_playables = sorted(
