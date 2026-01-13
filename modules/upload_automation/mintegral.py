@@ -246,11 +246,17 @@ def get_offers(game_filter: Optional[List[str]] = None, max_pages: int = 3, only
                 if any(gf.lower() in o.get("offer_name", "").lower() for gf in game_filter)
             ]
         
-        # ✅ Running 상태 필터링
+        # ✅ 활성 상태 필터링 (Running + Over Daily Cap + Partially Over Cap)
         if only_running:
             before_count = len(all_offers)
-            all_offers = [o for o in all_offers if o.get("status") == "RUNNING"]
-            logger.info(f"Filtered to RUNNING offers: {len(all_offers)}/{before_count}")
+            
+            # 디버깅: 모든 status 값 확인
+            all_statuses = set(o.get("status") for o in all_offers)
+            logger.info(f"🔍 All offer statuses found: {all_statuses}")
+            
+            active_statuses = ["RUNNING", "OVER_DAILY_CAP", "PARTIALLY_OVER_CAP"]
+            all_offers = [o for o in all_offers if o.get("status") in active_statuses]
+            logger.info(f"Filtered to active offers: {len(all_offers)}/{before_count}")
         
         logger.info(f"Fetched {len(all_offers)} offers (game: {game_filter}, running_only: {only_running})")
         return all_offers
