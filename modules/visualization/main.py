@@ -279,6 +279,13 @@ def run():
     # ========== 주차 계산 추가 ==========
     # day_1 기준으로 업로드 주차 계산
     df['upload_week'] = df['day_1'].apply(get_friday_based_week)
+    
+    # ========== Locality 이모지 라벨 ==========
+    df['subject_label_emoji'] = df.apply(
+        lambda x: f"{x['subject_label']} 🇺🇸" if x['future_locality'] == 'US' 
+                  else f"{x['subject_label']} 🌍", 
+        axis=1
+    )
                 
     
     # 현재 기준 주차들 계산
@@ -693,19 +700,24 @@ def run():
                         
                         fig_bubble = go.Figure()
                         
+                        # Locality별 색상
+                        locality_colors = top_10_bubble['future_locality'].map({
+                            'US': '#ff006e', 'GLOBAL': '#8b00ff'
+                        }).fillna('#ff006e')
+                        
                         fig_bubble.add_trace(go.Scatter(
                             x=top_10_bubble['rank_per_network'],
                             y=top_10_bubble['ranking_score'],
                             mode='markers+text',
                             marker=dict(
                                 size=bubble_size,
-                                color=top_10_bubble['ranking_score'],
-                                colorscale=[[0, '#ff77a0'], [0.5, '#ff4d8f'], [1, '#ff006e']],
+                                color=locality_colors,
                                 showscale=False,
                                 line=dict(color='rgba(255, 255, 255, 0.5)', width=2),
                                 opacity=0.9
                             ),
-                            text=top_10_bubble['subject_label'],
+                           
+                            text=top_10_bubble['subject_label_emoji'],
                             textposition='top center',
                             textfont=dict(color='white', size=9),
                             hovertemplate='<b>%{text}</b><br>Rank: %{x}<br>Score: %{y:.2f}<extra></extra>'
@@ -886,19 +898,23 @@ def run():
                         
                         fig_bubble = go.Figure()
                         
+                        # Locality별 색상
+                        locality_colors = top_10_bubble['future_locality'].map({
+                            'US': '#ff006e', 'GLOBAL': '#8b00ff'
+                        }).fillna('#ff006e')
+                        
                         fig_bubble.add_trace(go.Scatter(
                             x=top_10_bubble['rank_per_network'],
                             y=top_10_bubble['ranking_score'],
                             mode='markers+text',
                             marker=dict(
                                 size=bubble_size,
-                                color=top_10_bubble['ranking_score'],
-                                colorscale=[[0, '#ff77a0'], [0.5, '#ff4d8f'], [1, '#ff006e']],
+                                color=locality_colors,
                                 showscale=False,
                                 line=dict(color='rgba(255, 255, 255, 0.5)', width=2),
                                 opacity=0.9
                             ),
-                            text=top_10_bubble['subject_label'],
+                            text=top_10_bubble['subject_label_emoji'],
                             textposition='top center',
                             textfont=dict(color='white', size=9),
                             hovertemplate='<b>%{text}</b><br>Rank: %{x}<br>Score: %{y:.2f}<extra></extra>'
