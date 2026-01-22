@@ -211,6 +211,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
     # --- LOAD GAMES FROM DB ---
     GAMES = game_manager.get_all_game_names(include_custom=is_marketer)
 
+
     if not GAMES:
         st.error("No games found. Please check BigQuery connection or Add a New Game.")
         return

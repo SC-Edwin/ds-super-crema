@@ -398,7 +398,7 @@ def main():
             # Streamlit의 link_button 사용 (새 탭에서 열림)
             st.link_button(
                 "🌐 이동",
-                "https://weapon-rpg.web.app/",
+                "https://creative-crema.web.app/",
                 use_container_width=True,
                 type="primary"
             )  

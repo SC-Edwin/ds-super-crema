@@ -1331,6 +1331,13 @@ FB_GAME_MAPPING: Dict[str, Dict[str, Any]] = {
         "adset_prefix": "prison_aos_facebook_us_install_test",
         "page_id_key": "page_id_prison",
     },
+    "Arrow Flow": {
+        "account_id": "act_24856362507399374",
+        "campaign_id": "120227542471290408",
+        "campaign_name": "arrowflow_aos_facebook_us_test_15th+",
+        "adset_prefix": "arrowflow_aos_facebook_us_test",
+        "page_id_key": "page_id_arrow",
+    },
 }
 
 def upload_to_facebook(
