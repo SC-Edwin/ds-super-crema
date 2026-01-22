@@ -293,8 +293,8 @@ def login_with_password(username, password):
 def login_with_google(email):
     """Google 로그인 - Supercent 도메인이면 자동 허용"""
     
-    # 1. 도메인 체크 (supercent.com과 supercent.io 둘 다 허용)
-    allowed_domains = ['@supercent.com', '@supercent.io']
+    # 1. 도메인 체크 ( supercent.io 둘 다 허용)
+    allowed_domains = [ '@supercent.io']
     
     if not any(email.endswith(domain) for domain in allowed_domains):
         return False, "🚫 Supercent 계정만 사용 가능합니다"
@@ -303,7 +303,7 @@ def login_with_google(email):
     name = email.split('@')[0].capitalize()
     
     # 3. 관리자 지정 (필요하면 이메일 추가)
-    admins = ['edi@supercent.com', 'edwin@supercent.io']  # 관리자 이메일 리스트
+    admins = [ 'edwin@supercent.io']  # 관리자 이메일 리스트
     role = 'admin' if email in admins else 'user'
     
     # 4. 세션에 저장
@@ -357,7 +357,7 @@ def show_login_page():
             # --- 1. Google 로그인 섹션 (상단 배치) ---
             
             st.markdown("##### 🌐 Supercent 계정 로그인 (권장)")
-            st.info("🏢 @supercent.com 또는 @supercent.io 계정만 사용 가능합니다.")
+            st.info("🏢  @supercent.io 계정만 사용 가능합니다.")
             
             # OAuth 콜백 처리 (URL에 code가 있으면)
             email = handle_google_callback()
