@@ -480,6 +480,18 @@ GAME_DEFAULTS: Dict[str, Dict[str, str]] = {
         "fb_app_id": "6564765833603067",
         "store_url": "https://play.google.com/store/apps/details?id=io.supercent.prison",
     },
+    "Arrow Flow": {
+        "fb_app_id": "1178896120788157",
+        "store_url": "https://play.google.com/store/apps/details?id=com.hg.arrow&hl=ko",
+    },
+    "Roller Disco": {
+        "fb_app_id": "579397764432053",
+        "store_url": "https://play.google.com/store/apps/details?id=com.Albus.RollerDisco",
+    },
+    "Waterpark Boys": {
+        "fb_app_id": "957490872253064",
+        "store_url": "https://play.google.com/store/apps/details?id=com.Albus.WaterParkBoys",
+    },
 }
 
 def init_fb_game_defaults() -> None:
@@ -751,8 +763,7 @@ def upload_videos_create_ads(
     max_workers: int = 6,
     store_url: str | None = None,
     try_instagram: bool = True,
-    settings: dict | None = None,
-):
+    settings: dict | None = None,):
     """
     [Hybrid Mode]
     - Test Mode: Uploads every video as a separate ad (Original behavior).
@@ -767,8 +778,7 @@ def upload_videos_create_ads(
     import re
     import pathlib
     import os
-    st.warning("⚠️ **WARNING: upload_videos_create_ads 실행 중 (Test Mode 함수)**")
-    st.write("Marketer Mode에서는 upload_videos_to_library_and_create_single_ads를 사용해야 합니다!")
+
     # ------------------------------------------------------------------
     # 0. DETECT MODE
     # ------------------------------------------------------------------
@@ -1333,20 +1343,32 @@ FB_GAME_MAPPING: Dict[str, Dict[str, Any]] = {
     },
     "Arrow Flow": {
         "account_id": "act_24856362507399374",
-        "campaign_id": "120227542471290408",
-        "campaign_name": "arrowflow_aos_facebook_us_test_15th+",
-        "adset_prefix": "arrowflow_aos_facebook_us_test",
+        "campaign_id": "120240666247060394",
+        "campaign_name": "arrow_aos_facebook_us_test",
+        "adset_prefix": "arrow_aos_facebook_us_test",
         "page_id_key": "page_id_arrow",
     },
+    "Roller Disco": {
+        "account_id": "act_505828195863528",
+        "campaign_id": "120216262440630087",
+        "campaign_name": "rollerdisco_aos_facebook_us_creativetest",
+        "adset_prefix": "rollerdisco_aos_facebook_us_creativetest",
+        "page_id_key": "page_id_roller",
+    },
+    "Waterpark Boys": {
+        "account_id": "act_1088490002247518",
+        "campaign_id": "120209343960830376",
+        "campaign_name": "WaterParkBoys_aos_facebook_us_test",
+        "adset_prefix": "WaterParkBoys_aos_facebook_us_test",
+        "page_id_key": "page_id_water",
+    },
 }
-
 def upload_to_facebook(
     game_name: str,
     uploaded_files: list,
     settings: dict,
     *,
-    simulate: bool = False,
-) -> dict:
+    simulate: bool = False,) -> dict:
     """
     Main entry: create ad set + ads for a game using current settings.
     If simulate=True, just return the plan (no writes).
