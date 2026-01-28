@@ -28,16 +28,18 @@ from unity_ads import (
     _unity_list_playable_creatives,
     _unity_list_assigned_creative_packs,
     _unity_assign_creative_pack,
-    _unity_create_playable_creative,  # 추가
-    _unity_create_creative_pack,      # 추가
-    _check_existing_creative,         # 추가
-    _check_existing_pack,             # 추가
+    _unity_create_playable_creative,
+    _unity_create_creative_pack,
+    _check_existing_creative,
+    _check_existing_pack,
+    _clean_playable_name_for_pack,  # 추가
     get_unity_settings as _get_unity_settings,
     _ensure_unity_settings_state,
     preview_unity_upload as _preview_unity_upload,
     apply_unity_creative_packs_to_campaign as _apply_unity_creative_packs_to_campaign,
     upload_unity_creatives_to_campaign as _upload_unity_creatives_to_campaign,
 )
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 # Re-export for compatibility
@@ -413,7 +415,7 @@ def _upload_playable_only_packs(*, game: str, videos: List[Dict], settings: Dict
             pf_path = pf.get("path", "")
             
             # Pack 이름 생성 (파일명에서 확장자 제거)
-            pack_name = pf_name.replace("_unityads.html", "").replace(".html", "").replace("_", "")
+            pack_name = _clean_playable_name_for_pack(pf_name)
             
             try:
                 # 1. Playable creative 생성 (또는 기존 것 사용)

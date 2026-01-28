@@ -590,17 +590,11 @@ def _clean_playable_name_for_pack(playable_name_or_label: str) -> str:
     
     Rules:
     1. If label format "name (type) [id]", extract just the name part
-    2. If playable name starts with something before underscore (e.g., "hello_playablexxx"),
-       remove everything before and including the first underscore (result: "playablexxx")
-    3. Remove "_unityads.html" or ".html" suffix
-    4. Remove all underscores
-    5. Return cleaned name
+    2. Remove .html extension
+    3. Keep only the part before the first underscore
     
-    Examples:
-    - "playable_003_escalater_감옥_unityads.html" -> "playable003escalater감옥"
-    - "playable_003_escalater_감옥.html" -> "playable003escalater감옥"
-    - "hello_playable_003" -> "playable003"
-    - "playable_name (playable) [12345]" -> "playablename"
+    Example:
+    - "playable001vari_hi_unityads.html" -> "playable001vari"
     """
     if not playable_name_or_label:
         return ""
@@ -608,27 +602,13 @@ def _clean_playable_name_for_pack(playable_name_or_label: str) -> str:
     # Step 1: Extract name from label format "name (type) [id]"
     name = playable_name_or_label.split(" (")[0].strip()
     
-    # Step 2: Remove file extension and suffixes (.html, _unityads.html, _Default Version, _Default Creative) - do this first
-    name = re.sub(r"_unityads\.html$", "", name, flags=re.IGNORECASE)
+    # Step 2: Remove .html extension
     name = re.sub(r"\.html$", "", name, flags=re.IGNORECASE)
-    name = re.sub(r"_Default Version$", "", name, flags=re.IGNORECASE)
-    name = re.sub(r"_Default Creative$", "", name, flags=re.IGNORECASE)
     
-    # Step 3: If there's text before the first underscore and 'playable' appears after it,
-    # remove everything before and including the first underscore
-    # Example: "hello_playable_003" -> "playable_003"
-    # Find the first underscore, and if 'playable' (case-insensitive) appears after it,
-    # remove everything up to and including that underscore
+    # Step 3: Keep only the part before the first underscore
     first_underscore_idx = name.find("_")
     if first_underscore_idx >= 0:
-        # Check if 'playable' appears after the first underscore
-        after_underscore = name[first_underscore_idx + 1:]
-        if "playable" in after_underscore.lower():
-            # Remove everything before and including the first underscore
-            name = after_underscore
-    
-    # Step 4: Remove all underscores
-    name = name.replace("_", "")
+        name = name[:first_underscore_idx]
     
     return name
 
