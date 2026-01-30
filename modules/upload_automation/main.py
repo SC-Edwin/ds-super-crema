@@ -343,23 +343,50 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         )
                         
                         if uploaded_files:
-                            if st.button("로컬 파일 추가하기", key=f"local_add_{game}", use_container_width=True):
+                            # 파일 제한 체크
+                            MAX_FILES = 10
+                            MAX_SIZE_MB = 100
+                            
+                            over_limit = len(uploaded_files) > MAX_FILES
+                            large_files = [f for f in uploaded_files if f.size > MAX_SIZE_MB * 1024 * 1024]
+                            
+                            if over_limit:
+                                st.error(f"⚠️ 한 번에 {MAX_FILES}개까지만 업로드 가능합니다. 현재: {len(uploaded_files)}개")
+                            if large_files:
+                                st.warning(f"⚠️ {MAX_SIZE_MB}MB 초과 파일 {len(large_files)}개는 Google Drive 사용을 권장합니다.")
+                            
+                            if st.button("로컬 파일 추가하기", key=f"local_add_{game}", use_container_width=True, disabled=over_limit):
                                 try:
                                     import tempfile
                                     import pathlib
+                                    import gc
                                     
                                     imported = []
-                                    for uploaded_file in uploaded_files:
-                                        # 임시 파일로 저장
-                                        suffix = pathlib.Path(uploaded_file.name).suffix or ".mp4"
-                                        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                                            tmp.write(uploaded_file.getvalue())
-                                            tmp_path = tmp.name
-                                        
-                                        imported.append({
-                                            "name": uploaded_file.name,
-                                            "path": tmp_path
-                                        })
+                                    progress = st.progress(0, text="업로드 준비 중...")
+                                    
+                                    for idx, uploaded_file in enumerate(uploaded_files):
+                                        try:
+                                            suffix = pathlib.Path(uploaded_file.name).suffix or ".mp4"
+                                            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                                                # 청크 단위로 쓰기 (메모리 절약)
+                                                CHUNK_SIZE = 1024 * 1024  # 1MB
+                                                while True:
+                                                    chunk = uploaded_file.read(CHUNK_SIZE)
+                                                    if not chunk:
+                                                        break
+                                                    tmp.write(chunk)
+                                                tmp_path = tmp.name
+                                            
+                                            imported.append({"name": uploaded_file.name, "path": tmp_path})
+                                            progress.progress((idx + 1) / len(uploaded_files), text=f"{uploaded_file.name} ({idx+1}/{len(uploaded_files)})")
+                                        except Exception as e:
+                                            st.warning(f"⚠️ {uploaded_file.name} 실패: {e}")
+                                            continue
+                                        finally:
+                                            uploaded_file.close()
+                                            gc.collect()
+                                    
+                                    progress.empty()
                                     
                                     # 기존 파일과 병합 및 중복 제거
                                     lst = st.session_state.remote_videos.get(game, [])
