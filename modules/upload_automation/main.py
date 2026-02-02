@@ -344,7 +344,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         
                         if uploaded_files:
                             # 파일 제한 체크
-                            MAX_FILES = 10
+                            MAX_FILES = 12
                             MAX_SIZE_MB = 100
                             
                             over_limit = len(uploaded_files) > MAX_FILES
