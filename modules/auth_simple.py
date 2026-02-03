@@ -10,12 +10,24 @@ from google.cloud import bigquery
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 import os
-
+from streamlit_cookies_controller import CookieController
+import json
+from datetime import timedelta
 
 
 # ========== Config ==========
 SPREADSHEET_ID = st.secrets["user_management"]["spreadsheet_id"]
 SHEET_NAME = "super_crema_users"
+
+
+# ========== Cookie 설정 ==========
+def get_cookie_manager():
+    return CookieController()
+
+COOKIE_NAME = "super_crema_session"
+COOKIE_EXPIRY_DAYS = 7
+
+
 
 
 # ========== Google OAuth 헬퍼 함수 ==========
@@ -256,10 +268,60 @@ def log_action(user_email, login_method, action):
         print(f"Log error: {e}")
 
 
+
+def _save_session_cookie(user_email, user_name, user_role, login_method):
+    """세션 정보를 쿠키에 저장"""
+    controller = get_cookie_manager()
+    
+    session_data = {
+        'user_email': user_email,
+        'user_name': user_name,
+        'user_role': user_role,
+        'login_method': login_method,
+    }
+    
+    controller.set(COOKIE_NAME, json.dumps(session_data))
+    print(f"[AUTH] Cookie saved for: {user_email}")
+
+    
+
+
+
 # ========== 인증 함수 ==========
 def check_authentication():
-    """현재 세션 인증 상태 확인"""
-    return st.session_state.get('authenticated', False)
+    """현재 세션 인증 상태 확인 (쿠키 기반)"""
+    
+    # 1. 이미 세션에 인증 정보 있으면 True
+    if st.session_state.get('authenticated', False):
+        print(f"[AUTH] Session active: {st.session_state.get('user_email')}")
+        return True
+    
+    # 2. 쿠키에서 세션 복원 시도
+    controller = get_cookie_manager()
+    session_cookie = controller.get(COOKIE_NAME)
+    
+    print(f"[AUTH] Cookie check: {session_cookie}")
+    
+    if session_cookie:
+        try:
+            session_data = json.loads(session_cookie) if isinstance(session_cookie, str) else session_cookie
+            
+            # 세션 복원
+            st.session_state.authenticated = True
+            st.session_state.user_email = session_data['user_email']
+            st.session_state.user_name = session_data['user_name']
+            st.session_state.user_role = session_data['user_role']
+            st.session_state.login_method = session_data['login_method']
+            
+            print(f"[AUTH] Restored from cookie: {session_data['user_email']}")
+            return True
+            
+        except Exception as e:
+            print(f"[AUTH] Cookie parse error: {e}")
+    
+    print(f"[AUTH] Not authenticated")
+    return False
+
 
 
 def login_with_password(username, password):
@@ -286,6 +348,9 @@ def login_with_password(username, password):
     st.session_state.user_role = user['role']
     st.session_state.login_method = 'password'
     
+    _save_session_cookie(username, user['name'], user['role'], 'password')
+
+
     log_action(username, 'password', 'login')
     
     return True, "로그인 성공"
@@ -313,6 +378,8 @@ def login_with_google(email):
     st.session_state.user_role = role
     st.session_state.login_method = 'google'
     
+    _save_session_cookie(email, name, role, 'google')
+
     # 5. 로그 기록
     log_action(email, 'google', 'login')
     
@@ -330,6 +397,11 @@ def logout():
             'logout'
         )
     
+    # 쿠키 삭제
+    cookie_manager = get_cookie_manager()
+    cookie_manager.delete(COOKIE_NAME)
+    print(f"[AUTH] Cookie deleted")
+        
     for key in ['authenticated', 'user_email', 'user_name', 'user_role', 'login_method']:
         if key in st.session_state:
             del st.session_state[key]
@@ -425,6 +497,12 @@ def show_login_page():
                         st.rerun()
                     else:
                         st.error(message)
+
+
+
+
+
+
 
 
 

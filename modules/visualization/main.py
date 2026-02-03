@@ -20,6 +20,9 @@ import pandas as pd
 import streamlit.components.v1 as components
 
 
+
+
+
 def get_friday_based_week(date):
     """
     금요일 기준 주차 계산
@@ -51,23 +54,54 @@ def get_friday_based_week(date):
 def get_week_label(week_str, reference_weeks):
     """
     주차 코드를 사용자 친화적 레이블로 변환
+    예: '2026-W05' → '2월 1주'
     
     Args:
         week_str: 'YYYY-Wnn' 형식
         reference_weeks: dict {'this': 'YYYY-Wnn', 'last': ..., 'two_ago': ...}
     
     Returns:
-        str: '이번주 (2024-W49)' 같은 형식
+        str: '2월 1주 (이번주)' 같은 형식
     """
-    if week_str == reference_weeks['this']:
-        return f"이번주 ({week_str})"
-    elif week_str == reference_weeks['last']:
-        return f"전주 ({week_str})"
-    elif week_str == reference_weeks['two_ago']:
-        return f"전전주 ({week_str})"
-    else:
+    if not week_str:
         return week_str
     
+    # ISO 주차 → 날짜 변환 (해당 주의 금요일)
+    try:
+        year = int(week_str.split('-W')[0])
+        week_num = int(week_str.split('-W')[1])
+        
+        # ISO 주차의 금요일 날짜 계산
+        from datetime import datetime, timedelta
+        jan4 = datetime(year, 1, 4)  # 1월 4일은 항상 W01에 포함
+        week1_friday = jan4 + timedelta(days=(4 - jan4.weekday()))  # W01의 금요일
+        target_friday = week1_friday + timedelta(weeks=(week_num - 1))
+        
+        month = target_friday.month
+        
+        # 해당 월의 몇 번째 주인지 계산
+        first_day_of_month = target_friday.replace(day=1)
+        week_of_month = (target_friday.day + first_day_of_month.weekday()) // 7 + 1
+        
+        month_week_label = f"{month}월 {week_of_month}주"
+        
+    except:
+        month_week_label = week_str
+    
+    # 이번주/전주/전전주 표시 추가
+    if week_str == reference_weeks['this']:
+        return f"{month_week_label} (이번주)"
+    elif week_str == reference_weeks['last']:
+        return f"{month_week_label} (전주)"
+    elif week_str == reference_weeks['two_ago']:
+        return f"{month_week_label} (전전주)"
+    else:
+        return month_week_label
+    
+
+
+
+
 
 
 # ================================
@@ -93,6 +127,8 @@ def get_bigquery_client():
     
     # 로컬 (Application Default Credentials)
     return bigquery.Client(project='roas-test-456808')  # ← 로컬 인증 사용
+
+
 
 
 
@@ -334,21 +370,19 @@ def run():
             reverse=True
         )
         
-        # 사용자 친화적 레이블 생성
-        week_options = ['All'] + [
-            get_week_label(w, reference_weeks) for w in available_weeks
-        ]
+        # 레이블 → 주차코드 매핑 생성
+        week_label_to_code = {'All': 'All'}
+        week_options = ['All']
+        
+        for w in available_weeks:
+            label = get_week_label(w, reference_weeks)
+            week_label_to_code[label] = w
+            week_options.append(label)
         
         selected_week_label = st.selectbox("📅 업로드 주차", week_options)
         
         # 레이블 → 실제 주차 코드 변환
-        if selected_week_label == 'All':
-            selected_week = 'All'
-        else:
-            # 괄호 안의 주차 코드 추출 (예: "이번주 (2024-W49)" → "2024-W49")
-            import re
-            match = re.search(r'\((.*?)\)', selected_week_label)
-            selected_week = match.group(1) if match else selected_week_label
+        selected_week = week_label_to_code.get(selected_week_label, 'All')
 
 
     # 필터 적용
@@ -358,14 +392,36 @@ def run():
 
     if selected_future_locality != 'All':
             filtered_df = filtered_df[filtered_df['future_locality'] == selected_future_locality]
-    
+
     if selected_week != 'All':
+        # 디버깅 로그
+        print(f"[DEBUG] selected_week_label: {selected_week_label}")
+        print(f"[DEBUG] selected_week (코드): {selected_week}")
+        print(f"[DEBUG] df의 upload_week 값들: {df['upload_week'].unique().tolist()}")
+        
         filtered_df = filtered_df[filtered_df['upload_week'] == selected_week]
 
     if len(filtered_df) == 0:
         st.warning("⚠️ 선택한 조건에 맞는 데이터가 없습니다.")
         return
-    
+        
+
+
+
+
+    # ========== 테스트 소재 목록 ==========
+    unique_subjects = filtered_df['subject_label'].unique()
+    # 숫자 정렬 (001, 002, 003 순서로)
+    unique_subjects_sorted = sorted(unique_subjects, key=lambda x: int(x) if x.isdigit() else float('inf'))
+    subject_count = len(unique_subjects_sorted)
+
+
+    # video001 형식으로 변환
+    subject_list_display = ', '.join([f"video{str(s).zfill(3)}" for s in unique_subjects_sorted[:25]])
+    if subject_count > 25:  # ← 여기도 25로
+        subject_list_display += f" ... (+{subject_count - 25}개 더)"
+
+    st.info(f"📋 **테스트 소재 ({subject_count}개):** {subject_list_display}")    
 
 
 
@@ -386,24 +442,7 @@ def run():
         st.markdown("---")
 
         
-        
-        # # 소재별 최적 경로 계산
-        # best_per_creative = filtered_df.loc[
-        #     filtered_df.groupby('subject_label')['ranking_score'].idxmax()
-        # ]
-        
-        # best_per_creative['path'] = (
-        #     best_per_creative['past_network'] + ' → ' + 
-        #     best_per_creative['network']
-        # )
-        
-        # # 2등과의 차이 계산
-        # def get_score_gap(row):
-        #     same_creative = filtered_df[filtered_df['subject_label'] == row['subject_label']]
-        #     sorted_scores = same_creative['ranking_score'].sort_values(ascending=False)
-        #     if len(sorted_scores) >= 2:
-        #         return sorted_scores.iloc[0] - sorted_scores.iloc[1]
-        #     return 0
+
         
         # best_per_creative['gap'] = best_per_creative.apply(get_score_gap, axis=1)
 
@@ -1067,6 +1106,10 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+
+
+
 
 
 
