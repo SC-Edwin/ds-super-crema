@@ -909,7 +909,7 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
         with title_col:
             st.markdown(f"#### {game} Applovin Settings")
         with reload_col:
-            if st.button("🔄 Reload", key=f"applovin_reload_{idx}", use_container_width=True):
+            if st.button("🔄 Reload", key=f"applovin_reload_{idx}", width="stretch"):
                 with st.spinner("Reloading campaigns and assets..."):
                     # Lazy loading: 버튼으로 명시적 로드
                     campaigns_key = f"applovin_campaigns_{game}"

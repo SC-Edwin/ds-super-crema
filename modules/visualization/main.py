@@ -522,7 +522,7 @@ def run():
                         'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small')
                     },
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                     height=400
                 )
 
@@ -558,7 +558,7 @@ def run():
                         'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small')
                     },
                         hide_index=True,
-                        use_container_width=True,
+                        width="stretch",
                         height=400
                     )
         
@@ -590,7 +590,7 @@ def run():
                 showlegend=True
             )
             
-            st.plotly_chart(fig_pie, use_container_width=True, key='ai_modal_pie')
+            st.plotly_chart(fig_pie, width="stretch", key='ai_modal_pie')
         
         with col_viz2:
             # Past 네트워크별 평균 스코어
@@ -623,7 +623,7 @@ def run():
                 showlegend=False
             )
             
-            st.plotly_chart(fig_bar, use_container_width=True, key='ai_modal_bar')
+            st.plotly_chart(fig_bar, width="stretch", key='ai_modal_bar')
         
         # 핵심 인사이트 요약
         st.markdown("---")
@@ -773,7 +773,7 @@ def run():
                             showlegend=False
                         )
                         
-                        st.plotly_chart(fig_bubble, use_container_width=True, key=f'bubble_{future_net}_{past_net}_{col_idx}')
+                        st.plotly_chart(fig_bubble, width="stretch", key=f'bubble_{future_net}_{past_net}_{col_idx}')
                         
                         # 6개 차트 (2x3 그리드로 축소)
                         st.markdown("##### 📊 주요 지표")
@@ -821,7 +821,7 @@ def run():
                                 text="sum_impressions", theme=theme, height=chart_height,
                                 color="#0096ff", texttemplate="%{text:,.0f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'imp_{future_net}_{past_net}_{col_idx}')
+                            st.plotly_chart(fig, width="stretch", key=f'imp_{future_net}_{past_net}_{col_idx}')
                         
                         with row1_col2:
                             st.markdown("###### 📲 Installs")
@@ -830,7 +830,7 @@ def run():
                                 text="sum_installs", theme=theme, height=chart_height,
                                 color="#a855f7", texttemplate="%{text:,.0f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'inst_{future_net}_{past_net}_{col_idx}')
+                            st.plotly_chart(fig, width="stretch", key=f'inst_{future_net}_{past_net}_{col_idx}')
                         
                         # Row 2
                         row2_col1, row2_col2 = st.columns(2)
@@ -842,7 +842,7 @@ def run():
                                 text="sum_CPI", theme=theme, height=chart_height,
                                 color="#ff006e", texttemplate="$%{text:.2f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'cpi_{future_net}_{past_net}_{col_idx}')
+                            st.plotly_chart(fig, width="stretch", key=f'cpi_{future_net}_{past_net}_{col_idx}')
                         
                         with row2_col2:
                             st.markdown("###### 📈 IPM")
@@ -851,7 +851,7 @@ def run():
                                 text="IPM", theme=theme, height=chart_height,
                                 color="#ff4d8f", texttemplate="%{text:.2f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'ipm_{future_net}_{past_net}_{col_idx}')
+                            st.plotly_chart(fig, width="stretch", key=f'ipm_{future_net}_{past_net}_{col_idx}')
                         
                         # Row 3
                         row3_col1, row3_col2 = st.columns(2)
@@ -863,7 +863,7 @@ def run():
                                 text="CTR", theme=theme, height=chart_height,
                                 color="#ff77a0", texttemplate="%{text:.2f}%"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'ctr_{future_net}_{past_net}_{col_idx}')
+                            st.plotly_chart(fig, width="stretch", key=f'ctr_{future_net}_{past_net}_{col_idx}')
                         
                         with row3_col2:
                             st.markdown("###### 💎 ROAS")
@@ -872,7 +872,7 @@ def run():
                                 text="roas_sum_1to3", theme=theme, height=chart_height,
                                 color="#8b00ff", texttemplate="%{text:.2f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'roas_{future_net}_{past_net}_{col_idx}')
+                            st.plotly_chart(fig, width="stretch", key=f'roas_{future_net}_{past_net}_{col_idx}')
                         
                         # 테이블
                         st.markdown("---")
@@ -888,7 +888,7 @@ def run():
                         st.dataframe(
                             display_table,
                             hide_index=True,
-                            use_container_width=True,
+                            width="stretch",
                             height=300
                         )
                         
@@ -900,7 +900,7 @@ def run():
                             file_name=f"{past_net}_to_{future_net}_{datetime.now().strftime('%Y%m%d')}.csv",
                             mime="text/csv",
                             key=f'export_{future_net}_{past_net}_{col_idx}',
-                            use_container_width=True
+                            width="stretch"
                         )
             
             else:
@@ -970,7 +970,7 @@ def run():
                             showlegend=False
                         )
                         
-                        st.plotly_chart(fig_bubble, use_container_width=True, key=f'bubble_{future_net}_{past_net}_{past_idx}')
+                        st.plotly_chart(fig_bubble, width="stretch", key=f'bubble_{future_net}_{past_net}_{past_idx}')
                     
                     with col_charts:
                         row1_col1, row1_col2, row1_col3 = st.columns(3)
@@ -1016,7 +1016,7 @@ def run():
                                 text="sum_impressions", theme=theme, height=chart_height,
                                 color="#0096ff", texttemplate="%{text:,.0f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'imp_{future_net}_{past_net}_{past_idx}')
+                            st.plotly_chart(fig, width="stretch", key=f'imp_{future_net}_{past_net}_{past_idx}')
                         
                         with row1_col2:
                             st.markdown("##### 📲 Installs")
@@ -1025,7 +1025,7 @@ def run():
                                 text="sum_installs", theme=theme, height=chart_height,
                                 color="#a855f7", texttemplate="%{text:,.0f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'inst_{future_net}_{past_net}_{past_idx}')
+                            st.plotly_chart(fig, width="stretch", key=f'inst_{future_net}_{past_net}_{past_idx}')
                         
                         with row1_col3:
                             st.markdown("##### 💰 CPI")
@@ -1034,7 +1034,7 @@ def run():
                                 text="sum_CPI", theme=theme, height=chart_height,
                                 color="#ff006e", texttemplate="$%{text:.2f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'cpi_{future_net}_{past_net}_{past_idx}')
+                            st.plotly_chart(fig, width="stretch", key=f'cpi_{future_net}_{past_net}_{past_idx}')
                         
                         with row2_col1:
                             st.markdown("##### 📈 IPM")
@@ -1043,7 +1043,7 @@ def run():
                                 text="IPM", theme=theme, height=chart_height,
                                 color="#ff4d8f", texttemplate="%{text:.2f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'ipm_{future_net}_{past_net}_{past_idx}')
+                            st.plotly_chart(fig, width="stretch", key=f'ipm_{future_net}_{past_net}_{past_idx}')
                         
                         with row2_col2:
                             st.markdown("##### 🎯 CTR")
@@ -1052,7 +1052,7 @@ def run():
                                 text="CTR", theme=theme, height=chart_height,
                                 color="#ff77a0", texttemplate="%{text:.2f}%"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'ctr_{future_net}_{past_net}_{past_idx}')
+                            st.plotly_chart(fig, width="stretch", key=f'ctr_{future_net}_{past_net}_{past_idx}')
                         
                         with row2_col3:
                             st.markdown("##### 💎 ROAS")
@@ -1061,7 +1061,7 @@ def run():
                                 text="roas_sum_1to3", theme=theme, height=chart_height,
                                 color="#8b00ff", texttemplate="%{text:.2f}"
                             )
-                            st.plotly_chart(fig, use_container_width=True, key=f'roas_{future_net}_{past_net}_{past_idx}')
+                            st.plotly_chart(fig, width="stretch", key=f'roas_{future_net}_{past_net}_{past_idx}')
                     
                     # 테이블
                     st.markdown("---")
@@ -1077,7 +1077,7 @@ def run():
                     st.dataframe(
                         display_table,
                         hide_index=True,
-                        use_container_width=True,
+                        width="stretch",
                         height=400
                     )
                     
@@ -1091,7 +1091,7 @@ def run():
                             file_name=f"{past_net}_to_{future_net}_{datetime.now().strftime('%Y%m%d')}.csv",
                             mime="text/csv",
                             key=f'export_{future_net}_{past_net}_{past_idx}',
-                            use_container_width=True
+                            width="stretch"
                         )
                     
                     # Past Network 구분선 (마지막 섹션 제외)

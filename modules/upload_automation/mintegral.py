@@ -525,7 +525,7 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
         if st.button(
             "Add Product Icon",
             key=f"mintegral_add_icon_{idx}",
-            use_container_width=True,
+            width="stretch",
             type="primary"
         ):
             # Get existing creative sets for this offer to find the icon
