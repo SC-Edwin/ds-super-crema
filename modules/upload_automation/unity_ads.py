@@ -136,13 +136,15 @@ for game, val in _raw_campaign_sets.items():
 # 3) Campaign IDs per game (operator-mode default uses AOS entry)
 for game, val in _raw_campaign_ids.items():
     gname = str(game)
-    if isinstance(val, dict):
+    if hasattr(val, 'items'):  # AttrDict 호환
         plat_map: Dict[str, List[str]] = {}
         for plat, v in val.items():
             if isinstance(v, (list, tuple)):
                 plat_map[str(plat)] = [str(x) for x in v]
             elif isinstance(v, str):
                 plat_map[str(plat)] = [v]
+            elif hasattr(v, '__iter__'):  # AttrDict list 호환
+                plat_map[str(plat)] = [str(x) for x in v]
         if plat_map:
             UNITY_CAMPAIGN_IDS_ALL[gname] = plat_map
             # Default: prefer "aos", else first platform
@@ -334,7 +336,7 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
         st.markdown(f"#### {game} Unity Settings")
         cur = st.session_state.unity_settings.get(game, {})
 
-        # Test Mode: campaign_set_id(aos)를 title_id로 사용
+        # Test Mode: campaign_set_id(플랫폼별)를 title_id로 사용
         # Marketer Mode: 플랫폼에 따라 app_id를 title_id로 사용
         if is_marketer:
             # Marketer Mode: 플랫폼 선택에 따라 app_id 사용
@@ -347,14 +349,46 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
                 # Fallback: UNITY_GAME_IDS 사용
                 secret_title_id = str(UNITY_GAME_IDS.get(game, ""))
         else:
-            # Test Mode: campaign_set_id (aos) 사용
+            available_platforms = []
+            if game in UNITY_CAMPAIGN_IDS_ALL:
+                available_platforms = list(UNITY_CAMPAIGN_IDS_ALL[game].keys())
+            if not available_platforms:
+                available_platforms = ["aos"]
+            
+            # 플랫폼 선택 UI
+            prev_platform = cur.get("platform", "aos")
+            if prev_platform not in available_platforms:
+                prev_platform = available_platforms[0]
+            
+            platform = st.selectbox(
+                "플랫폼 선택",
+                options=available_platforms,
+                index=available_platforms.index(prev_platform) if prev_platform in available_platforms else 0,
+                key=f"unity_platform_{idx}",
+            )
+            
+            # 선택한 플랫폼으로 campaign_set_id 가져오기
             try:
-                secret_title_id = get_unity_campaign_set_id(game, "aos")
+                secret_title_id = get_unity_campaign_set_id(game, platform)
             except Exception as e:
-                logger.warning(f"Failed to get campaign set ID for {game}: {e}")
+                logger.warning(f"Failed to get campaign set ID for {game} ({platform}): {e}")
                 secret_title_id = ""
         
-        secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
+        # 플랫폼별 campaign_ids 가져오기
+        if is_marketer:
+            secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
+        else:
+            # Test Mode: 선택한 플랫폼의 campaign_ids 사용
+            if game in UNITY_CAMPAIGN_IDS_ALL:
+                platform_campaign_ids = UNITY_CAMPAIGN_IDS_ALL[game].get(platform, [])
+                if platform_campaign_ids:
+                    secret_campaign_ids = platform_campaign_ids
+                else:
+                    # Fallback: 기본 campaign_ids
+                    secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
+            else:
+                secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
+        
         default_campaign_id_val = secret_campaign_ids[0] if secret_campaign_ids else ""
 
         title_key = f"unity_title_{idx}"
@@ -365,8 +399,21 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
         if secret_campaign_ids and not st.session_state.get(campaign_key) and default_campaign_id_val:
             st.session_state[campaign_key] = default_campaign_id_val
 
-        current_title_id = cur.get("title_id") or st.session_state.get(title_key) or secret_title_id
-        current_campaign_id = cur.get("campaign_id") or st.session_state.get(campaign_key) or default_campaign_id_val
+        if not is_marketer:
+            # Test Mode: 플랫폼 변경 시 캐시된 값 무시
+            prev_saved_platform = cur.get("platform", "aos")
+            if prev_saved_platform != platform:
+                current_title_id = secret_title_id
+                current_campaign_id = default_campaign_id_val
+                # 캐시도 갱신
+                st.session_state[title_key] = secret_title_id
+                st.session_state[campaign_key] = default_campaign_id_val
+            else:
+                current_title_id = cur.get("title_id") or st.session_state.get(title_key) or secret_title_id
+                current_campaign_id = cur.get("campaign_id") or st.session_state.get(campaign_key) or default_campaign_id_val
+        else:
+            current_title_id = cur.get("title_id") or st.session_state.get(title_key) or secret_title_id
+            current_campaign_id = cur.get("campaign_id") or st.session_state.get(campaign_key) or default_campaign_id_val
 
         default_org_id = cur.get("org_id") or UNITY_ORG_ID_DEFAULT
         default_client_id = cur.get("client_id") or UNITY_CLIENT_ID_DEFAULT
@@ -460,13 +507,13 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
                             title_id=title_for_list
                         )
                 else:
-                    # Test Mode: campaign set ID를 title_id로 사용
-                    # unity.game_ids의 aos 값이 campaign set ID이므로 이를 title_id로 사용
+                    # Test Mode: 선택한 플랫폼의 campaign set ID를 title_id로 사용
                     try:
-                        campaign_set_id = get_unity_campaign_set_id(game, "aos")
-                        logger.info(f"Test Mode: Using campaign set ID as title_id: {campaign_set_id} for game: {game}")
+                        campaign_set_id = get_unity_campaign_set_id(game, platform)
+                        logger.info(f"Test Mode: Using campaign set ID as title_id: {campaign_set_id} for game: {game}, platform: {platform}")
                         with st.expander("🔍 Debug: Unity Playable 조회 정보", expanded=False):
                             st.write(f"**Game:** {game}")
+                            st.write(f"**Platform:** {platform}")
                             st.write(f"**Org ID:** {org_for_list}")
                             st.write(f"**Campaign Set ID (title_id로 사용):** {campaign_set_id}")
                         playable_creatives = _unity_list_playable_creatives(
@@ -477,7 +524,7 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
                         if len(playable_creatives) == 0:
                             st.info(f"ℹ️ Campaign Set ID `{campaign_set_id}`에서 playable을 찾지 못했습니다. Unity에 playable이 등록되어 있는지 확인하세요.")
                     except Exception as e:
-                        logger.warning(f"Failed to get campaign set ID for {game}, error: {e}")
+                        logger.warning(f"Failed to get campaign set ID for {game} ({platform}), error: {e}")
                         devtools.record_exception("Unity Campaign Set ID lookup failed", e)
                         st.error("❌ Campaign Set ID 조회 실패")
                         # Fallback: 기존 title_id 사용 (있는 경우)
@@ -534,7 +581,8 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
             "Unity creative pack은 **9:16 영상 1개 + 16:9 영상 1개 + 1개의 playable** 조합을 기준으로 생성됩니다."
         )
 
-        st.session_state.unity_settings[game] = {
+        # platform 정보도 settings에 저장 (Test Mode와 Marketer Mode 모두)
+        settings_dict = {
             "title_id": (unity_title_id or "").strip(),
             "campaign_id": (unity_campaign_id or "").strip(),
             "org_id": (unity_org_id or "").strip(),
@@ -544,6 +592,12 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
             "existing_playable_id": existing_playable_id,
             "existing_playable_label": selected_existing_label,
         }
+        
+        # 플랫폼 정보 추가
+        if not is_marketer:
+            settings_dict["platform"] = platform
+        
+        st.session_state.unity_settings[game] = settings_dict
 
 # --------------------------------------------------------------------
 # Utilities
@@ -1104,7 +1158,7 @@ def preview_unity_upload(
     Preview what would happen if Unity upload is executed.
     Returns a dict with preview information without actually uploading.
     """
-    # Get title_id: Test Mode는 campaign_set_id(aos), Marketer Mode는 플랫폼별 app_id 사용
+    # Get title_id: Test Mode는 campaign_set_id(플랫폼별), Marketer Mode는 플랫폼별 app_id 사용
     title_id = (settings.get("title_id") or "").strip()
     if not title_id:
         if is_marketer:
@@ -1117,18 +1171,29 @@ def preview_unity_upload(
                 # Fallback: UNITY_GAME_IDS 사용
                 title_id = str(UNITY_GAME_IDS.get(game, ""))
         else:
-            # Test Mode: campaign_set_id (aos) 사용
+            # Test Mode: 선택한 플랫폼의 campaign_set_id 사용
+            platform = settings.get("platform", "aos")
             try:
-                title_id = get_unity_campaign_set_id(game, "aos")
+                title_id = get_unity_campaign_set_id(game, platform)
             except Exception as e:
-                logger.warning(f"Failed to get campaign set ID for {game}: {e}")
-                raise RuntimeError(f"Missing title_id for {game}. Please set it in Unity settings.")
+                logger.warning(f"Failed to get campaign set ID for {game} ({platform}): {e}")
+                raise RuntimeError(f"Missing title_id for {game} ({platform}). Please set it in Unity settings.")
     
     campaign_id = (settings.get("campaign_id") or "").strip()
     if not campaign_id:
-        ids_for_game = UNITY_CAMPAIGN_IDS.get(game) or []
-        if ids_for_game:
-            campaign_id = str(ids_for_game[0])
+        # Test Mode: 플랫폼별 campaign_ids 사용
+        if not is_marketer:
+            platform = settings.get("platform", "aos")
+            if game in UNITY_CAMPAIGN_IDS_ALL:
+                platform_campaign_ids = UNITY_CAMPAIGN_IDS_ALL[game].get(platform, [])
+                if platform_campaign_ids:
+                    campaign_id = str(platform_campaign_ids[0])
+        
+        # Fallback: 기본 campaign_ids
+        if not campaign_id:
+            ids_for_game = UNITY_CAMPAIGN_IDS.get(game) or []
+            if ids_for_game:
+                campaign_id = str(ids_for_game[0])
     
     org_id = (settings.get("org_id") or "").strip() or UNITY_ORG_ID_DEFAULT
     
@@ -1239,12 +1304,15 @@ def upload_unity_creatives_to_campaign(
     - Only upload missing items
     - Resume from where it left off
     """
-    # Get title_id: Test Mode는 campaign_set_id(aos), Marketer Mode는 플랫폼별 app_id 사용
+    # Get title_id: Test Mode는 campaign_set_id(플랫폼별), Marketer Mode는 플랫폼별 app_id 사용
     title_id = (settings.get("title_id") or "").strip()
     if not title_id:
-        # settings에서 platform 정보가 있으면 marketer mode로 간주
+        # settings에서 platform 정보 가져오기
         platform = settings.get("platform", "aos")
-        if platform in ("aos", "ios"):
+        # is_marketer_mode가 명시적으로 설정되어 있으면 그에 따라 처리
+        is_marketer = settings.get("is_marketer_mode", False)
+        
+        if is_marketer:
             # Marketer Mode: 플랫폼에 따라 app_id 사용
             try:
                 title_id = get_unity_app_id(game, platform)
@@ -1253,18 +1321,29 @@ def upload_unity_creatives_to_campaign(
                 # Fallback: UNITY_GAME_IDS 사용
                 title_id = str(UNITY_GAME_IDS.get(game, ""))
         else:
-            # Test Mode: campaign_set_id (aos) 사용
+            # Test Mode: 선택한 플랫폼의 campaign_set_id 사용
             try:
-                title_id = get_unity_campaign_set_id(game, "aos")
+                title_id = get_unity_campaign_set_id(game, platform)
             except Exception as e:
-                logger.warning(f"Failed to get campaign set ID for {game}: {e}")
-                raise RuntimeError(f"Missing title_id for {game}. Please set it in Unity settings.")
+                logger.warning(f"Failed to get campaign set ID for {game} ({platform}): {e}")
+                raise RuntimeError(f"Missing title_id for {game} ({platform}). Please set it in Unity settings.")
     
     campaign_id = (settings.get("campaign_id") or "").strip()
     if not campaign_id:
-        ids_for_game = UNITY_CAMPAIGN_IDS.get(game) or []
-        if ids_for_game:
-            campaign_id = str(ids_for_game[0])
+        # Test Mode: 플랫폼별 campaign_ids 사용
+        platform = settings.get("platform", "aos")
+        is_marketer = settings.get("is_marketer_mode", False)
+        
+        if not is_marketer and game in UNITY_CAMPAIGN_IDS_ALL:
+            platform_campaign_ids = UNITY_CAMPAIGN_IDS_ALL[game].get(platform, [])
+            if platform_campaign_ids:
+                campaign_id = str(platform_campaign_ids[0])
+        
+        # Fallback: 기본 campaign_ids
+        if not campaign_id:
+            ids_for_game = UNITY_CAMPAIGN_IDS.get(game) or []
+            if ids_for_game:
+                campaign_id = str(ids_for_game[0])
     
     org_id = (settings.get("org_id") or "").strip() or UNITY_ORG_ID_DEFAULT
     
