@@ -71,7 +71,7 @@ for game, val in _raw_game_ids.items():
     app_ids: Dict[str, str] = {}
     camp_sets: Dict[str, str] = {}
 
-    if isinstance(val, dict):
+    if hasattr(val, 'items'):  # AttrDict 호환
         for k, v in val.items():
             key = str(k)
             sval = str(v)
