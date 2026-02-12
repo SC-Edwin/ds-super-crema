@@ -293,7 +293,7 @@ def run():
         hovermode='x unified'
     )
     
-    st.plotly_chart(fig_trend, use_container_width=True, key='daily_trend')
+    st.plotly_chart(fig_trend, width="stretch", key='daily_trend')
     
     # 2개 컬럼: Top Creatives + Network Distribution
     viz_col1, viz_col2 = st.columns(2)
@@ -331,7 +331,7 @@ def run():
             textposition='outside'
         )
         
-        st.plotly_chart(fig_bar, use_container_width=True, key='top_creatives')
+        st.plotly_chart(fig_bar, width="stretch", key='top_creatives')
     
     with viz_col2:
         st.markdown("#### 🌐 Network Distribution")
@@ -352,7 +352,7 @@ def run():
             height=400
         )
         
-        st.plotly_chart(fig_pie, use_container_width=True, key='network_dist')
+        st.plotly_chart(fig_pie, width="stretch", key='network_dist')
     
     st.markdown("---")
     
@@ -369,7 +369,7 @@ def run():
     st.dataframe(
         display_df,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         height=500
     )
     
@@ -380,7 +380,7 @@ def run():
         data=csv,
         file_name=f"creative_trend_{start_date}_to_{end_date}.csv",
         mime="text/csv",
-        use_container_width=False
+        width="content"
     )
     
     st.markdown("---")

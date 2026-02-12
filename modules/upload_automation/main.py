@@ -291,7 +291,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             )
 
                         # [수정 1] 드라이브 가져오기 버튼: 너비 꽉 채우기
-                        if st.button("드라이브에서 Creative 가져오기", key=f"drive_import_{game}", use_container_width=True):
+                        if st.button("드라이브에서 Creative 가져오기", key=f"drive_import_{game}", width="stretch"):
                             try:
                                 overall = st.progress(0, text="Waiting...")
                                 log_box = st.empty()
@@ -354,7 +354,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             if large_files:
                                 st.warning(f"⚠️ {MAX_SIZE_MB}MB 초과 파일 {len(large_files)}개는 Google Drive 사용을 권장합니다.")
                             
-                            if st.button("로컬 파일 추가하기", key=f"local_add_{game}", use_container_width=True, disabled=over_limit):
+                            if st.button("로컬 파일 추가하기", key=f"local_add_{game}", width="stretch", disabled=over_limit):
                                 try:
                                     import tempfile
                                     import pathlib
@@ -410,7 +410,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         
                         # ✅ 선택된 비디오 초기화 버튼 (file_uploader만 초기화)
                         if uploaded_files or st.session_state.get(f"local_upload_{game}"):
-                            if st.button("선택된 비디오 초기화", key=f"clear_selected_{game}", use_container_width=True):
+                            if st.button("선택된 비디오 초기화", key=f"clear_selected_{game}", width="stretch"):
                                 # file_uploader의 선택만 초기화
                                 if f"local_upload_{game}" in st.session_state:
                                     del st.session_state[f"local_upload_{game}"]
@@ -428,7 +428,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     
                     
                     # ✅ 다운로드된 Creatives 초기화 버튼 (remote_videos만 초기화)
-                    if st.button("다운로드된 Creatives 초기화", key=f"clearurl_{game}", use_container_width=True):
+                    if st.button("다운로드된 Creatives 초기화", key=f"clearurl_{game}", width="stretch"):
                         st.session_state.remote_videos[game] = []
                         st.session_state.current_tab_index = i  # Preserve current tab
                         st.rerun()
@@ -438,7 +438,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         if st.button(
                             "📤 Media Library에 업로드",
                             key=f"applovin_media_upload_{game}",
-                            use_container_width=True,
+                            width="stretch",
                             help="Drive/로컬에서 가져온 파일을 Applovin Media Library에 업로드합니다"
                         ):
                             remote_list = st.session_state.remote_videos.get(game, [])
@@ -501,31 +501,31 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             media_library_btn = st.button(
                                 "📤 Media Library에 업로드 (모든 비디오)", 
                                 key=f"media_library_{game}", 
-                                use_container_width=True,
+                                width="stretch",
                                 help="Drive에서 가져온 모든 비디오를 Account Media Library에 원본 파일명으로 저장합니다."
                             )
                             st.write("")
             
                         btn_label = "Creative 업로드하기" if is_marketer else "Creative Test 업로드하기"
-                        cont = st.button(btn_label, key=f"continue_{game}", use_container_width=True)
+                        cont = st.button(btn_label, key=f"continue_{game}", width="stretch")
                         # Store current tab in query params when button is clicked
                         if cont:
                             st.query_params["tab"] = game
-                        clr = st.button("전체 초기화", key=f"clear_{game}", use_container_width=True)
+                        clr = st.button("전체 초기화", key=f"clear_{game}", width="stretch")
                     elif platform == "Unity Ads":
                         unity_ok_placeholder = st.empty()
                         st.write("")
-                        cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{game}", use_container_width=True)
-                        cont_unity_apply = st.button("캠페인에 적용", key=f"unity_apply_{game}", use_container_width=True)
+                        cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{game}", width="stretch")
+                        cont_unity_apply = st.button("캠페인에 적용", key=f"unity_apply_{game}", width="stretch")
                         # Store current tab in query params when Unity buttons are clicked
                         if cont_unity_create or cont_unity_apply:
                             st.query_params["tab"] = game
-                        clr_unity = st.button("전체 초기화 (Unity)", key=f"unity_clear_{game}", use_container_width=True)
+                        clr_unity = st.button("전체 초기화 (Unity)", key=f"unity_clear_{game}", width="stretch")
                     elif platform == "Mintegral":
                         mintegral_ok_placeholder = st.empty()
                         st.write("")
                         # Expander 없이 바로 버튼
-                        if st.button("📤 라이브러리에 업로드하기", key=f"mintegral_lib_upload_{game}", use_container_width=True):
+                        if st.button("📤 라이브러리에 업로드하기", key=f"mintegral_lib_upload_{game}", width="stretch"):
                             remote_list = st.session_state.remote_videos.get(game, [])
                             
                             if not remote_list:
@@ -582,10 +582,10 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                     devtools.record_exception("Mintegral library upload failed", e)
 
                         st.write("")  # Spacing
-                        cont_mintegral = st.button("Mintegral Creative Set 업로드하기", key=f"mintegral_upload_{game}", use_container_width=True)
+                        cont_mintegral = st.button("Mintegral Creative Set 업로드하기", key=f"mintegral_upload_{game}", width="stretch")
                         if cont_mintegral:
                             st.query_params["tab"] = game
-                        clr_mintegral = st.button("전체 초기화 (Mintegral)", key=f"mintegral_clear_{game}", use_container_width=True)
+                        clr_mintegral = st.button("전체 초기화 (Mintegral)", key=f"mintegral_clear_{game}", width="stretch")
                     elif platform == "Applovin":
                         applovin_ok_placeholder = st.empty()
                         st.write("")
@@ -597,7 +597,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             cont_applovin_paused = st.button(
                                 "⏸️ Applovin (Paused)",
                                 key=f"applovin_upload_paused_{game}",
-                                use_container_width=True,
+                                width="stretch",
                                 type="secondary"
                             )
                         
@@ -605,14 +605,14 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             cont_applovin_live = st.button(
                                 "▶️ Applovin (Live)",
                                 key=f"applovin_upload_live_{game}",
-                                use_container_width=True,
+                                width="stretch",
                                 type="primary"
                             )
                         
                         if cont_applovin_paused or cont_applovin_live:
                             st.query_params["tab"] = game
                         
-                        clr_applovin = st.button("전체 초기화 (Applovin)", key=f"applovin_clear_{game}", use_container_width=True)
+                        clr_applovin = st.button("전체 초기화 (Applovin)", key=f"applovin_clear_{game}", width="stretch")
 
             # =========================
             # RIGHT COLUMN: Settings
@@ -1324,12 +1324,12 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
 #     col_mode1, col_mode2, _ = st.columns([1, 1, 4])
     
 #     with col_mode1:
-#         if st.button("Test", use_container_width=True, key="btn_mode_ops"):
+#         if st.button("Test", width="stretch", key="btn_mode_ops"):
 #             st.session_state["page"] = "Creative 자동 업로드"
 #             st.rerun()
             
 #     with col_mode2:
-#         if st.button("Marketer", use_container_width=True, key="btn_mode_mkt"):
+#         if st.button("Marketer", width="stretch", key="btn_mode_mkt"):
 #             st.session_state["page"] = "Creative 자동 업로드 - 마케터"
 #             st.rerun()
 
@@ -1385,12 +1385,12 @@ def run():
     col_mode1, col_mode2, _ = st.columns([1, 1, 4])
     
     with col_mode1:
-        if st.button("Test", use_container_width=True, key="btn_mode_ops"):
+        if st.button("Test", width="stretch", key="btn_mode_ops"):
             st.session_state["page"] = "Creative 자동 업로드"
             st.rerun()
             
     with col_mode2:
-        if st.button("Marketer", use_container_width=True, key="btn_mode_mkt"):
+        if st.button("Marketer", width="stretch", key="btn_mode_mkt"):
             st.session_state["page"] = "Creative 자동 업로드 - 마케터"
             st.rerun()
 
