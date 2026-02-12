@@ -385,6 +385,43 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
 
         unity_daily_budget = 0
 
+        # Language 선택 (Creative 생성 시 사용)
+        LANGUAGE_OPTIONS = {
+            "English": "en",
+            "Korean (한국어)": "ko",
+            "Japanese (日本語)": "ja",
+            "Chinese Simplified (简体中文)": "zh-CN",
+            "Chinese Traditional (繁體中文)": "zh-TW",
+            "French (Français)": "fr",
+            "German (Deutsch)": "de",
+            "Spanish (Español)": "es",
+            "Portuguese (Português)": "pt",
+            "Russian (Русский)": "ru",
+            "Arabic (العربية)": "ar",
+            "Italian (Italiano)": "it",
+            "Turkish (Türkçe)": "tr",
+            "Thai (ไทย)": "th",
+            "Vietnamese (Tiếng Việt)": "vi",
+            "Indonesian (Bahasa Indonesia)": "id",
+            "Hindi (हिन्दी)": "hi",
+            "Hebrew (עברית)": "he",
+        }
+        lang_labels = list(LANGUAGE_OPTIONS.keys())
+        prev_lang = cur.get("language", "en")
+        prev_lang_label = next((k for k, v in LANGUAGE_OPTIONS.items() if v == prev_lang), "English")
+        try:
+            lang_default_idx = lang_labels.index(prev_lang_label)
+        except ValueError:
+            lang_default_idx = 0
+
+        selected_lang_label = st.selectbox(
+            "Creative 언어",
+            options=lang_labels,
+            index=lang_default_idx,
+            key=f"unity_language_{idx}",
+        )
+        unity_language = LANGUAGE_OPTIONS[selected_lang_label]
+
         st.markdown("#### Playable 선택")
         drive_playables = [
             v for v in (st.session_state.remote_videos.get(game, []) if "remote_videos" in st.session_state else [])
@@ -502,6 +539,7 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
             "campaign_id": (unity_campaign_id or "").strip(),
             "org_id": (unity_org_id or "").strip(),
             "daily_budget_usd": int(unity_daily_budget),
+            "language": unity_language,
             "selected_playable": chosen_drive_playable,
             "existing_playable_id": existing_playable_id,
             "existing_playable_label": selected_existing_label,
@@ -1240,8 +1278,10 @@ def upload_unity_creatives_to_campaign(
             missing.append("org_id")
         raise RuntimeError(f"Unity Settings Missing for upload. Missing: {', '.join(missing)}")
     
+    language = (settings.get("language") or "en").strip()
+
     # 디버깅: 실제 사용되는 ID들 출력
-    st.info(f"🔍 **Debug Info:**\n- Org ID: {org_id}\n- Title ID (App ID): {title_id}\n- Campaign ID: {campaign_id}")
+    st.info(f"🔍 **Debug Info:**\n- Org ID: {org_id}\n- Title ID (App ID): {title_id}\n- Campaign ID: {campaign_id}\n- Language: {language}")
     logger.info(f"Unity upload - org_id={org_id}, title_id={title_id}, campaign_id={campaign_id}")
 
     # Unity Ads creative limit per app (typically very high, but check for safety)
@@ -1294,10 +1334,11 @@ def upload_unity_creatives_to_campaign(
                     else:
                         st.info(f"⬆️ Uploading playable: {playable_name}")
                         playable_creative_id = _unity_create_playable_creative(
-                            org_id=org_id, 
-                            title_id=title_id, 
-                            playable_path=playable_item["path"], 
-                            name=playable_name
+                            org_id=org_id,
+                            title_id=title_id,
+                            playable_path=playable_item["path"],
+                            name=playable_name,
+                            language=language
                         )
                     
                     upload_state["playable_creative"] = playable_creative_id
@@ -1421,10 +1462,11 @@ def upload_unity_creatives_to_campaign(
             if not p_id:
                 status_container.info(f"⬆️ Uploading portrait: {portrait['name']}")
                 p_id = _unity_create_video_creative(
-                    org_id=org_id, 
-                    title_id=title_id, 
-                    video_path=portrait["path"], 
-                    name=portrait["name"]
+                    org_id=org_id,
+                    title_id=title_id,
+                    video_path=portrait["path"],
+                    name=portrait["name"],
+                    language=language
                 )
                 upload_state["video_creatives"][portrait["name"]] = p_id
                 _save_upload_state(game, campaign_id, upload_state)
@@ -1440,10 +1482,11 @@ def upload_unity_creatives_to_campaign(
             if not l_id:
                 status_container.info(f"⬆️ Uploading landscape: {landscape['name']}")
                 l_id = _unity_create_video_creative(
-                    org_id=org_id, 
-                    title_id=title_id, 
-                    video_path=landscape["path"], 
-                    name=landscape["name"]
+                    org_id=org_id,
+                    title_id=title_id,
+                    video_path=landscape["path"],
+                    name=landscape["name"],
+                    language=language
                 )
                 upload_state["video_creatives"][landscape["name"]] = l_id
                 _save_upload_state(game, campaign_id, upload_state)

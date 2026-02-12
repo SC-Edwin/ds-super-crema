@@ -299,6 +299,7 @@ def upload_unity_creatives_to_campaign(*, game: str, videos: List[Dict], setting
             "campaign_id": plat_settings["campaign_ids"][0],
             "existing_playable_id": plat_settings.get("existing_playable_id", ""),
             "existing_playable_label": plat_settings.get("existing_playable_label", ""),
+            "language": settings.get("language", "en"),
         }
         
         tasks.append({
@@ -393,6 +394,7 @@ def _upload_playable_only_packs(*, game: str, videos: List[Dict], settings: Dict
             "org_id": settings.get("org_id", UNITY_ORG_ID_DEFAULT),
             "title_id": plat_settings.get("campaign_set_id"),
             "playable_files": playable_files,
+            "language": settings.get("language", "en"),
         })
     
     if not tasks:
@@ -403,6 +405,7 @@ def _upload_playable_only_packs(*, game: str, videos: List[Dict], settings: Dict
         org_id = task["org_id"]
         title_id = task["title_id"]
         playables = task["playable_files"]
+        lang = task.get("language", "en")
         
         result = {
             "plat": plat,
@@ -426,7 +429,8 @@ def _upload_playable_only_packs(*, game: str, videos: List[Dict], settings: Dict
                         org_id=org_id,
                         title_id=title_id,
                         playable_path=pf_path,
-                        name=pf_name
+                        name=pf_name,
+                        language=lang
                     )
                     time.sleep(0.5)
                 
