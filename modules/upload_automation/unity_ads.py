@@ -1280,9 +1280,7 @@ def upload_unity_creatives_to_campaign(
     
     language = (settings.get("language") or "en").strip()
 
-    # 디버깅: 실제 사용되는 ID들 출력
-    st.info(f"🔍 **Debug Info:**\n- Org ID: {org_id}\n- Title ID (App ID): {title_id}\n- Campaign ID: {campaign_id}\n- Language: {language}")
-    logger.info(f"Unity upload - org_id={org_id}, title_id={title_id}, campaign_id={campaign_id}")
+    logger.info(f"Unity upload - org_id={org_id}, title_id={title_id}, campaign_id={campaign_id}, language={language}")
 
     # Unity Ads creative limit per app (typically very high, but check for safety)
     # Unity Ads creative pack limit per campaign (typically 50)
