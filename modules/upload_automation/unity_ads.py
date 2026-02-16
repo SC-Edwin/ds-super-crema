@@ -318,23 +318,30 @@ def debug_unity_ids(game: str = "XP HERO") -> None:
 
 
 
-def _ensure_unity_settings_state() -> None:
-    if "unity_settings" not in st.session_state:
-        st.session_state.unity_settings = {}
+def _uni_key(prefix: str, name: str) -> str:
+    """Return a namespaced session state key."""
+    return f"{prefix}_{name}" if prefix else name
 
-def get_unity_settings(game: str) -> Dict:
-    _ensure_unity_settings_state()
-    return st.session_state.unity_settings.get(game, {})
+def _ensure_unity_settings_state(prefix: str = "") -> None:
+    _k = _uni_key(prefix, "unity_settings")
+    if _k not in st.session_state:
+        st.session_state[_k] = {}
+
+def get_unity_settings(game: str, prefix: str = "") -> Dict:
+    _ensure_unity_settings_state(prefix)
+    return st.session_state[_uni_key(prefix, "unity_settings")].get(game, {})
 
 # --------------------------------------------------------------------
 # Unity settings UI
 # --------------------------------------------------------------------
-def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: bool = False) -> None:
-    _ensure_unity_settings_state()
+def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: bool = False, prefix: str = "") -> None:
+    _ensure_unity_settings_state(prefix)
+    _us = _uni_key(prefix, "unity_settings")
+    kp = f"{prefix}_" if prefix else ""
 
     with right_col:
         st.markdown(f"#### {game} Unity Settings")
-        cur = st.session_state.unity_settings.get(game, {})
+        cur = st.session_state[_us].get(game, {})
 
         # Test Mode: campaign_set_id(플랫폼별)를 title_id로 사용
         # Marketer Mode: 플랫폼에 따라 app_id를 title_id로 사용
@@ -364,7 +371,7 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
                 "플랫폼 선택",
                 options=available_platforms,
                 index=available_platforms.index(prev_platform) if prev_platform in available_platforms else 0,
-                key=f"unity_platform_{idx}",
+                key=f"{kp}unity_platform_{idx}",
             )
             
             # 선택한 플랫폼으로 campaign_set_id 가져오기
@@ -391,8 +398,8 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
         
         default_campaign_id_val = secret_campaign_ids[0] if secret_campaign_ids else ""
 
-        title_key = f"unity_title_{idx}"
-        campaign_key = f"unity_campaign_{idx}"
+        title_key = f"{kp}unity_title_{idx}"
+        campaign_key = f"{kp}unity_campaign_{idx}"
 
         if st.session_state.get(title_key) == "" and secret_title_id:
             st.session_state[title_key] = secret_title_id
@@ -424,11 +431,11 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
         unity_campaign_id = current_campaign_id
         st.session_state[campaign_key] = unity_campaign_id
         unity_org_id = default_org_id
-        st.session_state[f"unity_org_{idx}"] = unity_org_id
+        st.session_state[f"{kp}unity_org_{idx}"] = unity_org_id
         unity_client_id = default_client_id
-        st.session_state[f"unity_client_id_{idx}"] = unity_client_id
+        st.session_state[f"{kp}unity_client_id_{idx}"] = unity_client_id
         unity_client_secret = default_client_secret
-        st.session_state[f"unity_client_secret_{idx}"] = unity_client_secret
+        st.session_state[f"{kp}unity_client_secret_{idx}"] = unity_client_secret
 
         unity_daily_budget = 0
 
@@ -465,13 +472,13 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
             "Creative 언어",
             options=lang_labels,
             index=lang_default_idx,
-            key=f"unity_language_{idx}",
+            key=f"{kp}unity_language_{idx}",
         )
         unity_language = LANGUAGE_OPTIONS[selected_lang_label]
 
         st.markdown("#### Playable 선택")
         drive_playables = [
-            v for v in (st.session_state.remote_videos.get(game, []) if "remote_videos" in st.session_state else [])
+            v for v in (st.session_state[_uni_key(prefix, "remote_videos")].get(game, []) if _uni_key(prefix, "remote_videos") in st.session_state else [])
             if "playable" in (v.get("name") or "").lower()
         ]
         drive_options = [p["name"] for p in drive_playables]
@@ -481,7 +488,7 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
             "Drive에서 가져온 플레이어블",
             options=["(선택 안 함)"] + drive_options,
             index=(drive_options.index(prev_drive_playable) + 1) if prev_drive_playable in drive_options else 0,
-            key=f"unity_playable_{idx}",
+            key=f"{kp}unity_playable_{idx}",
         )
         chosen_drive_playable = selected_drive_playable if selected_drive_playable != "(선택 안 함)" else ""
 
@@ -570,7 +577,7 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
             "Unity에 이미 있는 playable",
             options=existing_labels,
             index=existing_default_idx,
-            key=f"unity_existing_playable_{idx}",
+            key=f"{kp}unity_existing_playable_{idx}",
         )
 
         existing_playable_id = ""
@@ -597,7 +604,7 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
         if not is_marketer:
             settings_dict["platform"] = platform
         
-        st.session_state.unity_settings[game] = settings_dict
+        st.session_state[_us][game] = settings_dict
 
 # --------------------------------------------------------------------
 # Utilities

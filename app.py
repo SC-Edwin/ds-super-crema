@@ -249,13 +249,14 @@ def main():
     # ===================================================
 
     
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊 Performance M/L",
         "📈 Creative Performance Trend",
         "👁️ Creative Upload",
-        "📊 Video M/L", 
-        "🌐 Localization", 
+        "📊 Video M/L",
+        "🌐 Localization",
         "🎬 Video Generation",
+        "🇻🇳 Creative Upload - Vietnam",
     ])
 
 
@@ -295,7 +296,13 @@ def main():
         st.info("🚧 Comming Soon")  
 
     with tab6:
-        st.info("🚧 Comming Soon")  
+        st.info("🚧 Comming Soon")
+
+    with tab7:
+        st.markdown('<div id="upload-vn-root">', unsafe_allow_html=True)
+        from modules.upload_automation import vietnam as vietnam_main
+        vietnam_main.run()
+        st.markdown('</div>', unsafe_allow_html=True)  
              
     
     st.markdown("---")
