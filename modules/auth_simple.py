@@ -359,9 +359,10 @@ def login_with_google(email):
     """Google 로그인 - Supercent 도메인이면 자동 허용"""
     
     # 1. 도메인 체크 ( supercent.io 둘 다 허용)
-    allowed_domains = [ '@supercent.io']
-    
-    if not any(email.endswith(domain) for domain in allowed_domains):
+    allowed_domains = ['@supercent.io']
+    allowed_emails = ['rumble@supercent.vn']
+
+    if not any(email.endswith(domain) for domain in allowed_domains) and email not in allowed_emails:
         return False, "🚫 Supercent 계정만 사용 가능합니다"
     
     # 2. 이름 자동 생성 (이메일 앞부분 사용)
