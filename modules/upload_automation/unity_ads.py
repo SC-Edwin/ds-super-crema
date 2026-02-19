@@ -713,7 +713,8 @@ def next_sat_0000_kst(today: datetime | None = None) -> str:
 
 def unity_creative_name_from_filename(filename: str) -> str:
     stem = pathlib.Path(filename).stem
-    m = re.search(r"(\d{3})(?!.*\d)", stem)
+    # Match 3-5 digit codes (e.g., 001, 1234, 12345)
+    m = re.search(r"(\d{3,5})(?!.*\d)", stem)
     code = m.group(1) if m else "000"
     return f"video{code}"
 
@@ -727,7 +728,7 @@ def _extract_video_part_from_base(base: str) -> str:
     if m:
         return m.group(1).lower()
     # Fallback: use unity_creative_name_from_filename logic
-    m = re.search(r"(\d{3})(?!.*\d)", base)
+    m = re.search(r"(\d{3,5})(?!.*\d)", base)
     code = m.group(1) if m else "000"
     return f"video{code}"
 
