@@ -427,14 +427,19 @@ def make_ad_name(filename: str, prefix: str | None) -> str:
 # --------------------------------------------------------------------
 # Session-state helpers for FB settings
 # --------------------------------------------------------------------
-def _ensure_settings_state() -> None:
-    if "settings" not in st.session_state:
-        st.session_state.settings = {}
+def _fb_key(prefix: str, name: str) -> str:
+    """Return a namespaced session state key."""
+    return f"{prefix}_{name}" if prefix else name
 
-def get_fb_settings(game: str) -> dict:
+def _ensure_settings_state(prefix: str = "") -> None:
+    _k = _fb_key(prefix, "settings")
+    if _k not in st.session_state:
+        st.session_state[_k] = {}
+
+def get_fb_settings(game: str, prefix: str = "") -> dict:
     """Return per-game FB settings dict (creating container if needed)."""
-    _ensure_settings_state()
-    return st.session_state.settings.get(game, {})
+    _ensure_settings_state(prefix)
+    return st.session_state[_fb_key(prefix, "settings")].get(game, {})
 
 # --------------------------------------------------------------------
 # Default per-game App IDs + Store URLs
@@ -494,19 +499,20 @@ GAME_DEFAULTS: Dict[str, Dict[str, str]] = {
     },
 }
 
-def init_fb_game_defaults() -> None:
+def init_fb_game_defaults(prefix: str = "") -> None:
     """
     Apply FB app_id/store_url defaults per game without overwriting
     what the user has already saved in st.session_state.settings.
     """
-    _ensure_settings_state()
+    _ensure_settings_state(prefix)
+    _settings = _fb_key(prefix, "settings")
     for game, defaults in GAME_DEFAULTS.items():
-        cur = st.session_state.settings.get(game, {}) or {}
+        cur = st.session_state[_settings].get(game, {}) or {}
         if not cur.get("fb_app_id") and defaults.get("fb_app_id"):
             cur["fb_app_id"] = defaults["fb_app_id"]
         if not cur.get("store_url") and defaults.get("store_url"):
             cur["store_url"] = defaults["store_url"]
-        st.session_state.settings[game] = cur
+        st.session_state[_settings][game] = cur
 
 
 
@@ -1170,7 +1176,9 @@ def _plan_upload(
     adset_name = f"{adset_prefix_for_name}{ai_suffix}_{suffix_str}{launch_date_suffix}"
 
     allowed = {".mp4", ".mpeg4"}
-    remote = st.session_state.remote_videos.get(settings.get("game_key", ""), []) or []
+    _prefix = settings.get("_prefix", "")
+    _rv = _fb_key(_prefix, "remote_videos")
+    remote = st.session_state[_rv].get(settings.get("game_key", ""), []) or []
 
     def _name(u):
         return getattr(u, "name", None) or (u.get("name") if isinstance(u, dict) else "")
@@ -1505,15 +1513,17 @@ def upload_to_facebook(
 # --------------------------------------------------------------------
 # Settings panel UI (right column)
 # --------------------------------------------------------------------
-def render_facebook_settings_panel(container, game: str, idx: int) -> None:
+def render_facebook_settings_panel(container, game: str, idx: int, prefix: str = "") -> None:
     """
     Render the Facebook settings panel for a single game and save
     values into st.session_state.settings[game].
-    
+
     Includes validation for Taiwan and other compliance countries.
     """
-    _ensure_settings_state()
-    cur = st.session_state.settings.get(game, {})
+    _ensure_settings_state(prefix)
+    _settings = _fb_key(prefix, "settings")
+    kp = f"{prefix}_" if prefix else ""
+    cur = st.session_state[_settings].get(game, {})
 
     with container:
         st.markdown(f"#### {game} Facebook Settings")
@@ -1524,13 +1534,13 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             step=1,
             value=int(cur.get("suffix_number", 1)),
             help="Ad set will be named as <campaign_name>_<n>th or <campaign_name>_<n>th_YYMMDD",
-            key=f"suffix_{idx}",
+            key=f"{kp}suffix_{idx}",
         )
 
         use_ai = st.checkbox(
             "AI",
             value=bool(cur.get("use_ai", False)),
-            key=f"use_ai_{idx}",
+            key=f"{kp}use_ai_{idx}",
             help="체크 시 광고 세트 이름에 '_ai'가 추가됩니다. 예: ..._creativetest_ai_nth",
         )
 
@@ -1538,20 +1548,20 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "모바일 앱 스토어",
             ["Google Play 스토어", "Apple App Store"],
             index=0 if cur.get("app_store", "Google Play 스토어") == "Google Play 스토어" else 1,
-            key=f"appstore_{idx}",
+            key=f"{kp}appstore_{idx}",
         )
 
         fb_app_id = st.text_input(
             "Facebook App ID",
             value=cur.get("fb_app_id", ""),
-            key=f"fbappid_{idx}",
+            key=f"{kp}fbappid_{idx}",
             help="설치 추적을 연결하려면 FB App ID를 입력하세요(선택).",
         )
         
         store_url = st.text_input(
             "구글 스토어 URL",
             value=cur.get("store_url", ""),
-            key=f"storeurl_{idx}",
+            key=f"{kp}storeurl_{idx}",
             help="예) https://play.google.com/store/apps/details?id=... (쿼리스트링/트래킹 파라미터 제거 권장)",
         )
 
@@ -1559,7 +1569,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "성과 목표",
             list(OPT_GOAL_LABEL_TO_API.keys()),
             index=list(OPT_GOAL_LABEL_TO_API.keys()).index(cur.get("opt_goal_label", "앱 설치수 극대화")),
-            key=f"optgoal_{idx}",
+            key=f"{kp}optgoal_{idx}",
         )
 
         st.caption("기여 설정: 클릭 1일(기본), 참여한 조회/조회 없음 — Facebook에서 고정/제한될 수 있습니다.")
@@ -1568,7 +1578,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "영상 1개당 일일 예산 (USD)",
             min_value=1,
             value=int(cur.get("budget_per_video_usd", 10)),
-            key=f"budget_per_video_{idx}",
+            key=f"{kp}budget_per_video_{idx}",
             help="총 일일 예산 = (업로드/선택된 영상 수) × 이 값",
         )
 
@@ -1577,7 +1587,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "시작 날짜/시간 (ISO, KST)",
             value=cur.get("start_iso", default_start_iso),
             help="예: 2025-11-15T00:00:00+09:00 (종료일은 자동으로 꺼지지 않도록 설정하지 않습니다)",
-            key=f"start_{idx}",
+            key=f"{kp}start_{idx}",
         )
 
         launch_date_example = ""
@@ -1590,7 +1600,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
         add_launch_date = st.checkbox(
             "Launch 날짜 추가",
             value=bool(cur.get("add_launch_date", False)),
-            key=f"add_launch_date_{idx}",
+            key=f"{kp}add_launch_date_{idx}",
             help=(
                 f"시작 날짜/시간의 날짜(YYMMDD)를 광고 세트 이름 끝에 추가합니다. "
                 f"예: …_{int(suffix_number)}th_{launch_date_example or 'YYMMDD'}"
@@ -1619,7 +1629,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "타겟 국가 (여러 개 선택 가능)",
             options=sorted(COUNTRY_OPTIONS.keys()),
             default=default_selection,
-            key=f"countries_{idx}",
+            key=f"{kp}countries_{idx}",
             help="Meta 광고를 게재할 국가를 선택하세요. 여러 국가 선택 가능합니다."
         )
         
@@ -1696,14 +1706,14 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "최소 연령",
             min_value=13,
             value=int(cur.get("age_min", 18)),
-            key=f"age_{idx}",
+            key=f"{kp}age_{idx}",
         )
 
         os_choice = st.selectbox(
             "Target OS",
             ["Both", "Android only", "iOS only"],
             index={"Both": 0, "Android only": 1, "iOS only": 2}[cur.get("os_choice", "Android only")],
-            key=f"os_choice_{idx}",
+            key=f"{kp}os_choice_{idx}",
         )
 
         if os_choice in ("Both", "Android only"):
@@ -1711,7 +1721,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
                 "Min Android version",
                 list(ANDROID_OS_CHOICES.keys()),
                 index=list(ANDROID_OS_CHOICES.keys()).index(cur.get("min_android_label", "6.0+")),
-                key=f"min_android_{idx}",
+                key=f"{kp}min_android_{idx}",
             )
         else:
             min_android_label = "None (any)"
@@ -1721,7 +1731,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
                 "Min iOS version",
                 list(IOS_OS_CHOICES.keys()),
                 index=list(IOS_OS_CHOICES.keys()).index(cur.get("min_ios_label", "None (any)")),
-                key=f"min_ios_{idx}",
+                key=f"{kp}min_ios_{idx}",
             )
         else:
             min_ios_label = "None (any)"
@@ -1741,7 +1751,7 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             "Ad name",
             ["Use video filename", "Prefix + filename"],
             index=1 if cur.get("ad_name_mode") == "Prefix + filename" else 0,
-            key=f"adname_mode_{idx}",
+            key=f"{kp}adname_mode_{idx}",
         )
         
         ad_name_prefix = ""
@@ -1749,11 +1759,11 @@ def render_facebook_settings_panel(container, game: str, idx: int) -> None:
             ad_name_prefix = st.text_input(
                 "Ad name prefix",
                 value=cur.get("ad_name_prefix", ""),
-                key=f"adname_prefix_{idx}",
+                key=f"{kp}adname_prefix_{idx}",
             )
 
         # Save settings with validated countries
-        st.session_state.settings[game] = {
+        st.session_state[_settings][game] = {
             "suffix_number": int(suffix_number),
             "use_ai": bool(use_ai),
             "add_launch_date": bool(add_launch_date),

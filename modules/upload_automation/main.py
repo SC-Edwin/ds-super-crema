@@ -123,17 +123,24 @@ try:
 except Exception:
     MAX_UPLOAD_MB = 200
 
-def init_state():
-    """Set up st.session_state containers."""
-    if "uploads" not in st.session_state:
-        st.session_state.uploads = {}
-    if "settings" not in st.session_state:
-        st.session_state.settings = {}
+def _key(prefix: str, name: str) -> str:
+    """Return a namespaced session state key. Empty prefix returns name as-is."""
+    return f"{prefix}_{name}" if prefix else name
 
-def init_remote_state():
+def init_state(prefix: str = ""):
+    """Set up st.session_state containers."""
+    _uploads = _key(prefix, "uploads")
+    _settings = _key(prefix, "settings")
+    if _uploads not in st.session_state:
+        st.session_state[_uploads] = {}
+    if _settings not in st.session_state:
+        st.session_state[_settings] = {}
+
+def init_remote_state(prefix: str = ""):
     """Set up st.session_state container for Drive-imported videos."""
-    if "remote_videos" not in st.session_state:
-        st.session_state.remote_videos = {}
+    _rv = _key(prefix, "remote_videos")
+    if _rv not in st.session_state:
+        st.session_state[_rv] = {}
 
 def validate_count(files: List) -> tuple[bool, str]:
     """Check there is at least one .mp4/.mpeg4/.html file."""
@@ -199,13 +206,23 @@ fb_ops.init_fb_game_defaults()
 # ======================================================================
 # MAIN RENDERER (Shared Logic)
 # ======================================================================
-def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = False) -> None:
+def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = False, prefix: str = "") -> None:
     # Dev-only log panel (enable via ?dev=1 or secrets developer_mode=true)
     devtools.render_dev_panel()
     """
-    Renders the main UI. 
+    Renders the main UI.
     Dynamically loads games from BigQuery via game_manager.
+    prefix: namespace for session state keys (e.g. "vn" for Vietnam tab).
     """
+    # Namespaced session state key aliases
+    _rv = _key(prefix, "remote_videos")
+    _up = _key(prefix, "uploads")
+    _st = _key(prefix, "settings")
+    _us = _key(prefix, "unity_settings")
+    _ucp = _key(prefix, "unity_created_packs")
+    _tab = _key(prefix, "tab")
+    kp = f"{prefix}_" if prefix else ""  # widget key prefix
+
     st.title(title)
     
     # --- LOAD GAMES FROM DB ---
@@ -217,7 +234,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
 
     # Use query params to preserve tab selection after rerun
     query_params = st.query_params
-    selected_tab = query_params.get("tab", [None])[0] if query_params.get("tab") else None
+    selected_tab = query_params.get(_tab, [None])[0] if query_params.get(_tab) else None
     
     _tabs = st.tabs(GAMES)
  
@@ -225,7 +242,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
     # If a tab was selected via query params, try to find its index
     if selected_tab and selected_tab in GAMES:
         tab_index = GAMES.index(selected_tab)
-        st.query_params["tab_index"] = tab_index
+        st.query_params[_key(prefix, "tab_index")] = tab_index
         # Note: Streamlit tabs don't support programmatic selection, but this helps with state tracking
 
     for i, game in enumerate(GAMES):
@@ -252,7 +269,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         platform_options,
                         index=0,
                         horizontal=True,
-                        key=f"platform_{game}",
+                        key=f"{kp}platform_{game}",
                     )
 
                     if platform == "Facebook":
@@ -274,24 +291,24 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         ["Google Drive", "로컬 파일"],
                         index=0,
                         horizontal=True,
-                        key=f"import_method_{game}",
+                        key=f"{kp}import_method_{game}",
                     )
                     
                     if import_method == "Google Drive":
                         st.markdown("**구글 드라이브에서 Creative Videos를 가져옵니다**")
                         drv_input = st.text_input(
                             "Drive folder URL or ID",
-                            key=f"drive_folder_{game}",
+                            key=f"{kp}drive_folder_{game}",
                             placeholder="https://drive.google.com/drive/folders/..."
                         )
 
                         with st.expander("Advanced import options", expanded=False):
                             workers = st.number_input(
-                                "Parallel workers", min_value=1, max_value=16, value=8, key=f"drive_workers_{game}"
+                                "Parallel workers", min_value=1, max_value=16, value=8, key=f"{kp}drive_workers_{game}"
                             )
 
                         # [수정 1] 드라이브 가져오기 버튼: 너비 꽉 채우기
-                        if st.button("드라이브에서 Creative 가져오기", key=f"drive_import_{game}", width="stretch"):
+                        if st.button("드라이브에서 Creative 가져오기", key=f"{kp}drive_import_{game}", width="stretch"):
                             try:
                                 overall = st.progress(0, text="Waiting...")
                                 log_box = st.empty()
@@ -313,12 +330,12 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
 
                                 with st.status("Importing videos...", expanded=True) as status:
                                     imported = _run_drive_import(drv_input, int(workers), _on_progress)
-                                    lst = st.session_state.remote_videos.get(game, [])
+                                    lst = st.session_state[_rv].get(game, [])
                                     # Combine existing and newly imported files
                                     combined = lst + imported
                                     # Remove duplicates by filename (case-insensitive)
                                     deduplicated = fb_ops._dedupe_by_name(combined)
-                                    st.session_state.remote_videos[game] = deduplicated
+                                    st.session_state[_rv][game] = deduplicated
                                     new_count = len(imported)
                                     duplicate_count = len(combined) - len(deduplicated)
                                     status.update(label=f"Done: {new_count} files imported", state="complete")
@@ -337,7 +354,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             "파일 선택 (Video 또는 Playable)",
                             type=["mp4", "mov", "png", "jpg", "jpeg", "zip", "html"],
                             accept_multiple_files=True,
-                            key=f"local_upload_{game}",
+                            key=f"{kp}local_upload_{game}",
                             help="여러 파일을 선택할 수 있습니다. (.mp4, .png, .html 형식 지원)"
                         )
                         
@@ -354,7 +371,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             if large_files:
                                 st.warning(f"⚠️ {MAX_SIZE_MB}MB 초과 파일 {len(large_files)}개는 Google Drive 사용을 권장합니다.")
                             
-                            if st.button("로컬 파일 추가하기", key=f"local_add_{game}", width="stretch", disabled=over_limit):
+                            if st.button("로컬 파일 추가하기", key=f"{kp}local_add_{game}", width="stretch", disabled=over_limit):
                                 try:
                                     import tempfile
                                     import pathlib
@@ -388,10 +405,10 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                     progress.empty()
                                     
                                     # 기존 파일과 병합 및 중복 제거
-                                    lst = st.session_state.remote_videos.get(game, [])
+                                    lst = st.session_state[_rv].get(game, [])
                                     combined = lst + imported
                                     deduplicated = fb_ops._dedupe_by_name(combined)
-                                    st.session_state.remote_videos[game] = deduplicated
+                                    st.session_state[_rv][game] = deduplicated
                                     
                                     new_count = len(imported)
                                     duplicate_count = len(combined) - len(deduplicated)
@@ -409,16 +426,16 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                     devtools.record_exception("Local file upload failed", e)
                         
                         # ✅ 선택된 비디오 초기화 버튼 (file_uploader만 초기화)
-                        if uploaded_files or st.session_state.get(f"local_upload_{game}"):
-                            if st.button("선택된 비디오 초기화", key=f"clear_selected_{game}", width="stretch"):
+                        if uploaded_files or st.session_state.get(f"{kp}local_upload_{game}"):
+                            if st.button("선택된 비디오 초기화", key=f"{kp}clear_selected_{game}", width="stretch"):
                                 # file_uploader의 선택만 초기화
-                                if f"local_upload_{game}" in st.session_state:
-                                    del st.session_state[f"local_upload_{game}"]
+                                if f"{kp}local_upload_{game}" in st.session_state:
+                                    del st.session_state[f"{kp}local_upload_{game}"]
                                 st.session_state.current_tab_index = i  # Preserve current tab
                                 st.rerun()
 
                     # --- Display List ---
-                    remote_list = st.session_state.remote_videos.get(game, [])
+                    remote_list = st.session_state[_rv].get(game, [])
                     st.caption("다운로드된 Creatives:")
                     if remote_list:
                         for it in remote_list[:20]: st.write("•", it["name"])
@@ -428,8 +445,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     
                     
                     # ✅ 다운로드된 Creatives 초기화 버튼 (remote_videos만 초기화)
-                    if st.button("다운로드된 Creatives 초기화", key=f"clearurl_{game}", width="stretch"):
-                        st.session_state.remote_videos[game] = []
+                    if st.button("다운로드된 Creatives 초기화", key=f"{kp}clearurl_{game}", width="stretch"):
+                        st.session_state[_rv][game] = []
                         st.session_state.current_tab_index = i  # Preserve current tab
                         st.rerun()
                     
@@ -437,11 +454,11 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     if is_marketer and platform == "Applovin":
                         if st.button(
                             "📤 Media Library에 업로드",
-                            key=f"applovin_media_upload_{game}",
+                            key=f"{kp}applovin_media_upload_{game}",
                             width="stretch",
                             help="Drive/로컬에서 가져온 파일을 Applovin Media Library에 업로드합니다"
                         ):
-                            remote_list = st.session_state.remote_videos.get(game, [])
+                            remote_list = st.session_state[_rv].get(game, [])
                             if not remote_list:
                                 st.warning("⚠️ 업로드할 파일이 없습니다. 먼저 파일을 가져오세요.")
                             else:
@@ -472,7 +489,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                                     st.write(f"✅ {asset['name']} (ID: {asset['id']})")
                                             
                                             # Asset 캐시 무효화
-                                            assets_key = f"applovin_assets_{game}"
+                                            assets_key = f"{kp}applovin_assets_{game}"
                                             if assets_key in st.session_state:
                                                 del st.session_state[assets_key]
                                             
@@ -500,33 +517,33 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         if is_marketer:
                             media_library_btn = st.button(
                                 "📤 Media Library에 업로드 (모든 비디오)", 
-                                key=f"media_library_{game}", 
+                                key=f"{kp}media_library_{game}", 
                                 width="stretch",
                                 help="Drive에서 가져온 모든 비디오를 Account Media Library에 원본 파일명으로 저장합니다."
                             )
                             st.write("")
             
                         btn_label = "Creative 업로드하기" if is_marketer else "Creative Test 업로드하기"
-                        cont = st.button(btn_label, key=f"continue_{game}", width="stretch")
+                        cont = st.button(btn_label, key=f"{kp}continue_{game}", width="stretch")
                         # Store current tab in query params when button is clicked
                         if cont:
-                            st.query_params["tab"] = game
-                        clr = st.button("전체 초기화", key=f"clear_{game}", width="stretch")
+                            st.query_params[_tab] = game
+                        clr = st.button("전체 초기화", key=f"{kp}clear_{game}", width="stretch")
                     elif platform == "Unity Ads":
                         unity_ok_placeholder = st.empty()
                         st.write("")
-                        cont_unity_create = st.button("크리에이티브/팩 생성", key=f"unity_create_{game}", width="stretch")
-                        cont_unity_apply = st.button("캠페인에 적용", key=f"unity_apply_{game}", width="stretch")
+                        cont_unity_create = st.button("크리에이티브/팩 생성", key=f"{kp}unity_create_{game}", width="stretch")
+                        cont_unity_apply = st.button("캠페인에 적용", key=f"{kp}unity_apply_{game}", width="stretch")
                         # Store current tab in query params when Unity buttons are clicked
                         if cont_unity_create or cont_unity_apply:
-                            st.query_params["tab"] = game
-                        clr_unity = st.button("전체 초기화 (Unity)", key=f"unity_clear_{game}", width="stretch")
+                            st.query_params[_tab] = game
+                        clr_unity = st.button("전체 초기화 (Unity)", key=f"{kp}unity_clear_{game}", width="stretch")
                     elif platform == "Mintegral":
                         mintegral_ok_placeholder = st.empty()
                         st.write("")
                         # Expander 없이 바로 버튼
-                        if st.button("📤 라이브러리에 업로드하기", key=f"mintegral_lib_upload_{game}", width="stretch"):
-                            remote_list = st.session_state.remote_videos.get(game, [])
+                        if st.button("📤 라이브러리에 업로드하기", key=f"{kp}mintegral_lib_upload_{game}", width="stretch"):
+                            remote_list = st.session_state[_rv].get(game, [])
                             
                             if not remote_list:
                                 st.warning("⚠️ 먼저 위에서 파일을 가져오세요 (Google Drive 또는 로컬 파일)")
@@ -582,10 +599,10 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                     devtools.record_exception("Mintegral library upload failed", e)
 
                         st.write("")  # Spacing
-                        cont_mintegral = st.button("Mintegral Creative Set 업로드하기", key=f"mintegral_upload_{game}", width="stretch")
+                        cont_mintegral = st.button("Mintegral Creative Set 업로드하기", key=f"{kp}mintegral_upload_{game}", width="stretch")
                         if cont_mintegral:
-                            st.query_params["tab"] = game
-                        clr_mintegral = st.button("전체 초기화 (Mintegral)", key=f"mintegral_clear_{game}", width="stretch")
+                            st.query_params[_tab] = game
+                        clr_mintegral = st.button("전체 초기화 (Mintegral)", key=f"{kp}mintegral_clear_{game}", width="stretch")
                     elif platform == "Applovin":
                         applovin_ok_placeholder = st.empty()
                         st.write("")
@@ -596,7 +613,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         with col1:
                             cont_applovin_paused = st.button(
                                 "⏸️ Applovin (Paused)",
-                                key=f"applovin_upload_paused_{game}",
+                                key=f"{kp}applovin_upload_paused_{game}",
                                 width="stretch",
                                 type="secondary"
                             )
@@ -604,15 +621,15 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         with col2:
                             cont_applovin_live = st.button(
                                 "▶️ Applovin (Live)",
-                                key=f"applovin_upload_live_{game}",
+                                key=f"{kp}applovin_upload_live_{game}",
                                 width="stretch",
                                 type="primary"
                             )
                         
                         if cont_applovin_paused or cont_applovin_live:
-                            st.query_params["tab"] = game
+                            st.query_params[_tab] = game
                         
-                        clr_applovin = st.button("전체 초기화 (Applovin)", key=f"applovin_clear_{game}", width="stretch")
+                        clr_applovin = st.button("전체 초기화 (Applovin)", key=f"{kp}applovin_clear_{game}", width="stretch")
 
             # =========================
             # RIGHT COLUMN: Settings
@@ -622,7 +639,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
             if platform == "Facebook":
                 with right_col:
                     fb_card = st.container(border=True)
-                    fb_module.render_facebook_settings_panel(fb_card, game, i)
+                    fb_module.render_facebook_settings_panel(fb_card, game, i, prefix=prefix)
 
             elif platform == "Unity Ads":
                 with right_col:
@@ -631,10 +648,10 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     try:
                         # Marketer Mode: All games support campaign selection and creative upload
                         if is_marketer:
-                            unity_module.render_unity_settings_panel(unity_card, game, i, is_marketer=True)
+                            unity_module.render_unity_settings_panel(unity_card, game, i, is_marketer=True, prefix=prefix)
                         else:
                             # Operation Mode: Use existing settings panel
-                            uni_ops.render_unity_settings_panel(unity_card, game, i, is_marketer=False)
+                            uni_ops.render_unity_settings_panel(unity_card, game, i, is_marketer=False, prefix=prefix)
                     except Exception as e:
                         st.error(str(e) if str(e) else "Unity 설정 패널 로드 실패")
                         devtools.record_exception("Unity settings panel load failed", e)
@@ -662,7 +679,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
             # EXECUTION LOGIC
             # =========================
             if platform == "Facebook" and is_marketer and "media_library_btn" in locals() and media_library_btn:
-                remote_list = st.session_state.remote_videos.get(game, [])
+                remote_list = st.session_state[_rv].get(game, [])
                 ok, msg = validate_count(remote_list)
                 if not ok:
                     ok_msg_placeholder.error(msg)
@@ -712,13 +729,13 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
             # ✅ FACEBOOK DRY RUN 섹션 전체 제거 (449-540줄 정도)
             # --- FACEBOOK DRY RUN ---
             # if platform == "Facebook" and is_marketer and "dry_run_fb" in locals() and dry_run_fb:
-            #     remote_list = st.session_state.remote_videos.get(game, [])
+            #     remote_list = st.session_state[_rv].get(game, [])
             #     ok, msg = validate_count(remote_list)
             #     if not ok:
             #         ok_msg_placeholder.error(msg)
             #     else:
             #         try:
-            #             settings = st.session_state.settings.get(game, {})
+            #             settings = st.session_state[_st].get(game, {})
             #             preview = fb_module.preview_facebook_upload(game, remote_list, settings)
                         
             #             with st.expander("📋 Facebook Upload Preview", expanded=True):
@@ -872,16 +889,17 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
             
             if platform == "Facebook" and cont:
                 # Preserve current tab
-                st.query_params["tab"] = game
+                st.query_params[_tab] = game
                 
-                remote_list = st.session_state.remote_videos.get(game, [])
+                remote_list = st.session_state[_rv].get(game, [])
                 ok, msg = validate_count(remote_list)
                 if not ok:
                     ok_msg_placeholder.error(msg)
                 else:
                     try:
-                        st.session_state.uploads[game] = remote_list
-                        settings = st.session_state.settings.get(game, {})
+                        st.session_state[_up][game] = remote_list
+                        settings = st.session_state[_st].get(game, {})
+                        settings["_prefix"] = prefix
         
                         # ✅ 디버깅 메시지
                         if devtools.dev_enabled():
@@ -916,24 +934,24 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         st.error(str(e) if str(e) else "❌ Upload Error")
                     finally:
                         # Ensure tab is preserved even after upload
-                        st.query_params["tab"] = game
+                        st.query_params[_tab] = game
             if platform == "Facebook" and clr:
-                st.session_state.uploads.pop(game, None)
-                st.session_state.remote_videos.pop(game, None)
-                st.session_state.settings.pop(game, None)
-                st.query_params["tab"] = game  # Preserve current tab
+                st.session_state[_up].pop(game, None)
+                st.session_state[_rv].pop(game, None)
+                st.session_state[_st].pop(game, None)
+                st.query_params[_tab] = game  # Preserve current tab
                 st.rerun()
 
             # ✅ UNITY DRY RUN 섹션 전체 제거
             # --- UNITY DRY RUN ---
             # if platform == "Unity Ads" and is_marketer and "dry_run_unity" in locals() and dry_run_unity:
-            #     remote_list = st.session_state.remote_videos.get(game, [])
+            #     remote_list = st.session_state[_rv].get(game, [])
             #     ok, msg = validate_count(remote_list)
             #     if not ok:
             #         unity_ok_placeholder.error(msg)
             #     else:
             #         try:
-            #             unity_settings = unity_module.get_unity_settings(game)
+            #             unity_settings = unity_module.get_unity_settings(game, prefix=prefix)
             #             preview = unity_module.preview_unity_upload(
             #                 game=game,
             #                 videos=remote_list,
@@ -996,16 +1014,16 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
             
             # --- UNITY ACTIONS ---
             if platform == "Unity Ads":
-                unity_settings = unity_module.get_unity_settings(game)
-                if "unity_created_packs" not in st.session_state:
-                    st.session_state.unity_created_packs = {}
+                unity_settings = unity_module.get_unity_settings(game, prefix=prefix)
+                if _ucp not in st.session_state:
+                    st.session_state[_ucp] = {}
 
                 # 1. Create Logic
                 if "cont_unity_create" in locals() and cont_unity_create:
                     # Preserve current tab
-                    st.query_params["tab"] = game
+                    st.query_params[_tab] = game
                     
-                    remote_list = st.session_state.remote_videos.get(game, [])
+                    remote_list = st.session_state[_rv].get(game, [])
                     ok, msg = validate_count(remote_list)
                     if not ok:
                         unity_ok_placeholder.error(msg)
@@ -1030,7 +1048,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                         for err in plat_result["errors"]:
                                             st.warning(f"[{plat.upper()}] {err}")
                                 
-                                st.session_state.unity_created_packs[game] = pack_ids_by_platform
+                                st.session_state[_ucp][game] = pack_ids_by_platform
                                 
                                 if total_packs > 0:
                                     unity_ok_placeholder.success(f"Created {total_packs} Creative Packs across {len(pack_ids_by_platform)} platform(s).")
@@ -1039,7 +1057,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             else:
                                 # 하위 호환: 기존 단일 플랫폼 구조
                                 pack_ids = summary.get("creative_ids", [])
-                                st.session_state.unity_created_packs[game] = pack_ids
+                                st.session_state[_ucp][game] = pack_ids
                                 
                                 if pack_ids:
                                     unity_ok_placeholder.success(f"Created {len(pack_ids)} Creative Packs.")
@@ -1054,20 +1072,20 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             devtools.record_exception("Unity upload failed", e)
                         finally:
                             # Ensure tab is preserved even after upload
-                            st.query_params["tab"] = game
+                            st.query_params[_tab] = game
 
                 # 2. Apply Logic
                 # 2. Apply Logic
                 if "cont_unity_apply" in locals() and cont_unity_apply:
                     # Preserve current tab
-                    st.query_params["tab"] = game
+                    st.query_params[_tab] = game
                     
                     # 오른쪽 패널에서 선택한 pack 확인
                     packs_per_campaign = unity_settings.get("packs_per_campaign", {})
                     has_selected_packs = any(v.get("pack_ids") for v in packs_per_campaign.values())
                     
                     # 방금 생성한 pack 확인
-                    created_packs = st.session_state.unity_created_packs.get(game, [])
+                    created_packs = st.session_state[_ucp].get(game, [])
                     
                     if not has_selected_packs and not created_packs:
                         unity_ok_placeholder.error("No packs selected. Select packs from the right panel first.")
@@ -1111,18 +1129,18 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             devtools.record_exception("Unity apply failed", e)
                         finally:
                             # Ensure tab is preserved even after apply
-                            st.query_params["tab"] = game
+                            st.query_params[_tab] = game
                 
                 if "clr_unity" in locals() and clr_unity:
-                    st.session_state.unity_settings.pop(game, None)
-                    st.session_state.remote_videos.pop(game, None)
-                    st.query_params["tab"] = game  # Preserve current tab
+                    st.session_state[_us].pop(game, None)
+                    st.session_state[_rv].pop(game, None)
+                    st.query_params[_tab] = game  # Preserve current tab
                     st.rerun()
             
             # --- MINTEGRAL ACTIONS ---
             if platform == "Mintegral":
                 if "cont_mintegral" in locals() and cont_mintegral:
-                    st.query_params["tab"] = game
+                    st.query_params[_tab] = game
                     
                     try:
                         from modules.upload_automation import mintegral as mintegral_module
@@ -1195,20 +1213,20 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         st.error(str(e) if str(e) else "Mintegral upload failed")
                         devtools.record_exception("Mintegral upload failed", e)
                     finally:
-                        st.query_params["tab"] = game
+                        st.query_params[_tab] = game
                 
                 if "clr_mintegral" in locals() and clr_mintegral:
-                    if "mintegral_settings" in st.session_state:
-                        st.session_state.mintegral_settings.pop(game, None)
-                    st.session_state.remote_videos.pop(game, None)
-                    st.query_params["tab"] = game
+                    if _key(prefix, "mintegral_settings") in st.session_state:
+                        st.session_state[_key(prefix, "mintegral_settings")].pop(game, None)
+                    st.session_state[_rv].pop(game, None)
+                    st.query_params[_tab] = game
                     st.rerun()
             
             # --- APPLOVIN ACTIONS ---
             if platform == "Applovin":
                 # Paused 버튼 클릭 시
                 if "cont_applovin_paused" in locals() and cont_applovin_paused:
-                    st.query_params["tab"] = game
+                    st.query_params[_tab] = game
                     
                     applovin_settings = applovin_module.get_applovin_settings(game)
                     
@@ -1219,7 +1237,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 
                 # Live 버튼 클릭 시
                 if "cont_applovin_live" in locals() and cont_applovin_live:
-                    st.query_params["tab"] = game
+                    st.query_params[_tab] = game
                     
                     applovin_settings = applovin_module.get_applovin_settings(game)
                     
@@ -1229,16 +1247,16 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         applovin_ok_placeholder.warning(f"⚠️ {game}의 Applovin 설정을 먼저 완료해주세요.")
                 
                 if "clr_applovin" in locals() and clr_applovin:
-                    if "applovin_settings" in st.session_state:
-                        st.session_state.applovin_settings.pop(game, None)
-                    st.session_state.remote_videos.pop(game, None)
-                    st.query_params["tab"] = game
+                    if _key(prefix, "applovin_settings") in st.session_state:
+                        st.session_state[_key(prefix, "applovin_settings")].pop(game, None)
+                    st.session_state[_rv].pop(game, None)
+                    st.query_params[_tab] = game
                     st.rerun()
 
     # Summary
     st.subheader("Upload Summary")
-    if st.session_state.uploads:
-        data = [{"Game": k, "Files": len(v)} for k, v in st.session_state.uploads.items()]
+    if st.session_state[_up]:
+        data = [{"Game": k, "Files": len(v)} for k, v in st.session_state[_up].items()]
         st.dataframe(data)
 
 
@@ -1412,5 +1430,3 @@ def run():
 # Allow standalone execution
 if __name__ == "__main__":
     run()
-
-    
