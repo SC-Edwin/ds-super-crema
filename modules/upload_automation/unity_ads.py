@@ -157,44 +157,40 @@ for game, val in _raw_campaign_ids.items():
         UNITY_CAMPAIGN_IDS_ALL[gname] = {"default": [val]}
         UNITY_CAMPAIGN_IDS[gname] = [val]
 
-# 4) Vietnam-specific campaign IDs (from unity.vn_campaign_ids)
-_raw_vn_campaign_ids = unity_cfg.get("vn_campaign_ids", {}) or {}
-VN_CAMPAIGN_IDS_ALL: Dict[str, Dict[str, List[str]]] = {}
-VN_CAMPAIGN_IDS: Dict[str, List[str]] = {}
-
-for game, val in _raw_vn_campaign_ids.items():
-    gname = str(game)
-    if hasattr(val, 'items'):  # AttrDict 호환
-        plat_map_vn: Dict[str, List[str]] = {}
-        for plat, v in val.items():
-            if isinstance(v, (list, tuple)):
-                plat_map_vn[str(plat)] = [str(x) for x in v]
-            elif isinstance(v, str):
-                plat_map_vn[str(plat)] = [v]
-            elif hasattr(v, '__iter__'):
-                plat_map_vn[str(plat)] = [str(x) for x in v]
-        if plat_map_vn:
-            VN_CAMPAIGN_IDS_ALL[gname] = plat_map_vn
-            VN_CAMPAIGN_IDS[gname] = plat_map_vn.get("aos") or next(iter(plat_map_vn.values()))
-    elif isinstance(val, (list, tuple)):
-        lst = [str(x) for x in val]
-        VN_CAMPAIGN_IDS_ALL[gname] = {"default": lst}
-        VN_CAMPAIGN_IDS[gname] = lst
-    elif isinstance(val, str):
-        VN_CAMPAIGN_IDS_ALL[gname] = {"default": [val]}
-        VN_CAMPAIGN_IDS[gname] = [val]
+# 4) Vietnam-specific campaign IDs — read at runtime from st.secrets
+def _load_vn_campaign_ids() -> Dict[str, Dict[str, List[str]]]:
+    """Read unity.vn_campaign_ids from st.secrets at runtime (no restart needed)."""
+    try:
+        raw = st.secrets["unity"]["vn_campaign_ids"]
+    except (KeyError, TypeError):
+        return {}
+    result: Dict[str, Dict[str, List[str]]] = {}
+    for game in raw:
+        val = raw[game]
+        gname = str(game)
+        plat_map: Dict[str, List[str]] = {}
+        if hasattr(val, 'items'):
+            for plat, v in val.items():
+                ids = [str(x) for x in v] if hasattr(v, '__iter__') and not isinstance(v, str) else [str(v)]
+                # filter out empty strings
+                ids = [x for x in ids if x]
+                plat_map[str(plat)] = ids
+        if plat_map:
+            result[gname] = plat_map
+    return result
 
 # --------------------------------------------------------------------
 # Helper: select campaign IDs by prefix
 # --------------------------------------------------------------------
 def _get_campaign_ids_all_for_prefix(prefix: str = "") -> Dict[str, Dict[str, List[str]]]:
     if prefix == "vn":
-        return VN_CAMPAIGN_IDS_ALL  # empty dict if not configured — no fallback
+        return _load_vn_campaign_ids()
     return UNITY_CAMPAIGN_IDS_ALL
 
 def _get_campaign_ids_for_prefix(prefix: str = "") -> Dict[str, List[str]]:
     if prefix == "vn":
-        return VN_CAMPAIGN_IDS  # empty dict if not configured — no fallback
+        vn = _load_vn_campaign_ids()
+        return {g: v.get("aos") or next(iter(v.values())) for g, v in vn.items()}
     return UNITY_CAMPAIGN_IDS
 
 # --------------------------------------------------------------------
