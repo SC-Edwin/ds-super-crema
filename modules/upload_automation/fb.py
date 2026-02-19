@@ -478,7 +478,7 @@ def fetch_ad_creative_by_ad_id(ad_id: str, force_refresh: float = 0.0) -> dict:
 
 # --- UI Renderer ---
 
-def render_facebook_settings_panel(container, game: str, idx: int) -> None:
+def render_facebook_settings_panel(container, game: str, idx: int, **kwargs) -> None:
     """Render Facebook settings with Smart Defaults logic."""
     with container:
         st.markdown(f"#### {game} Settings")

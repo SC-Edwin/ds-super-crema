@@ -21,6 +21,24 @@ logger = logging.getLogger(__name__)
 
 
 APPLOVIN_BASE_URL = "https://api.ads.axon.ai/manage/v1"
+
+# ── Targeting constants ──────────────────────────────────────────────
+APPLOVIN_LANGUAGES = [
+    "ENGLISH", "KOREAN", "JAPANESE", "CHINESE_SIMPLIFIED", "CHINESE_TRADITIONAL",
+    "FRENCH", "GERMAN", "SPANISH", "PORTUGUESE", "ITALIAN",
+    "INDONESIAN", "THAI", "VIETNAMESE", "RUSSIAN", "ARABIC",
+    "TURKISH", "HINDI", "DUTCH", "POLISH", "SWEDISH",
+    "NORWEGIAN", "DANISH", "FINNISH", "CZECH", "ROMANIAN",
+    "HUNGARIAN", "GREEK", "HEBREW", "MALAY",
+]
+
+APPLOVIN_COUNTRIES = [
+    "US", "CA", "GB", "AU", "DE", "FR", "JP", "KR", "CN", "TW",
+    "HK", "SG", "TH", "VN", "ID", "MY", "PH", "IN", "BR", "MX",
+    "IT", "ES", "PT", "NL", "SE", "NO", "DK", "FI", "PL", "CZ",
+    "RU", "TR", "SA", "AE", "IL", "EG", "ZA", "NZ", "AR", "CL",
+    "CO", "PE",
+]
   
 def _get_api_config():
     """Get Applovin API configuration from secrets."""
@@ -219,6 +237,9 @@ def _upload_creative_set(game: str, idx: int, status: str = "PAUSED"):
         video_ids = settings.get("video_ids", [])
         playable_ids = settings.get("playable_ids", [])
         creative_name = settings.get("generated_name", "")
+        # Targeting — None means omit from payload (= no customize targeting)
+        targeting_languages = settings.get("languages") if settings.get("customize_targeting") else None
+        targeting_countries = settings.get("countries") if settings.get("customize_targeting") else None
         
         if not video_ids and not playable_ids:
             st.error("⚠️ Video 또는 Playable을 선택해주세요.")
@@ -243,7 +264,9 @@ def _upload_creative_set(game: str, idx: int, status: str = "PAUSED"):
                             name=creative_name,
                             video_ids=video_ids,
                             playable_ids=playable_ids,
-                            status=status
+                            status=status,
+                            languages=targeting_languages,
+                            countries=targeting_countries,
                         )
                         
                         if result.get("success"):
@@ -273,7 +296,9 @@ def _create_creative_set_api(
     name: str,
     video_ids: List[str],
     playable_ids: List[str],
-    status: str = "PAUSED"
+    status: str = "PAUSED",
+    languages: Optional[List[str]] = None,
+    countries: Optional[List[str]] = None,
 ) -> Dict:
     """
     Call Applovin API to create creative set.
@@ -295,9 +320,12 @@ def _create_creative_set_api(
             "name": name,
             "status": status,
             "assets": [],
-            "languages": ["ENGLISH"],  # TODO: 설정 가능하게
-            "countries": []  # 빈 배열 = 모든 국가
         }
+        # Customize targeting — only include if explicitly provided
+        if languages is not None:
+            payload["languages"] = languages
+        if countries is not None:
+            payload["countries"] = countries
         
         # Add video assets
         for vid in video_ids:
@@ -1218,7 +1246,37 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
                 st.warning(f"⚠️ {game}에 해당하는 Playable asset이 없습니다.")
             
             st.markdown("---")
-            
+
+            # ── Customize Targeting ──────────────────────────
+            st.markdown("##### 🎯 Customize Targeting")
+            customize_targeting = st.toggle(
+                "Customize Targeting",
+                value=cur.get("customize_targeting", False),
+                key=f"applovin_customize_targeting_{idx}",
+                help="OFF = 타겟팅 없음 (기존 젠킨스/수동 업로드와 동일). ON = 언어·국가 직접 지정.",
+            )
+
+            selected_languages: list[str] = []
+            selected_countries: list[str] = []
+
+            if customize_targeting:
+                selected_languages = st.multiselect(
+                    "Languages",
+                    options=APPLOVIN_LANGUAGES,
+                    default=cur.get("languages", []),
+                    key=f"applovin_languages_{idx}",
+                    help="비워두면 ALL (모든 언어)",
+                )
+                selected_countries = st.multiselect(
+                    "Countries (ISO 3166-1)",
+                    options=APPLOVIN_COUNTRIES,
+                    default=cur.get("countries", []),
+                    key=f"applovin_countries_{idx}",
+                    help="비워두면 ALL (모든 국가). 목록에 없는 코드는 직접 입력 가능.",
+                )
+
+            st.markdown("---")
+
             # Creative Name 설정
             st.markdown("##### 📝 Creative Set Name")
             
@@ -1267,5 +1325,8 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
                 "playable_ids": selected_playable_ids,
                 "custom_name": custom_name.strip() if custom_name else "",
                 "generated_name": creative_name,
+                "customize_targeting": customize_targeting,
+                "languages": selected_languages,
+                "countries": selected_countries,
             }
     

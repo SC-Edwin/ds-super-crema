@@ -43,7 +43,7 @@ from unity_ads import (
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 # Re-export for compatibility
-def get_unity_settings(game: str) -> Dict:
+def get_unity_settings(game: str, **kwargs) -> Dict:
     """Re-export from unity_ads for compatibility."""
     return _get_unity_settings(game)
 
@@ -657,7 +657,7 @@ def fetch_playables_for_game(game: str, platform: str = "aos") -> List[Dict]:
 # -------------------------------------------------------------------------
 # 3. Marketer-mode Unity settings panel
 # -------------------------------------------------------------------------
-def render_unity_settings_panel(container, game: str, idx: int, is_marketer: bool = True) -> None:
+def render_unity_settings_panel(container, game: str, idx: int, is_marketer: bool = True, **kwargs) -> None:
     """
     Marketer-mode Unity panel
     - 플랫폼별 캠페인 선택
