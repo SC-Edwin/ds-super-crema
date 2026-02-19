@@ -156,6 +156,47 @@ for game, val in _raw_campaign_ids.items():
     elif isinstance(val, str):
         UNITY_CAMPAIGN_IDS_ALL[gname] = {"default": [val]}
         UNITY_CAMPAIGN_IDS[gname] = [val]
+
+# 4) Vietnam-specific campaign IDs (from unity.vn_campaign_ids)
+_raw_vn_campaign_ids = unity_cfg.get("vn_campaign_ids", {}) or {}
+VN_CAMPAIGN_IDS_ALL: Dict[str, Dict[str, List[str]]] = {}
+VN_CAMPAIGN_IDS: Dict[str, List[str]] = {}
+
+for game, val in _raw_vn_campaign_ids.items():
+    gname = str(game)
+    if hasattr(val, 'items'):  # AttrDict 호환
+        plat_map_vn: Dict[str, List[str]] = {}
+        for plat, v in val.items():
+            if isinstance(v, (list, tuple)):
+                plat_map_vn[str(plat)] = [str(x) for x in v]
+            elif isinstance(v, str):
+                plat_map_vn[str(plat)] = [v]
+            elif hasattr(v, '__iter__'):
+                plat_map_vn[str(plat)] = [str(x) for x in v]
+        if plat_map_vn:
+            VN_CAMPAIGN_IDS_ALL[gname] = plat_map_vn
+            VN_CAMPAIGN_IDS[gname] = plat_map_vn.get("aos") or next(iter(plat_map_vn.values()))
+    elif isinstance(val, (list, tuple)):
+        lst = [str(x) for x in val]
+        VN_CAMPAIGN_IDS_ALL[gname] = {"default": lst}
+        VN_CAMPAIGN_IDS[gname] = lst
+    elif isinstance(val, str):
+        VN_CAMPAIGN_IDS_ALL[gname] = {"default": [val]}
+        VN_CAMPAIGN_IDS[gname] = [val]
+
+# --------------------------------------------------------------------
+# Helper: select campaign IDs by prefix
+# --------------------------------------------------------------------
+def _get_campaign_ids_all_for_prefix(prefix: str = "") -> Dict[str, Dict[str, List[str]]]:
+    if prefix == "vn" and VN_CAMPAIGN_IDS_ALL:
+        return VN_CAMPAIGN_IDS_ALL
+    return UNITY_CAMPAIGN_IDS_ALL
+
+def _get_campaign_ids_for_prefix(prefix: str = "") -> Dict[str, List[str]]:
+    if prefix == "vn" and VN_CAMPAIGN_IDS:
+        return VN_CAMPAIGN_IDS
+    return UNITY_CAMPAIGN_IDS
+
 # --------------------------------------------------------------------
 # Internal helpers to build & use maps
 # --------------------------------------------------------------------
@@ -357,8 +398,9 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
                 secret_title_id = str(UNITY_GAME_IDS.get(game, ""))
         else:
             available_platforms = []
-            if game in UNITY_CAMPAIGN_IDS_ALL:
-                available_platforms = list(UNITY_CAMPAIGN_IDS_ALL[game].keys())
+            _cids_all = _get_campaign_ids_all_for_prefix(prefix)
+            if game in _cids_all:
+                available_platforms = list(_cids_all[game].keys())
             if not available_platforms:
                 available_platforms = ["aos"]
             
@@ -381,20 +423,22 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
                 logger.warning(f"Failed to get campaign set ID for {game} ({platform}): {e}")
                 secret_title_id = ""
         
-        # 플랫폼별 campaign_ids 가져오기
+        # 플랫폼별 campaign_ids 가져오기 (prefix에 따라 VN/기본 선택)
+        _cids_all = _get_campaign_ids_all_for_prefix(prefix)
+        _cids = _get_campaign_ids_for_prefix(prefix)
         if is_marketer:
-            secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
+            secret_campaign_ids = _cids.get(game, []) or []
         else:
             # Test Mode: 선택한 플랫폼의 campaign_ids 사용
-            if game in UNITY_CAMPAIGN_IDS_ALL:
-                platform_campaign_ids = UNITY_CAMPAIGN_IDS_ALL[game].get(platform, [])
+            if game in _cids_all:
+                platform_campaign_ids = _cids_all[game].get(platform, [])
                 if platform_campaign_ids:
                     secret_campaign_ids = platform_campaign_ids
                 else:
                     # Fallback: 기본 campaign_ids
-                    secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
+                    secret_campaign_ids = _cids.get(game, []) or []
             else:
-                secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
+                secret_campaign_ids = _cids.get(game, []) or []
         
         default_campaign_id_val = secret_campaign_ids[0] if secret_campaign_ids else ""
 
@@ -603,7 +647,11 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
         # 플랫폼 정보 추가
         if not is_marketer:
             settings_dict["platform"] = platform
-        
+
+        # prefix 저장 (VN 등 별도 campaign_ids 선택용)
+        if prefix:
+            settings_dict["prefix"] = prefix
+
         st.session_state[_us][game] = settings_dict
 
 # --------------------------------------------------------------------
@@ -1188,22 +1236,25 @@ def preview_unity_upload(
     
     campaign_id = (settings.get("campaign_id") or "").strip()
     if not campaign_id:
-        # Test Mode: 플랫폼별 campaign_ids 사용
+        # Test Mode: 플랫폼별 campaign_ids 사용 (prefix에 따라 VN/기본 선택)
+        _pfx = settings.get("prefix", "")
+        _cids_all = _get_campaign_ids_all_for_prefix(_pfx)
+        _cids = _get_campaign_ids_for_prefix(_pfx)
         if not is_marketer:
             platform = settings.get("platform", "aos")
-            if game in UNITY_CAMPAIGN_IDS_ALL:
-                platform_campaign_ids = UNITY_CAMPAIGN_IDS_ALL[game].get(platform, [])
+            if game in _cids_all:
+                platform_campaign_ids = _cids_all[game].get(platform, [])
                 if platform_campaign_ids:
                     campaign_id = str(platform_campaign_ids[0])
-        
+
         # Fallback: 기본 campaign_ids
         if not campaign_id:
-            ids_for_game = UNITY_CAMPAIGN_IDS.get(game) or []
+            ids_for_game = _cids.get(game) or []
             if ids_for_game:
                 campaign_id = str(ids_for_game[0])
-    
+
     org_id = (settings.get("org_id") or "").strip() or UNITY_ORG_ID_DEFAULT
-    
+
     if not all([title_id, campaign_id, org_id]):
         missing = []
         if not title_id:
@@ -1337,18 +1388,21 @@ def upload_unity_creatives_to_campaign(
     
     campaign_id = (settings.get("campaign_id") or "").strip()
     if not campaign_id:
-        # Test Mode: 플랫폼별 campaign_ids 사용
+        # Test Mode: 플랫폼별 campaign_ids 사용 (prefix에 따라 VN/기본 선택)
         platform = settings.get("platform", "aos")
         is_marketer = settings.get("is_marketer_mode", False)
-        
-        if not is_marketer and game in UNITY_CAMPAIGN_IDS_ALL:
-            platform_campaign_ids = UNITY_CAMPAIGN_IDS_ALL[game].get(platform, [])
+        _pfx = settings.get("prefix", "")
+        _cids_all = _get_campaign_ids_all_for_prefix(_pfx)
+        _cids = _get_campaign_ids_for_prefix(_pfx)
+
+        if not is_marketer and game in _cids_all:
+            platform_campaign_ids = _cids_all[game].get(platform, [])
             if platform_campaign_ids:
                 campaign_id = str(platform_campaign_ids[0])
-        
+
         # Fallback: 기본 campaign_ids
         if not campaign_id:
-            ids_for_game = UNITY_CAMPAIGN_IDS.get(game) or []
+            ids_for_game = _cids.get(game) or []
             if ids_for_game:
                 campaign_id = str(ids_for_game[0])
     
