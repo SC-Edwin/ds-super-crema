@@ -156,6 +156,43 @@ for game, val in _raw_campaign_ids.items():
     elif isinstance(val, str):
         UNITY_CAMPAIGN_IDS_ALL[gname] = {"default": [val]}
         UNITY_CAMPAIGN_IDS[gname] = [val]
+
+# 4) Vietnam-specific campaign IDs — read at runtime from st.secrets
+def _load_vn_campaign_ids() -> Dict[str, Dict[str, List[str]]]:
+    """Read unity.vn_campaign_ids from st.secrets at runtime (no restart needed)."""
+    try:
+        raw = st.secrets["unity"]["vn_campaign_ids"]
+    except (KeyError, TypeError):
+        return {}
+    result: Dict[str, Dict[str, List[str]]] = {}
+    for game in raw:
+        val = raw[game]
+        gname = str(game)
+        plat_map: Dict[str, List[str]] = {}
+        if hasattr(val, 'items'):
+            for plat, v in val.items():
+                ids = [str(x) for x in v] if hasattr(v, '__iter__') and not isinstance(v, str) else [str(v)]
+                # filter out empty strings
+                ids = [x for x in ids if x]
+                plat_map[str(plat)] = ids
+        if plat_map:
+            result[gname] = plat_map
+    return result
+
+# --------------------------------------------------------------------
+# Helper: select campaign IDs by prefix
+# --------------------------------------------------------------------
+def _get_campaign_ids_all_for_prefix(prefix: str = "") -> Dict[str, Dict[str, List[str]]]:
+    if prefix == "vn":
+        return _load_vn_campaign_ids()
+    return UNITY_CAMPAIGN_IDS_ALL
+
+def _get_campaign_ids_for_prefix(prefix: str = "") -> Dict[str, List[str]]:
+    if prefix == "vn":
+        vn = _load_vn_campaign_ids()
+        return {g: v.get("aos") or next(iter(v.values())) for g, v in vn.items()}
+    return UNITY_CAMPAIGN_IDS
+
 # --------------------------------------------------------------------
 # Internal helpers to build & use maps
 # --------------------------------------------------------------------
@@ -357,6 +394,7 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
                 secret_title_id = str(UNITY_GAME_IDS.get(game, ""))
         else:
             available_platforms = []
+            # 플랫폼 목록은 항상 기본 campaign IDs 기준 (app_id/campaign_set 공유)
             if game in UNITY_CAMPAIGN_IDS_ALL:
                 available_platforms = list(UNITY_CAMPAIGN_IDS_ALL[game].keys())
             if not available_platforms:
@@ -381,21 +419,27 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
                 logger.warning(f"Failed to get campaign set ID for {game} ({platform}): {e}")
                 secret_title_id = ""
         
-        # 플랫폼별 campaign_ids 가져오기
+        # 플랫폼별 campaign_ids 가져오기 (prefix에 따라 VN/기본 선택)
+        _cids_all = _get_campaign_ids_all_for_prefix(prefix)
+        _cids = _get_campaign_ids_for_prefix(prefix)
         if is_marketer:
-            secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
+            secret_campaign_ids = _cids.get(game, []) or []
         else:
             # Test Mode: 선택한 플랫폼의 campaign_ids 사용
-            if game in UNITY_CAMPAIGN_IDS_ALL:
-                platform_campaign_ids = UNITY_CAMPAIGN_IDS_ALL[game].get(platform, [])
+            if game in _cids_all:
+                platform_campaign_ids = _cids_all[game].get(platform, [])
                 if platform_campaign_ids:
                     secret_campaign_ids = platform_campaign_ids
                 else:
-                    # Fallback: 기본 campaign_ids
-                    secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
+                    secret_campaign_ids = _cids.get(game, []) or []
             else:
-                secret_campaign_ids = UNITY_CAMPAIGN_IDS.get(game, []) or []
-        
+                secret_campaign_ids = _cids.get(game, []) or []
+
+        # VN prefix: 캠페인 ID가 없으면 에러 표시
+        if prefix == "vn" and not secret_campaign_ids:
+            _plat_label = platform if not is_marketer else ""
+            st.error(f"No Vietnam creative campaign live for **{game}**" + (f" ({_plat_label})" if _plat_label else ""))
+
         default_campaign_id_val = secret_campaign_ids[0] if secret_campaign_ids else ""
 
         title_key = f"{kp}unity_title_{idx}"
@@ -603,7 +647,11 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
         # 플랫폼 정보 추가
         if not is_marketer:
             settings_dict["platform"] = platform
-        
+
+        # prefix 저장 (VN 등 별도 campaign_ids 선택용)
+        if prefix:
+            settings_dict["prefix"] = prefix
+
         st.session_state[_us][game] = settings_dict
 
 # --------------------------------------------------------------------
@@ -665,7 +713,8 @@ def next_sat_0000_kst(today: datetime | None = None) -> str:
 
 def unity_creative_name_from_filename(filename: str) -> str:
     stem = pathlib.Path(filename).stem
-    m = re.search(r"(\d{3})(?!.*\d)", stem)
+    # Match 3-5 digit codes (e.g., 001, 1234, 12345)
+    m = re.search(r"(\d{3,5})(?!.*\d)", stem)
     code = m.group(1) if m else "000"
     return f"video{code}"
 
@@ -679,7 +728,7 @@ def _extract_video_part_from_base(base: str) -> str:
     if m:
         return m.group(1).lower()
     # Fallback: use unity_creative_name_from_filename logic
-    m = re.search(r"(\d{3})(?!.*\d)", base)
+    m = re.search(r"(\d{3,5})(?!.*\d)", base)
     code = m.group(1) if m else "000"
     return f"video{code}"
 
@@ -1188,22 +1237,29 @@ def preview_unity_upload(
     
     campaign_id = (settings.get("campaign_id") or "").strip()
     if not campaign_id:
-        # Test Mode: 플랫폼별 campaign_ids 사용
+        # Test Mode: 플랫폼별 campaign_ids 사용 (prefix에 따라 VN/기본 선택)
+        _pfx = settings.get("prefix", "")
+        _cids_all = _get_campaign_ids_all_for_prefix(_pfx)
+        _cids = _get_campaign_ids_for_prefix(_pfx)
         if not is_marketer:
             platform = settings.get("platform", "aos")
-            if game in UNITY_CAMPAIGN_IDS_ALL:
-                platform_campaign_ids = UNITY_CAMPAIGN_IDS_ALL[game].get(platform, [])
+            if game in _cids_all:
+                platform_campaign_ids = _cids_all[game].get(platform, [])
                 if platform_campaign_ids:
                     campaign_id = str(platform_campaign_ids[0])
-        
+
         # Fallback: 기본 campaign_ids
         if not campaign_id:
-            ids_for_game = UNITY_CAMPAIGN_IDS.get(game) or []
+            ids_for_game = _cids.get(game) or []
             if ids_for_game:
                 campaign_id = str(ids_for_game[0])
-    
+
+        # VN: 캠페인 ID 없으면 에러
+        if not campaign_id and _pfx == "vn":
+            raise RuntimeError(f"No Vietnam creative campaign live for {game}")
+
     org_id = (settings.get("org_id") or "").strip() or UNITY_ORG_ID_DEFAULT
-    
+
     if not all([title_id, campaign_id, org_id]):
         missing = []
         if not title_id:
@@ -1337,21 +1393,28 @@ def upload_unity_creatives_to_campaign(
     
     campaign_id = (settings.get("campaign_id") or "").strip()
     if not campaign_id:
-        # Test Mode: 플랫폼별 campaign_ids 사용
+        # Test Mode: 플랫폼별 campaign_ids 사용 (prefix에 따라 VN/기본 선택)
         platform = settings.get("platform", "aos")
         is_marketer = settings.get("is_marketer_mode", False)
-        
-        if not is_marketer and game in UNITY_CAMPAIGN_IDS_ALL:
-            platform_campaign_ids = UNITY_CAMPAIGN_IDS_ALL[game].get(platform, [])
+        _pfx = settings.get("prefix", "")
+        _cids_all = _get_campaign_ids_all_for_prefix(_pfx)
+        _cids = _get_campaign_ids_for_prefix(_pfx)
+
+        if not is_marketer and game in _cids_all:
+            platform_campaign_ids = _cids_all[game].get(platform, [])
             if platform_campaign_ids:
                 campaign_id = str(platform_campaign_ids[0])
-        
+
         # Fallback: 기본 campaign_ids
         if not campaign_id:
-            ids_for_game = UNITY_CAMPAIGN_IDS.get(game) or []
+            ids_for_game = _cids.get(game) or []
             if ids_for_game:
                 campaign_id = str(ids_for_game[0])
-    
+
+        # VN: 캠페인 ID 없으면 에러
+        if not campaign_id and _pfx == "vn":
+            raise RuntimeError(f"No Vietnam creative campaign live for {game}")
+
     org_id = (settings.get("org_id") or "").strip() or UNITY_ORG_ID_DEFAULT
     
     if not all([title_id, campaign_id, org_id]):
