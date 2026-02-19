@@ -341,12 +341,13 @@ def main():
     
 
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Performance M/L", 
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Performance M/L",
         "👁️ Creative Upload",
-        "📊 Video M/L", 
-        "🌐 Localization", 
+        "📊 Video M/L",
+        "🌐 Localization",
         "🎬 Video Generation",
+        "🇻🇳 Creative Upload - Vietnam",
     ])
 
 
@@ -405,9 +406,15 @@ def main():
         
 
     with tab5:
-        st.info("🚧 Comming Soon")  
-             
-    
+        st.info("🚧 Comming Soon")
+
+    with tab6:
+        st.markdown('<div id="upload-vn-root">', unsafe_allow_html=True)
+        from modules.upload_automation import vietnam as vietnam_main
+        vietnam_main.run()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
     st.markdown("---")
     st.caption("© 2025 Super Crema - Supercent Marketing Intelligence Team")
 
