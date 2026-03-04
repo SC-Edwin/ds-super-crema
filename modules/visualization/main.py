@@ -77,7 +77,6 @@ def get_week_label(week_str, reference_weeks):
     except:
         date_label = week_str
     
-    # 이번주/전주/전전주 표시
     return date_label
 
     
@@ -121,16 +120,13 @@ def load_prediction_data():
     """최신 예측 결과 데이터 로드"""
     client = get_bigquery_client()
     
-    query = """
+    query = """        
         WITH WeekendData AS (
-        SELECT *
-        FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
-        WHERE 
-            prediction_timestamp = (
-            SELECT MAX(prediction_timestamp)
+            SELECT *
             FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
-            )
-        ),
+            WHERE 
+                CAST(day_1 AS DATE) >= DATE_SUB(CURRENT_DATE(), INTERVAL 8 WEEK)
+            ),
         LatestSnapshot AS (
         SELECT *
         FROM (
@@ -363,7 +359,7 @@ def run():
             week_options.append(label)
         
         
-        selected_week_label = st.selectbox("📅 업로드 날짜", week_options)
+        selected_week_label = st.selectbox("📅 테스트 날짜", week_options)
 
         
         # 레이블 → 실제 주차 코드 변환
