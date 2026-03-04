@@ -53,50 +53,39 @@ def get_friday_based_week(date):
 
 def get_week_label(week_str, reference_weeks):
     """
-    주차 코드를 사용자 친화적 레이블로 변환
-    예: '2026-W05' → '2월 1주'
-    
-    Args:
-        week_str: 'YYYY-Wnn' 형식
-        reference_weeks: dict {'this': 'YYYY-Wnn', 'last': ..., 'two_ago': ...}
-    
-    Returns:
-        str: '2월 1주 (이번주)' 같은 형식
+    주차 코드를 날짜+요일 레이블로 변환
+    예: '2026-W05' → '2026-01-30 (금)'
     """
     if not week_str:
         return week_str
     
-    # ISO 주차 → 날짜 변환 (해당 주의 금요일)
     try:
         year = int(week_str.split('-W')[0])
         week_num = int(week_str.split('-W')[1])
         
         # ISO 주차의 금요일 날짜 계산
-        from datetime import datetime, timedelta
-        jan4 = datetime(year, 1, 4)  # 1월 4일은 항상 W01에 포함
-        week1_friday = jan4 + timedelta(days=(4 - jan4.weekday()))  # W01의 금요일
+        jan4 = datetime(year, 1, 4)
+        week1_friday = jan4 + timedelta(days=(4 - jan4.weekday()))
         target_friday = week1_friday + timedelta(weeks=(week_num - 1))
         
-        month = target_friday.month
+        # 요일 한글
+        day_names = ['월', '화', '수', '목', '금', '토', '일']
+        day_name = day_names[target_friday.weekday()]
         
-        # 해당 월의 몇 번째 주인지 계산
-        first_day_of_month = target_friday.replace(day=1)
-        week_of_month = (target_friday.day + first_day_of_month.weekday()) // 7 + 1
-        
-        month_week_label = f"{month}월 {week_of_month}주"
+        date_label = f"{target_friday.strftime('%Y-%m-%d')} ({day_name})"
         
     except:
-        month_week_label = week_str
+        date_label = week_str
     
-    # 이번주/전주/전전주 표시 추가
+    # 이번주/전주/전전주 표시
     if week_str == reference_weeks['this']:
-        return f"{month_week_label} (이번주)"
+        return f"{date_label} - 이번주"
     elif week_str == reference_weeks['last']:
-        return f"{month_week_label} (전주)"
+        return f"{date_label} - 전주"
     elif week_str == reference_weeks['two_ago']:
-        return f"{month_week_label} (전전주)"
+        return f"{date_label} - 전전주"
     else:
-        return month_week_label
+        return date_label
     
 
 
@@ -379,7 +368,9 @@ def run():
             week_label_to_code[label] = w
             week_options.append(label)
         
-        selected_week_label = st.selectbox("📅 업로드 주차", week_options)
+        
+        selected_week_label = st.selectbox("📅 업로드 날짜", week_options)
+
         
         # 레이블 → 실제 주차 코드 변환
         selected_week = week_label_to_code.get(selected_week_label, 'All')
