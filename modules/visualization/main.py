@@ -78,14 +78,8 @@ def get_week_label(week_str, reference_weeks):
         date_label = week_str
     
     # 이번주/전주/전전주 표시
-    if week_str == reference_weeks['this']:
-        return f"{date_label} - 이번주"
-    elif week_str == reference_weeks['last']:
-        return f"{date_label} - 전주"
-    elif week_str == reference_weeks['two_ago']:
-        return f"{date_label} - 전전주"
-    else:
-        return date_label
+    return date_label
+
     
 
 
