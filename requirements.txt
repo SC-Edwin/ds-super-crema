@@ -22,5 +22,8 @@ opencv-python-headless
 facebook-business
 streamlit-extras
 
+# 6. Google Ads API
+google-ads
+
 
 

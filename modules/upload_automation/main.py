@@ -105,6 +105,14 @@ except ImportError as e:
     st.error(f"Applovin Module Import Error: {e}")
     st.stop()
 
+# 5. Google Ads Module (Marketer mode only)
+try:
+    from modules.upload_automation import ga as google_marketer
+    _GOOGLE_ADS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Google Ads module not available: {e}")
+    _GOOGLE_ADS_AVAILABLE = False
+
 # # Optional: safe debug helper (won't crash app even if IDs are missing)
 # try:
 #     st.write("unity_cfg", uni_ops.unity_cfg)
@@ -261,6 +269,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     # Marketer mode: Facebook, Unity Ads, Mintegral, Applovin
                     if is_marketer:
                         platform_options = ["Facebook", "Unity Ads", "Mintegral", "Applovin"]
+                        if _GOOGLE_ADS_AVAILABLE:
+                            platform_options.append("Google Ads")
                     else:
                         platform_options = ["Facebook", "Unity Ads"]
                     
@@ -280,6 +290,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         st.markdown("### Mintegral")
                     elif platform == "Applovin":
                         st.markdown("### Applovin")
+                    elif platform == "Google Ads":
+                        st.markdown("### Google Ads")
 
 
                     # --- Drive Import Section ---
@@ -630,6 +642,34 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             st.query_params[_tab] = game
                         
                         clr_applovin = st.button("전체 초기화 (Applovin)", key=f"{kp}applovin_clear_{game}", width="stretch")
+                    elif platform == "Google Ads":
+                        google_ok_placeholder = st.empty()
+                        st.write("")
+
+                        cont_google_asset_upload = st.button(
+                            "📤 에셋 업로드 (라이브러리)",
+                            key=f"{kp}google_asset_upload_{game}",
+                            width="stretch",
+                            type="secondary",
+                            help="Drive/로컬에서 가져온 파일을 Google Ads 에셋 라이브러리에 업로드합니다",
+                        )
+                        cont_google_preview = st.button(
+                            "📋 Preview Distribution Plan",
+                            key=f"{kp}google_preview_{game}",
+                            width="stretch",
+                            type="secondary",
+                        )
+                        cont_google_distribute = st.button(
+                            "📤 Google Ads 배치",
+                            key=f"{kp}google_distribute_{game}",
+                            width="stretch",
+                            type="primary",
+                            help="업로드된 에셋을 카테고리별 광고그룹에 배치합니다",
+                        )
+                        if cont_google_asset_upload or cont_google_preview or cont_google_distribute:
+                            st.query_params[_tab] = game
+
+                        clr_google = st.button("전체 초기화 (Google Ads)", key=f"{kp}google_clear_{game}", width="stretch")
 
             # =========================
             # RIGHT COLUMN: Settings
@@ -674,6 +714,17 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     except Exception as e:
                         st.error(str(e) if str(e) else "Applovin 설정 패널 로드 실패")
                         devtools.record_exception("Applovin settings panel load failed", e)
+
+            elif platform == "Google Ads":
+                with right_col:
+                    google_card = st.container(border=True)
+                    try:
+                        google_marketer.render_google_settings_panel(
+                            google_card, game, i, is_marketer=True, prefix=prefix
+                        )
+                    except Exception as e:
+                        st.error(str(e) if str(e) else "Google Ads 설정 패널 로드 실패")
+                        devtools.record_exception("Google Ads settings panel load failed", e)
 
             # =========================
             # EXECUTION LOGIC
@@ -1249,6 +1300,132 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 if "clr_applovin" in locals() and clr_applovin:
                     if _key(prefix, "applovin_settings") in st.session_state:
                         st.session_state[_key(prefix, "applovin_settings")].pop(game, None)
+                    st.session_state[_rv].pop(game, None)
+                    st.query_params[_tab] = game
+                    st.rerun()
+
+            # --- GOOGLE ADS ACTIONS ---
+            if platform == "Google Ads":
+                # Step 1: Asset Upload to Library
+                if "cont_google_asset_upload" in locals() and cont_google_asset_upload:
+                    st.query_params[_tab] = game
+                    remote_list = st.session_state[_rv].get(game, [])
+                    if not remote_list:
+                        google_ok_placeholder.warning("업로드할 파일이 없습니다. 먼저 파일을 가져오세요.")
+                    else:
+                        try:
+                            progress_bar = st.progress(0, text="에셋 업로드 준비 중...")
+
+                            def _on_asset_progress(done, total, name, err):
+                                pct = int((done / max(total, 1)) * 100)
+                                if err:
+                                    progress_bar.progress(pct, text=f"❌ {name}: {err}")
+                                else:
+                                    progress_bar.progress(pct, text=f"✅ {name} ({done}/{total})")
+
+                            result = google_marketer.upload_assets_to_library(
+                                game=game,
+                                uploaded_files=remote_list,
+                                prefix=prefix,
+                                on_progress=_on_asset_progress,
+                            )
+                            progress_bar.empty()
+
+                            if result["success"] > 0:
+                                google_ok_placeholder.success(
+                                    f"에셋 업로드 완료! 성공: {result['success']}개, 실패: {result['failed']}개"
+                                )
+                            else:
+                                google_ok_placeholder.error("에셋 업로드 실패")
+
+                            if result["errors"]:
+                                with st.expander("에셋 업로드 에러", expanded=False):
+                                    for err in result["errors"]:
+                                        st.error(f"• {err}")
+                        except Exception as e:
+                            google_ok_placeholder.error(f"에셋 업로드 실패: {e}")
+                            devtools.record_exception("Google Ads asset upload failed", e)
+
+                # Preview Distribution Plan
+                if "cont_google_preview" in locals() and cont_google_preview:
+                    st.query_params[_tab] = game
+                    try:
+                        plan = google_marketer.preview_google_upload(game, prefix=prefix)
+                        if plan.get("error"):
+                            google_ok_placeholder.error(plan["error"])
+                        elif plan.get("type") == "category_based":
+                            st.markdown("#### Distribution Preview")
+                            st.markdown(f"**캠페인:** {plan.get('campaign_name', '')}")
+                            categories = plan.get("categories", {})
+                            for cat_id, cat_info in categories.items():
+                                label = cat_info["label"]
+                                videos = cat_info.get("videos", [])
+                                playables = cat_info.get("playables", [])
+                                ag_count = cat_info.get("ad_group_count", 0)
+
+                                st.markdown(f"---\n**[{label}]** → {ag_count}개 광고그룹")
+                                if videos:
+                                    st.markdown(f"  영상 {len(videos)}개:")
+                                    for vi, v in enumerate(videos):
+                                        st.text(f"    {vi+1}. {v}")
+                                if playables:
+                                    st.markdown(f"  플레이어블 {len(playables)}개:")
+                                    for p in playables:
+                                        st.text(f"    → {p}")
+                        else:
+                            google_ok_placeholder.info("배치 계획이 없습니다.")
+                    except Exception as e:
+                        google_ok_placeholder.error(f"Preview 실패: {e}")
+                        devtools.record_exception("Google Ads preview failed", e)
+
+                # Step 2: Execute Distribution
+                if "cont_google_distribute" in locals() and cont_google_distribute:
+                    st.query_params[_tab] = game
+                    try:
+                        with st.spinner("Google Ads 배치 중..."):
+                            result = google_marketer.distribute_by_category(
+                                game=game,
+                                prefix=prefix,
+                            )
+                        if result.get("success"):
+                            msg = f"Google Ads 배치 완료! (성공: {result.get('total_success', 0)})"
+                            details = result.get("details", [])
+                            if details:
+                                detail_lines = []
+                                for d in details:
+                                    cat = d.get("category", "")
+                                    if d["type"] == "video":
+                                        detail_lines.append(
+                                            f"[{cat}] 영상 {d.get('placed', 0)}개 배치, "
+                                            f"{d.get('ad_groups_modified', 0)}개 광고그룹 수정"
+                                        )
+                                    elif d["type"] == "playable":
+                                        detail_lines.append(
+                                            f"[{cat}] 플레이어블 '{d.get('name', '')}' → "
+                                            f"{d.get('ad_groups_success', 0)}개 광고그룹"
+                                        )
+                                msg += "\n\n" + "\n".join(detail_lines)
+                            google_ok_placeholder.success(msg)
+                        else:
+                            google_ok_placeholder.error(
+                                f"배치 실패: {result.get('error', 'Unknown error')}"
+                            )
+                        if result.get("errors"):
+                            with st.expander("상세 에러 로그", expanded=True):
+                                for err in result["errors"]:
+                                    st.error(f"• {err}")
+                    except Exception as e:
+                        google_ok_placeholder.error(f"배치 실패: {e}")
+                        devtools.record_exception("Google Ads distribute failed", e)
+
+                if "clr_google" in locals() and clr_google:
+                    gsk = _key(prefix, "google_settings")
+                    if gsk in st.session_state:
+                        st.session_state[gsk].pop(game, None)
+                    # Also clear uploaded assets
+                    assets_key = f"{kp}gads_uploaded_assets_{game}"
+                    if assets_key in st.session_state:
+                        del st.session_state[assets_key]
                     st.session_state[_rv].pop(game, None)
                     st.query_params[_tab] = game
                     st.rerun()
