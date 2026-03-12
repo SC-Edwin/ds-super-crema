@@ -15,7 +15,10 @@ except ImportError:
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-SCOPES = ["https://www.googleapis.com/auth/adwords"]
+SCOPES = [
+    "https://www.googleapis.com/auth/adwords",
+    "https://www.googleapis.com/auth/youtube.upload",
+]
 
 
 def _load_secrets() -> dict:

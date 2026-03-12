@@ -310,37 +310,80 @@ def _get_asset_performance_labels(asset_resource_names: List[str]) -> Dict[str, 
     return perf_map
 
 
+# ── YouTube Upload Helper ─────────────────────────────────────────────
+
+def _get_youtube_service():
+    """
+    Build YouTube Data API v3 service using the same OAuth credentials
+    as Google Ads (client_id, client_secret, refresh_token).
+    Requires youtube.upload scope on the refresh token.
+    """
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+
+    cfg = st.secrets["google_ads"]
+    creds = Credentials(
+        token=None,
+        refresh_token=cfg["refresh_token"],
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=cfg["client_id"],
+        client_secret=cfg["client_secret"],
+    )
+    return build("youtube", "v3", credentials=creds)
+
+
+def _upload_to_youtube(video_bytes: bytes, title: str) -> str:
+    """
+    Upload video to YouTube as unlisted via YouTube Data API.
+    Returns the YouTube video ID.
+    """
+    import tempfile
+    import os
+    from googleapiclient.http import MediaFileUpload
+
+    youtube = _get_youtube_service()
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        tmp.write(video_bytes)
+        tmp_path = tmp.name
+
+    try:
+        request = youtube.videos().insert(
+            part="snippet,status",
+            body={
+                "snippet": {
+                    "title": title,
+                    "description": "Uploaded via Super Crema for Google Ads",
+                    "categoryId": "22",
+                },
+                "status": {
+                    "privacyStatus": "unlisted",
+                },
+            },
+            media_body=MediaFileUpload(tmp_path, mimetype="video/mp4", resumable=True),
+        )
+        response = None
+        while response is None:
+            _, response = request.next_chunk()
+
+        video_id = response["id"]
+        logger.info(f"Uploaded to YouTube: {video_id} ({title})")
+        return video_id
+    finally:
+        os.unlink(tmp_path)
+
+
 # ── Asset Upload ─────────────────────────────────────────────────────
 
 def upload_video_asset(video_bytes: bytes, display_name: str) -> str:
     """
-    Upload a raw video file to Google Ads.
-    Google auto-hosts it on the account's YouTube ad storage channel
-    (내 동영상 광고 저장 채널).
+    Upload a video to Google Ads:
+    1. Upload to YouTube (unlisted) via YouTube Data API
+    2. Create YOUTUBE_VIDEO asset referencing the video ID
     Returns the asset resource name.
     """
-    client = _get_client()
-    asset_service = client.get_service("AssetService")
-    customer_id = _customer_id()
-
-    asset_operation = client.get_type("AssetOperation")
-    asset = asset_operation.create
-    asset.name = display_name
-    asset.type_ = client.enums.AssetTypeEnum.YOUTUBE_VIDEO
-    asset.youtube_video_asset.youtube_video_id = ""  # empty = auto-upload
-    asset.video_asset.data = video_bytes
-
-    try:
-        response = asset_service.mutate_assets(
-            customer_id=customer_id,
-            operations=[asset_operation],
-        )
-        resource_name = response.results[0].resource_name
-        logger.info(f"Uploaded video asset: {resource_name} ({display_name})")
-        return resource_name
-    except Exception as e:
-        logger.error(f"Failed to upload video asset: {e}")
-        raise
+    youtube_video_id = _upload_to_youtube(video_bytes, display_name)
+    return upload_video_asset_by_youtube_id(youtube_video_id, display_name)
 
 
 def upload_video_asset_by_youtube_id(youtube_video_id: str, display_name: str) -> str:
