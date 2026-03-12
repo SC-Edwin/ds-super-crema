@@ -771,23 +771,35 @@ def _unity_headers() -> dict:
 def _unity_post(path: str, json_body: dict) -> dict:
     url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
     last_error: Exception | None = None
+    last_429_detail: str = ""
 
     for attempt in range(8):
         try:
             resp = requests.post(url, headers=_unity_headers(), json=json_body, timeout=60)
-            
+
             if resp.status_code == 429:
-                detail = resp.text[:400]
+                detail = resp.text[:800]
+                last_429_detail = detail
+                rate_headers = {k: v for k, v in resp.headers.items() if "rate" in k.lower() or "retry" in k.lower() or "limit" in k.lower()}
+                logger.error(
+                    f"[Unity 429] POST {path} | attempt={attempt+1}/8 | "
+                    f"response_body={detail} | rate_headers={rate_headers}"
+                )
                 if "quota" in detail.lower():
                     raise RuntimeError(f"Unity Quota Exceeded (STOPPING): {detail}")
-                
+
                 sleep_sec = 2 ** (attempt + 1)
                 logger.warning(f"Unity 429 Rate Limit (attempt {attempt+1}/8). Sleeping {sleep_sec}s...")
                 time.sleep(sleep_sec)
                 continue
 
             if not resp.ok:
-                raise RuntimeError(f"Unity POST {path} failed ({resp.status_code}): {resp.text[:400]}")
+                error_body = resp.text[:800] if resp.text else ""
+                logger.error(
+                    f"[Unity Error] POST {path} | status={resp.status_code} | "
+                    f"response_body={error_body}"
+                )
+                raise RuntimeError(f"Unity POST {path} failed ({resp.status_code}): {error_body}")
 
             return resp.json()
         except requests.exceptions.RequestException as e:
@@ -795,7 +807,13 @@ def _unity_post(path: str, json_body: dict) -> dict:
             time.sleep(2)
             last_error = e
 
-    raise last_error or RuntimeError(f"Unity POST {path} failed after retries.")
+    # 429가 반복되어 여기에 도달한 경우, 실제 API 응답을 포함
+    if last_429_detail:
+        raise RuntimeError(
+            f"Unity 429 Rate Limit — POST {path} failed after 8 retries. "
+            f"Last API response: {last_429_detail[:400]}"
+        )
+    raise last_error or RuntimeError(f"Unity POST {path} failed after 8 retries.")
 
 def _unity_put(path: str, json_body: dict) -> dict:
     url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
@@ -806,16 +824,48 @@ def _unity_put(path: str, json_body: dict) -> dict:
 
 def _unity_get(path: str, params: dict | None = None) -> dict:
     url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
-    resp = requests.get(url, headers=_unity_headers(), params=params or {}, timeout=60)
-    if not resp.ok:
-        raise RuntimeError(f"Unity GET {path} failed ({resp.status_code}): {resp.text[:400]}")
-    return resp.json()
+    last_429_detail: str = ""
+
+    for attempt in range(5):
+        resp = requests.get(url, headers=_unity_headers(), params=params or {}, timeout=60)
+
+        if resp.status_code == 429:
+            detail = resp.text[:800]
+            last_429_detail = detail
+            rate_headers = {k: v for k, v in resp.headers.items() if "rate" in k.lower() or "retry" in k.lower() or "limit" in k.lower()}
+            logger.error(
+                f"[Unity 429] GET {path} | attempt={attempt+1}/5 | "
+                f"response_body={detail} | rate_headers={rate_headers}"
+            )
+            sleep_sec = 2 ** (attempt + 1)
+            time.sleep(sleep_sec)
+            continue
+
+        if not resp.ok:
+            error_body = resp.text[:800] if resp.text else ""
+            logger.error(
+                f"[Unity Error] GET {path} | status={resp.status_code} | "
+                f"params={params} | response_body={error_body}"
+            )
+            raise RuntimeError(f"Unity GET {path} failed ({resp.status_code}): {error_body}")
+
+        return resp.json()
+
+    raise RuntimeError(
+        f"Unity 429 Rate Limit — GET {path} failed after 5 retries. "
+        f"Last API response: {last_429_detail[:400]}"
+    )
 
 def _unity_delete(path: str) -> None:
     url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
     resp = requests.delete(url, headers=_unity_headers(), timeout=60)
     if not resp.ok:
-        raise RuntimeError(f"Unity DELETE {path} failed ({resp.status_code}): {resp.text[:400]}")
+        error_body = resp.text[:800] if resp.text else ""
+        logger.error(
+            f"[Unity Error] DELETE {path} | status={resp.status_code} | "
+            f"response_body={error_body}"
+        )
+        raise RuntimeError(f"Unity DELETE {path} failed ({resp.status_code}): {error_body}")
 
 # --------------------------------------------------------------------
 # Creative Helpers
@@ -887,13 +937,14 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
         display_filename += ".mp4"
 
     creative_info = {
-        "name": name, 
-        "language": language, 
+        "name": name,
+        "language": language,
         "video": {"fileName": display_filename}
     }
-    
+
     url = f"{UNITY_BASE_URL.rstrip('/')}/organizations/{org_id}/apps/{title_id}/creatives"
     headers = {"Authorization": UNITY_AUTH_HEADER_DEFAULT}
+    last_429_detail: str = ""
 
     for attempt in range(8):
         try:
@@ -905,28 +956,46 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
                 resp = requests.post(url, headers=headers, files=files, timeout=300)
 
             if resp.status_code == 429:
-                detail = (resp.text or "")[:400].lower()
-                if "quota" in detail:
+                detail = (resp.text or "")[:800]
+                last_429_detail = detail
+                rate_headers = {k: v for k, v in resp.headers.items() if "rate" in k.lower() or "retry" in k.lower() or "limit" in k.lower()}
+                logger.error(
+                    f"[Unity 429] CREATE CREATIVE | name={name} | attempt={attempt+1}/8 | "
+                    f"response_body={detail} | rate_headers={rate_headers}"
+                )
+                if "quota" in detail.lower():
                     raise RuntimeError(f"Unity Quota Exceeded (STOPPING): {detail}")
                 sleep_sec = 5 * (attempt + 1)
                 time.sleep(sleep_sec)
                 continue
 
             if not resp.ok:
-                error_text = resp.text[:400] if resp.text else ""
+                error_text = resp.text[:800] if resp.text else ""
+                logger.error(
+                    f"[Unity Error] CREATE CREATIVE | name={name} | status={resp.status_code} | "
+                    f"response_body={error_text}"
+                )
                 # Check if error is related to capacity/limit
                 error_lower = error_text.lower()
                 if any(keyword in error_lower for keyword in ["limit", "maximum", "exceeded", "full", "capacity", "quota"]):
-                    raise RuntimeError("Creative 개수가 최대입니다. 사용하지 않는 creative을 제거해주세요.")
+                    raise RuntimeError(f"Creative 개수가 최대입니다. 사용하지 않는 creative을 제거해주세요. (API: {error_text[:200]})")
                 raise RuntimeError(f"Unity create creative failed ({resp.status_code}): {error_text}")
 
             body = resp.json()
             return str(body.get("id") or body.get("creativeId"))
         except Exception as e:
-            if "Quota Exceeded" in str(e): raise e
+            if "Quota Exceeded" in str(e) or "최대" in str(e):
+                raise e
+            logger.warning(f"[Unity Retry] CREATE CREATIVE | name={name} | attempt={attempt+1}/8 | error={e}")
             time.sleep(5)
 
-    raise RuntimeError("Unity create creative failed after multiple retries.")
+    # 429가 반복되어 여기에 도달한 경우, 실제 API 응답을 포함
+    if last_429_detail:
+        raise RuntimeError(
+            f"Unity 429 Rate Limit — create creative '{name}' failed after 8 retries. "
+            f"Last API response: {last_429_detail[:400]}"
+        )
+    raise RuntimeError(f"Unity create creative failed after 8 retries. name={name}")
 
 def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path: str, name: str, language: str = "en") -> str:
     if not os.path.isfile(playable_path):
@@ -952,6 +1021,8 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
     else:
         mime_type = "text/html"
 
+    last_429_detail: str = ""
+
     for attempt in range(8):
         try:
             with open(playable_path, "rb") as f:
@@ -962,25 +1033,42 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
                 resp = requests.post(url, headers=headers, files=files, timeout=300)
 
             if resp.status_code == 429:
+                detail = (resp.text or "")[:800]
+                last_429_detail = detail
+                rate_headers = {k: v for k, v in resp.headers.items() if "rate" in k.lower() or "retry" in k.lower() or "limit" in k.lower()}
+                logger.error(
+                    f"[Unity 429] CREATE PLAYABLE | file={file_name} | attempt={attempt+1}/8 | "
+                    f"response_body={detail} | rate_headers={rate_headers}"
+                )
                 time.sleep(3 * (attempt + 1))
                 continue
 
             if not resp.ok:
                 error_text = resp.text[:800] if resp.text else ""
-                logger.error(f"Unity playable upload failed: status={resp.status_code}, file={file_name}, response={error_text}")
+                logger.error(
+                    f"[Unity Error] CREATE PLAYABLE | file={file_name} | status={resp.status_code} | "
+                    f"response_body={error_text}"
+                )
                 # Check if error is related to capacity/limit
                 error_lower = error_text.lower()
                 if any(keyword in error_lower for keyword in ["limit", "maximum", "exceeded", "full", "capacity", "quota"]):
-                    raise RuntimeError("Creative 개수가 최대입니다. 사용하지 않는 creative을 제거해주세요.")
+                    raise RuntimeError(f"Creative 개수가 최대입니다. 사용하지 않는 creative을 제거해주세요. (API: {error_text[:200]})")
                 raise RuntimeError(f"Unity create playable failed ({resp.status_code}): {error_text}")
 
             body = resp.json()
             return str(body.get("id") or body.get("creativeId"))
         except Exception as e:
-            logger.error(f"Unity playable upload exception: file={file_name}, attempt={attempt+1}, error={str(e)}")
+            if "최대" in str(e):
+                raise e
+            logger.error(f"[Unity Retry] CREATE PLAYABLE | file={file_name} | attempt={attempt+1}/8 | error={e}")
             time.sleep(3)
 
-    raise RuntimeError(f"Unity create playable creative failed after retries. File: {file_name}")
+    if last_429_detail:
+        raise RuntimeError(
+            f"Unity 429 Rate Limit — create playable '{file_name}' failed after 8 retries. "
+            f"Last API response: {last_429_detail[:400]}"
+        )
+    raise RuntimeError(f"Unity create playable creative failed after 8 retries. File: {file_name}")
 
 def _unity_create_creative_pack(*, org_id: str, title_id: str, pack_name: str, creative_ids: List[str], pack_type: str = "video") -> str:
     clean_ids = [str(x) for x in creative_ids if x]
@@ -1000,13 +1088,15 @@ def _unity_create_creative_pack(*, org_id: str, title_id: str, pack_name: str, c
     }
 
     path = f"organizations/{org_id}/apps/{title_id}/creative-packs"
+    logger.info(f"[Unity] CREATE PACK | name={pack_name} | type={pack_type} | creative_ids={clean_ids}")
     try:
         meta = _unity_post(path, payload)
     except Exception as e:
         error_str = str(e).lower()
+        logger.error(f"[Unity Error] CREATE PACK FAILED | name={pack_name} | error={e}")
         # Check if error is related to capacity/limit
         if any(keyword in error_str for keyword in ["limit", "maximum", "exceeded", "full", "capacity", "quota"]):
-            raise RuntimeError("Creative pack 개수가 최대입니다. 사용하지 않는 creative을 제거해주세요.")
+            raise RuntimeError(f"Creative pack 개수가 최대입니다. 사용하지 않는 creative을 제거해주세요. (API: {str(e)[:200]})")
         raise  # Re-raise original error if not capacity-related
     
     creative_pack_id = meta.get("id") or meta.get("creativePackId")
@@ -1104,17 +1194,17 @@ def _check_existing_creative(org_id: str, title_id: str, name: str) -> str | Non
     try:
         path = f"organizations/{org_id}/apps/{title_id}/creatives"
         meta = _unity_get(path, params={"limit": 100})
-        
+
         items = []
         if isinstance(meta, list):
             items = meta
         elif isinstance(meta, dict):
             items = meta.get("items") or meta.get("data") or []
-        
+
         for creative in items:
             if creative.get("name") == name:
                 return str(creative.get("id", ""))
-        
+
         return None
     except Exception as e:
         logger.warning(f"Could not check existing creative: {e}")
@@ -1128,41 +1218,37 @@ def _check_existing_pack(org_id: str, title_id: str, pack_name: str) -> str | No
     """
     try:
         path = f"organizations/{org_id}/apps/{title_id}/creative-packs"
-        
-        # ✅ limit을 늘리거나 pagination 처리
-        # Unity API는 보통 최대 100개씩 반환하므로, 여러 번 요청해야 할 수 있음
+
         all_items = []
         offset = 0
         limit = 100
-        
+
         while True:
             meta = _unity_get(path, params={"limit": limit, "offset": offset})
-            
+
             items = []
             if isinstance(meta, list):
                 items = meta
             elif isinstance(meta, dict):
                 items = meta.get("items") or meta.get("data") or []
-            
+
             if not items:
                 break
-                
+
             all_items.extend(items)
-            
-            # 더 이상 데이터가 없으면 중단
+
             if len(items) < limit:
                 break
-                
+
             offset += limit
-        
-        # ✅ 이름 비교를 더 정확하게 (trim, case-insensitive)
+
         pack_name_normalized = pack_name.strip().lower()
-        
+
         for pack in all_items:
             existing_name = pack.get("name", "").strip().lower()
             if existing_name == pack_name_normalized:
                 return str(pack.get("id", ""))
-        
+
         return None
     except Exception as e:
         logger.warning(f"Could not check existing pack: {e}")
@@ -1176,30 +1262,106 @@ def _check_existing_pack_by_creatives(org_id: str, title_id: str, creative_ids: 
     try:
         path = f"organizations/{org_id}/apps/{title_id}/creative-packs"
         meta = _unity_get(path, params={"limit": 100})
-        
+
         items = []
         if isinstance(meta, list):
             items = meta
         elif isinstance(meta, dict):
             items = meta.get("items") or meta.get("data") or []
-        
-        # Normalize creative_ids to set for comparison (order doesn't matter)
+
         target_creative_set = set(str(cid) for cid in creative_ids if cid)
-        
+
         for pack in items:
             pack_creative_ids = pack.get("creativeIds") or pack.get("creative_ids") or []
             pack_creative_set = set(str(cid) for cid in pack_creative_ids if cid)
-            
-            # Check if sets match (same video + playable combination)
+
             if pack_creative_set == target_creative_set:
                 pack_id = str(pack.get("id", ""))
                 pack_name = pack.get("name", "")
                 return (pack_id, pack_name)
-        
+
         return (None, None)
     except Exception as e:
         logger.warning(f"Could not check existing pack by creatives: {e}")
         return (None, None)
+
+# --------------------------------------------------------------------
+# Cached lookups — fetch once, reuse in loop
+# --------------------------------------------------------------------
+def _fetch_all_creatives_map(org_id: str, title_id: str) -> Dict[str, str]:
+    """
+    Fetch ALL creatives for this app once and return {name: id} dict.
+    Replaces per-video _check_existing_creative calls.
+    """
+    try:
+        path = f"organizations/{org_id}/apps/{title_id}/creatives"
+        meta = _unity_get(path, params={"limit": 100})
+
+        items: list = []
+        if isinstance(meta, list):
+            items = meta
+        elif isinstance(meta, dict):
+            items = meta.get("items") or meta.get("data") or []
+
+        result: Dict[str, str] = {}
+        for cr in items:
+            name = cr.get("name", "")
+            cid = cr.get("id", "")
+            if name and cid:
+                result[name] = str(cid)
+        logger.info(f"[Unity Cache] Fetched {len(result)} existing creatives for app {title_id}")
+        return result
+    except Exception as e:
+        logger.warning(f"Could not fetch creatives map: {e}")
+        return {}
+
+
+def _fetch_all_packs_map(org_id: str, title_id: str) -> tuple[Dict[str, str], Dict[str, tuple[str, str]]]:
+    """
+    Fetch ALL creative packs for this app once and return:
+      - name_map: {pack_name_lower: pack_id}
+      - creatives_map: {frozenset_of_creative_ids_str: (pack_id, pack_name)}
+    Replaces per-pack _check_existing_pack + _check_existing_pack_by_creatives calls.
+    """
+    try:
+        path = f"organizations/{org_id}/apps/{title_id}/creative-packs"
+        all_items: list = []
+        offset = 0
+        limit = 100
+
+        while True:
+            meta = _unity_get(path, params={"limit": limit, "offset": offset})
+            items: list = []
+            if isinstance(meta, list):
+                items = meta
+            elif isinstance(meta, dict):
+                items = meta.get("items") or meta.get("data") or []
+            if not items:
+                break
+            all_items.extend(items)
+            if len(items) < limit:
+                break
+            offset += limit
+
+        name_map: Dict[str, str] = {}
+        creatives_map: Dict[str, tuple[str, str]] = {}
+
+        for pack in all_items:
+            pid = str(pack.get("id", ""))
+            pname = pack.get("name", "")
+            if pname and pid:
+                name_map[pname.strip().lower()] = pid
+
+            cids = pack.get("creativeIds") or pack.get("creative_ids") or []
+            key = ",".join(sorted(str(c) for c in cids if c))
+            if key and pid:
+                creatives_map[key] = (pid, pname)
+
+        logger.info(f"[Unity Cache] Fetched {len(name_map)} existing packs for app {title_id}")
+        return name_map, creatives_map
+    except Exception as e:
+        logger.warning(f"Could not fetch packs map: {e}")
+        return {}, {}
 # --------------------------------------------------------------------
 # Dry Run / Preview Functions
 # --------------------------------------------------------------------
@@ -1448,7 +1610,12 @@ def upload_unity_creatives_to_campaign(
 
     start_iso = next_sat_0000_kst()
     errors: List[str] = []
-    
+
+    # Pre-fetch existing creatives & packs (1-2 API calls instead of N per pair)
+    st.info("📋 기존 creative/pack 목록 조회 중...")
+    _creative_cache = _fetch_all_creatives_map(org_id, title_id)
+    _pack_name_cache, _pack_creatives_cache = _fetch_all_packs_map(org_id, title_id)
+
     # Initialize upload state (loads existing if resuming)
     upload_state = _init_upload_state(game, campaign_id, videos)
     
@@ -1601,11 +1768,11 @@ def upload_unity_creatives_to_campaign(
                 text=f"⬆️ Uploading {base} ({processed_count + 1}/{total_pairs})..."
             )
             
-            # Upload portrait video (check if exists first)
+            # Upload portrait video (check cache first, then upload)
             p_id = upload_state["video_creatives"].get(portrait["name"])
             if not p_id:
-                p_id = _check_existing_creative(org_id, title_id, portrait["name"])
-                
+                p_id = _creative_cache.get(portrait["name"])
+
             if not p_id:
                 status_container.info(f"⬆️ Uploading portrait: {portrait['name']}")
                 p_id = _unity_create_video_creative(
@@ -1615,17 +1782,18 @@ def upload_unity_creatives_to_campaign(
                     name=portrait["name"],
                     language=language
                 )
+                _creative_cache[portrait["name"]] = p_id  # update cache
                 upload_state["video_creatives"][portrait["name"]] = p_id
                 _save_upload_state(game, campaign_id, upload_state)
-                time.sleep(1)
+                time.sleep(2)
             else:
                 status_container.success(f"✅ Found existing: {portrait['name']}")
-            
-            # Upload landscape video (check if exists first)
+
+            # Upload landscape video (check cache first, then upload)
             l_id = upload_state["video_creatives"].get(landscape["name"])
             if not l_id:
-                l_id = _check_existing_creative(org_id, title_id, landscape["name"])
-                
+                l_id = _creative_cache.get(landscape["name"])
+
             if not l_id:
                 status_container.info(f"⬆️ Uploading landscape: {landscape['name']}")
                 l_id = _unity_create_video_creative(
@@ -1635,19 +1803,19 @@ def upload_unity_creatives_to_campaign(
                     name=landscape["name"],
                     language=language
                 )
+                _creative_cache[landscape["name"]] = l_id  # update cache
                 upload_state["video_creatives"][landscape["name"]] = l_id
                 _save_upload_state(game, campaign_id, upload_state)
-                time.sleep(1)
+                time.sleep(2)
             else:
                 status_container.success(f"✅ Found existing: {landscape['name']}")
 
             pack_creatives = [p_id, l_id, playable_creative_id]
-            
-            # ✅ Check if pack already exists by name first
-            pack_id = _check_existing_pack(org_id, title_id, final_pack_name)
+
+            # ✅ Check cache instead of API calls
+            pack_id = _pack_name_cache.get(final_pack_name.strip().lower())
             existing_pack_name = final_pack_name
-            
-            # ✅ 이름으로 찾았으면 명확하게 스킵
+
             if pack_id:
                 status_container.warning(
                     f"⚠️ **Creative pack already exists with same name:**\n\n"
@@ -1657,20 +1825,19 @@ def upload_unity_creatives_to_campaign(
                 )
                 logger.info(f"Skipping pack creation for {final_pack_name} - already exists ({pack_id})")
             else:
-                # Also check if pack exists with same video + playable combination (for marketer mode)
-                existing_pack_id, existing_pack_name = _check_existing_pack_by_creatives(
-                    org_id, title_id, pack_creatives
-                )
-                if existing_pack_id:
-                    pack_id = existing_pack_id
+                # Check by creative IDs combination (from cache)
+                cids_key = ",".join(sorted(str(c) for c in pack_creatives if c))
+                cached_match = _pack_creatives_cache.get(cids_key)
+                if cached_match:
+                    pack_id, existing_pack_name = cached_match
                     status_container.warning(
                         f"⚠️ **Creative pack already exists** with same video + playable combination:\n\n"
                         f"   - Existing Pack Name: `{existing_pack_name}`\n"
-                        f"   - Existing Pack ID: `{existing_pack_id}`\n"
+                        f"   - Existing Pack ID: `{pack_id}`\n"
                         f"   - Skipping upload for: `{final_pack_name}`\n\n"
                         f"   Continuing with remaining uploads..."
                     )
-                    logger.info(f"Skipping pack creation for {final_pack_name} - already exists as {existing_pack_name} ({existing_pack_id})")
+                    logger.info(f"Skipping pack creation for {final_pack_name} - already exists as {existing_pack_name} ({pack_id})")
             
             # ✅ pack_id가 있으면 생성하지 않고 기존 팩 사용
             if not pack_id:
@@ -1684,6 +1851,11 @@ def upload_unity_creatives_to_campaign(
                     pack_type="video+playable"
                 )
                 logger.info(f"✅ Created pack with ID: {pack_id}")
+                # Update caches with newly created pack
+                _pack_name_cache[final_pack_name.strip().lower()] = pack_id
+                cids_key = ",".join(sorted(str(c) for c in pack_creatives if c))
+                _pack_creatives_cache[cids_key] = (pack_id, final_pack_name)
+                time.sleep(2)
             else:
                 # ✅ 기존 팩이 있으면 명확하게 표시
                 if existing_pack_name != final_pack_name:
@@ -1700,18 +1872,36 @@ def upload_unity_creatives_to_campaign(
 
         except Exception as e:
             msg = str(e)
-            if "Quota Exceeded" in msg or "429" in msg:
-                errors.append(f"⚠️ Rate limit reached at {base}. Progress saved - you can retry!")
+            msg_lower = msg.lower()
+            logger.error(f"[Unity Error] PACK LOOP FAILED | base={base} | error={msg}")
+
+            # 1) Capacity/quota limit (not rate limit — won't resolve with retry)
+            is_capacity = any(kw in msg_lower for kw in ["최대", "capacity", "full", "maximum"])
+            # 2) Rate limit (429 — may resolve with time)
+            is_rate_limit = "429" in msg or "Quota Exceeded" in msg
+
+            if is_capacity:
+                errors.append(f"🚫 Creative/Pack 용량 초과 at {base}: {msg[:200]}")
                 status_container.error(
-                    f"⚠️ **Rate Limit Reached**\n\n"
-                    f"Progress saved: {len(upload_state['completed_packs'])}/{total_pairs} packs created.\n"
-                    f"Click '크리에이티브/팩 생성' again to resume from where we left off."
+                    f"🚫 **Creative/Pack 용량 초과**\n\n"
+                    f"Unity API 응답: `{msg[:300]}`\n\n"
+                    f"사용하지 않는 creative/pack을 삭제한 후 다시 시도해주세요.\n"
+                    f"Progress saved: {len(upload_state['completed_packs'])}/{total_pairs} packs."
                 )
                 break
-            
-            logger.exception(f"Unity pack creation failed for {base}")
-            errors.append(f"{base}: {msg}")
-            status_container.error(f"❌ Failed: {base} - {msg}")
+            elif is_rate_limit:
+                errors.append(f"⚠️ Rate limit at {base}: {msg[:200]}")
+                status_container.error(
+                    f"⚠️ **API Rate Limit**\n\n"
+                    f"Unity API 응답: `{msg[:300]}`\n\n"
+                    f"Progress saved: {len(upload_state['completed_packs'])}/{total_pairs} packs.\n"
+                    f"Click '크리에이티브/팩 생성' again to resume."
+                )
+                break
+            else:
+                logger.exception(f"Unity pack creation failed for {base}")
+                errors.append(f"{base}: {msg}")
+                status_container.error(f"❌ Failed: {base} - {msg[:300]}")
 
         finally:
             processed_count += 1
