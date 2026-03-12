@@ -402,7 +402,7 @@ def upload_html5_asset(html5_bytes: bytes, display_name: str) -> str:
 # ── Category Auto-Detection ──────────────────────────────────────────
 
 LANGUAGE_CODES = [
-    "en", "fr", "jp", "cn", "kr", "th", "vn", "de", "es", "pt",
+    "fr", "jp", "cn", "kr", "th", "vn", "de", "es", "pt",
     "id", "tr", "ar", "ru", "it", "hi", "ms", "pl", "nl", "sv",
 ]
 
