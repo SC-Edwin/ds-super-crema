@@ -3,6 +3,7 @@
 - Creative Set Settings:
   1) Upload Creative Set - Upload new creatives to new or existing sets
   2) Copy Creative Set - Copy creative sets to other offers
+  3) Delete Creative Set - Delete creative sets from offers (with 7-day spend data)
 
 - Supports:
   - Creative filtering by game name (via secrets.toml mapping)
@@ -272,6 +273,56 @@ def _get_default_creative_set_name(game: str) -> str:
     short_name = short_names[0] if short_names else game.lower().replace(" ", "")  # 첫 번째 이름 사용
     date_str = datetime.now().strftime("%y%m%d")
     return f"{short_name}_{date_str}"
+
+
+def _fetch_all_creative_sets(game_short: List[str], max_pages: int = 5, only_running: bool = True) -> Dict:
+    """Fetch creative sets from all offers for a game in parallel.
+
+    Returns:
+        Dict with "creative_sets" (list) and "offers" (list)
+    """
+    offers = get_offers(game_filter=game_short, max_pages=max_pages, only_running=only_running)
+
+    if not offers:
+        return {"creative_sets": [], "offers": []}
+
+    def fetch_for_offer(offer: Dict) -> List[Dict]:
+        offer_id = offer["offer_id"]
+        offer_name = offer["offer_name"]
+        try:
+            headers = _get_auth_headers()
+            params = {"offer_id": offer_id, "page": 1, "limit": 50}
+            response = requests.get(
+                f"{MINTEGRAL_BASE_URL}/creative_sets",
+                headers=headers,
+                params=params,
+                timeout=15
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data.get("code") == 200:
+                creative_sets = data.get("data", {}).get("list", [])
+                for cs in creative_sets:
+                    cs["source_offer_id"] = offer_id
+                    cs["source_offer_name"] = offer_name
+                return creative_sets
+            return []
+        except Exception as e:
+            logger.warning(f"Failed to fetch creative sets from offer {offer_id}: {e}")
+            return []
+
+    all_creative_sets = []
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(fetch_for_offer, offer): offer for offer in offers}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                all_creative_sets.extend(result)
+
+    return {"creative_sets": all_creative_sets, "offers": offers}
+
+
+
 # =========================================================
 # UI Renderer
 # =========================================================
@@ -295,15 +346,17 @@ def render_mintegral_settings_panel(container, game: str, idx: int, is_marketer:
         # Creative Set Setting dropdown
         setting_mode = st.selectbox(
             "Creative Set Setting",
-            options=["Upload Creative Set", "Copy Creative Set"],
+            options=["Upload Creative Set", "Copy Creative Set", "Delete Creative Set"],
             key=f"mintegral_setting_mode_{idx}",
-            help="Upload: 새 Creative Set 생성 또는 기존 Creative 추가\nCopy: 다른 Offer로 Creative Set 복사"
+            help="Upload: 새 Creative Set 생성 또는 기존 Creative 추가\nCopy: 다른 Offer로 Creative Set 복사\nDelete: Creative Set 삭제"
         )
-        
+
         if setting_mode == "Upload Creative Set":
             _render_upload_creative_set(game, idx, cur)
-        else:
+        elif setting_mode == "Copy Creative Set":
             _render_copy_creative_set(game, idx, cur)
+        else:
+            _render_delete_creative_set(game, idx, cur)
 
 def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
     """Render Upload Creative Set UI."""
@@ -599,72 +652,26 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
 
 def _render_copy_creative_set(game: str, idx: int, cur: Dict) -> None:
     """Render Copy Creative Set UI."""
-    
+
     st.markdown("**Select Creative Sets to Copy**")
-    
+
     game_short = _get_game_mapping(game)
-    
+
     # Session state key for creative sets data
     cache_key = f"mintegral_copy_creative_sets_data_{idx}"
-    
+
     # Load button to fetch creative sets
     if st.button("🔍 Load Creative Sets", key=f"load_copy_creative_sets_{idx}"):
         with st.spinner("Loading creative sets..."):
             try:
-                # Get all offers for this game
-                offers = get_offers(game_filter=game_short, max_pages=5, only_running=True)
-                
-                if not offers:
+                result = _fetch_all_creative_sets(game_short, max_pages=5, only_running=True)
+
+                if not result["offers"]:
                     st.warning(f"'{game_short}' 필터링된 Offer가 없습니다")
                     return
-                
-                # Fetch creative sets from all offers IN PARALLEL
-                def fetch_creative_sets_for_offer(offer: Dict) -> List[Dict]:
-                    """Fetch creative sets for a single offer."""
-                    offer_id = offer["offer_id"]
-                    offer_name = offer["offer_name"]
-                    
-                    try:
-                        headers = _get_auth_headers()
-                        params = {"offer_id": offer_id, "page": 1, "limit": 50}
-                        response = requests.get(
-                            f"{MINTEGRAL_BASE_URL}/creative_sets",
-                            headers=headers,
-                            params=params,
-                            timeout=15
-                        )
-                        response.raise_for_status()
-                        data = response.json()
-                        
-                        if data.get("code") == 200:
-                            creative_sets = data.get("data", {}).get("list", [])
-                            # Add offer info to each creative set
-                            for cs in creative_sets:
-                                cs["source_offer_id"] = offer_id
-                                cs["source_offer_name"] = offer_name
-                            return creative_sets
-                        return []
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch creative sets from offer {offer_id}: {e}")
-                        return []
-                
-                all_creative_sets = []
-                
-                # Parallel fetch with ThreadPoolExecutor
-                with ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = {executor.submit(fetch_creative_sets_for_offer, offer): offer for offer in offers}
-                    
-                    for future in as_completed(futures):
-                        creative_sets = future.result()
-                        if creative_sets:
-                            all_creative_sets.extend(creative_sets)
-                
-                # Save to session state
-                st.session_state[cache_key] = {
-                    "creative_sets": all_creative_sets,
-                    "offers": offers
-                }
-                
+
+                st.session_state[cache_key] = result
+
             except Exception as e:
                 st.error(f"Creative Set 목록을 불러오는데 실패했습니다: {e}")
                 logger.error(f"Failed to load creative sets for copy: {e}", exc_info=True)
@@ -746,7 +753,125 @@ def _render_copy_creative_set(game: str, idx: int, cur: Dict) -> None:
         "target_offer_ids": target_offer_ids,
         "target_offer_names": [name.split(" (ID:")[0] for name in selected_target_offers]
     }
-        
+
+
+def _render_delete_creative_set(game: str, idx: int, cur: Dict) -> None:
+    """Render Delete Creative Set UI with 7-day spend data."""
+
+    st.warning("⚠️ 삭제된 Creative Set은 복구할 수 없습니다. 신중하게 선택해주세요.")
+
+    game_short = _get_game_mapping(game)
+
+    # Session state key for loaded data
+    cache_key = f"mintegral_delete_creative_sets_data_{idx}"
+
+    # Load button
+    if st.button("🔍 Load Creative Sets", key=f"load_delete_creative_sets_{idx}"):
+        with st.spinner("Loading creative sets..."):
+            try:
+                result = _fetch_all_creative_sets(game_short, max_pages=5, only_running=True)
+
+                if not result["offers"]:
+                    st.warning(f"'{game_short}' 필터링된 Offer가 없습니다")
+                    return
+
+                st.session_state[cache_key] = {
+                    "creative_sets": result["creative_sets"],
+                    "offers": result["offers"],
+                }
+
+            except Exception as e:
+                st.error(f"Creative Set 목록을 불러오는데 실패했습니다: {e}")
+                logger.error(f"Failed to load creative sets for delete: {e}", exc_info=True)
+
+    # Display loaded data
+    cached_data = st.session_state.get(cache_key)
+
+    if not cached_data:
+        st.info("Click 'Load Creative Sets' to see available creative sets")
+        # Save empty settings so the action button validation works
+        st.session_state.mintegral_settings[game] = {
+            "mode": "delete",
+            "selected_creative_sets": [],
+            "delete_confirmed": False,
+        }
+        return
+
+    all_creative_sets = cached_data["creative_sets"]
+
+    if not all_creative_sets:
+        st.info("이 게임에 생성된 Creative Set이 없습니다")
+        st.session_state.mintegral_settings[game] = {
+            "mode": "delete",
+            "selected_creative_sets": [],
+            "delete_confirmed": False,
+        }
+        return
+
+    # Build display table sorted by creative count descending
+    import pandas as pd
+
+    table_data = []
+    for cs in all_creative_sets:
+        offer_id = cs.get("source_offer_id")
+        cs_name = cs.get("creative_set_name", "")
+        creative_count = len(cs.get("creatives", []))
+
+        table_data.append({
+            "Creative Set": cs_name,
+            "Offer": cs.get("source_offer_name", ""),
+            "Creatives": creative_count,
+            "_offer_id": offer_id,
+        })
+
+    table_data.sort(key=lambda x: x["Creative Set"])
+
+    # Display as dataframe
+    df = pd.DataFrame(table_data)
+    display_df = df[["Creative Set", "Offer", "Creatives"]]
+    st.dataframe(display_df, width="stretch", hide_index=True)
+
+    st.caption(f"총 {len(all_creative_sets)}개 Creative Set")
+
+    # Build options for multiselect
+    creative_set_options = {}
+    for row in table_data:
+        label = f"{row['Creative Set']} | {row['Offer']} | Creatives: {row['Creatives']}"
+        creative_set_options[label] = {
+            "creative_set_name": row["Creative Set"],
+            "offer_id": row["_offer_id"],
+            "offer_name": row["Offer"],
+        }
+
+    # Multi-select for deletion
+    selected_sets = st.multiselect(
+        "삭제할 Creative Set 선택",
+        options=list(creative_set_options.keys()),
+        key=f"mintegral_delete_creative_sets_{idx}",
+        help="삭제할 Creative Set을 선택하세요 (여러 개 선택 가능)"
+    )
+
+    # Confirmation
+    delete_confirmed = False
+    if selected_sets:
+        st.markdown(f"**삭제 예정: {len(selected_sets)}개 Creative Set**")
+        for label in selected_sets:
+            info = creative_set_options[label]
+            st.write(f"• {info['creative_set_name']} (Offer: {info['offer_name']})")
+
+        delete_confirmed = st.checkbox(
+            f"⚠️ 위 {len(selected_sets)}개 Creative Set을 삭제하겠습니다. 이 작업은 되돌릴 수 없습니다.",
+            key=f"mintegral_delete_confirm_{idx}",
+            value=False,
+        )
+
+    # Save settings
+    st.session_state.mintegral_settings[game] = {
+        "mode": "delete",
+        "selected_creative_sets": [creative_set_options[label] for label in selected_sets] if selected_sets else [],
+        "delete_confirmed": delete_confirmed,
+    }
+
 
 # =========================================================
 # Upload Logic
@@ -978,7 +1103,9 @@ def upload_to_mintegral(game: str, videos: List[Dict], settings: Dict) -> Dict:
         return _upload_creative_set(game, videos, settings)
     elif mode == "copy":
         return _copy_creative_sets(game, settings)
-    
+    elif mode == "delete":
+        return _delete_creative_sets(game, settings)
+
     return {
         "success": False,
         "error": "알 수 없는 모드입니다.",
@@ -1365,5 +1492,91 @@ def _copy_creative_sets(game: str, settings: Dict) -> Dict:
         return {
             "success": False,
             "error": f"모든 복사 실패 ({failed_count}/{total_copies})",
+            "errors": errors
+        }
+
+
+def _delete_creative_sets(game: str, settings: Dict) -> Dict:
+    """Delete creative sets from their offers via Mintegral API.
+
+    Uses DELETE /api/open/v1/creative_set with offer_id + creative_set_name.
+    """
+    selected_sets = settings.get("selected_creative_sets", [])
+
+    if not selected_sets:
+        return {
+            "success": False,
+            "error": "삭제할 Creative Set이 선택되지 않았습니다.",
+            "errors": []
+        }
+
+    if not settings.get("delete_confirmed", False):
+        return {
+            "success": False,
+            "error": "삭제 확인이 필요합니다. 체크박스를 선택해주세요.",
+            "errors": []
+        }
+
+    total = len(selected_sets)
+    success_count = 0
+    failed_count = 0
+    errors = []
+
+    logger.info(f"Deleting {total} creative set(s) for {game}")
+
+    for cs_info in selected_sets:
+        creative_set_name = cs_info["creative_set_name"]
+        offer_id = cs_info["offer_id"]
+
+        try:
+            headers = _get_auth_headers()
+            payload = {
+                "offer_id": int(offer_id),
+                "creative_set_name": creative_set_name
+            }
+
+            logger.info(f"Deleting creative set '{creative_set_name}' from Offer {offer_id}")
+
+            response = requests.delete(
+                f"{MINTEGRAL_BASE_URL}/creative_set",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+
+            response.raise_for_status()
+            data = response.json()
+
+            logger.info(f"DELETE response for '{creative_set_name}' (Offer {offer_id}): {response.text}")
+
+            if data.get("code") == 200:
+                success_count += 1
+                logger.info(f"✅ Deleted '{creative_set_name}' from Offer {offer_id}")
+            else:
+                failed_count += 1
+                error_msg = data.get("msg") or data.get("message") or "Unknown error"
+                error_detail = data.get("data")
+                full_error = f"{error_msg} - {error_detail}" if error_detail else error_msg
+                errors.append(f"Offer {offer_id} / {creative_set_name}: {full_error}")
+                logger.error(f"❌ Failed to delete '{creative_set_name}' from Offer {offer_id}: {full_error}")
+
+        except Exception as e:
+            failed_count += 1
+            errors.append(f"Offer {offer_id} / {creative_set_name}: {str(e)}")
+            logger.error(f"❌ Exception deleting '{creative_set_name}' from Offer {offer_id}: {e}")
+
+    if success_count > 0:
+        return {
+            "success": True,
+            "message": f"{success_count}/{total} Creative Set(s) 삭제 완료",
+            "total": total,
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "errors": errors
+        }
+    else:
+        return {
+            "success": False,
+            "error": f"모든 삭제 실패 ({failed_count}/{total})",
             "errors": errors
         }

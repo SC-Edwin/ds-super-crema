@@ -1260,6 +1260,37 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                                 st.error(f"• {err}")
                                     
                                     st.info("💡 더 자세한 로그는 Streamlit Cloud → Logs 탭에서 확인하세요")
+
+                        elif mode == "delete":
+                            # Delete mode validation
+                            if not mintegral_settings.get("selected_creative_sets"):
+                                mintegral_ok_placeholder.error("❌ 삭제할 Creative Set을 선택해주세요.")
+                            elif not mintegral_settings.get("delete_confirmed"):
+                                mintegral_ok_placeholder.error("❌ 삭제 확인 체크박스를 선택해주세요.")
+                            else:
+                                with st.spinner("⏳ Deleting Creative Sets..."):
+                                    result = mintegral_module.upload_to_mintegral(
+                                        game=game,
+                                        videos=[],
+                                        settings=mintegral_settings
+                                    )
+
+                                if result.get("success"):
+                                    mintegral_ok_placeholder.success(f"✅ {result.get('message', 'Delete complete')}")
+                                    # Clear cached creative sets so list refreshes on next load
+                                    delete_cache_key = f"mintegral_delete_creative_sets_data_{i}"
+                                    st.session_state.pop(delete_cache_key, None)
+                                else:
+                                    error_msg = result.get('error', 'Unknown error')
+                                    mintegral_ok_placeholder.error(f"❌ {error_msg}")
+
+                                    if result.get("errors"):
+                                        with st.expander("🔍 상세 에러 로그", expanded=True):
+                                            for err in result["errors"]:
+                                                st.error(f"• {err}")
+
+                                    st.info("💡 더 자세한 로그는 Streamlit Cloud → Logs 탭에서 확인하세요")
+
                     except Exception as e:
                         st.error(str(e) if str(e) else "Mintegral upload failed")
                         devtools.record_exception("Mintegral upload failed", e)

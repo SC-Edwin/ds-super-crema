@@ -112,7 +112,7 @@ def list_ad_groups_with_spend(campaign_id: str, days: int = 7) -> List[Dict]:
             metrics.cost_micros
         FROM ad_group
         WHERE campaign.id = {campaign_id}
-        AND ad_group.status != 'REMOVED'
+        AND ad_group.status = 'ENABLED'
         AND segments.date BETWEEN '{start_date}' AND '{end_date}'
     """
     # Aggregate spend per ad group

@@ -234,10 +234,13 @@ def _render_category_tabs(
         st.info("'GA 라이브러리 불러오기'를 클릭하거나, 왼쪽에서 파일을 가져오세요.")
 
     # ── Categorize GA library assets ──
+    # AI 영상은 일반 탭에도 표시
     cat_lib_videos: Dict[str, List[Dict]] = {cat_id: [] for cat_id, _ in CATEGORIES}
     for asset in lib_videos:
         cat = asset.get("category", gads._auto_detect_category(asset["name"]))
         cat_lib_videos[cat].append(asset)
+        if cat == "AI":
+            cat_lib_videos["normal"].append(asset)
 
     cat_lib_playables: Dict[str, List[Dict]] = {cat_id: [] for cat_id, _ in CATEGORIES}
     for asset in lib_playables:
@@ -258,6 +261,8 @@ def _render_category_tabs(
         ext = _get_ext(fname)
         if ext in video_exts:
             cat_local_videos[cat].append(fname)
+            if cat == "AI":
+                cat_local_videos["normal"].append(fname)
         elif ext in playable_exts:
             cat_local_playables[cat].append(fname)
 
