@@ -185,6 +185,16 @@ def _build_video_ranges_label(nums: list[int]) -> str:
     parts = [_fmt(a, b) for (a, b, _) in others] + [_fmt(main[0], main[1])]
     return ", ".join(parts)
 
+# --- Rate Limit Helper ---
+
+_RATE_LIMIT_CODES = {17, 32, 4}  # User limit, API too many calls, App limit
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    """Check if a Facebook API error is a rate limit error."""
+    if isinstance(e, FacebookRequestError):
+        return e.api_error_code() in _RATE_LIMIT_CODES
+    return False
+
 # --- Cached Data Fetchers ---
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -198,6 +208,8 @@ def fetch_active_campaigns_cached(account_id: str) -> list[dict]:
         )
         return [{"id": c["id"], "name": c["name"]} for c in campaigns]
     except Exception as e:
+        if _is_rate_limit_error(e):
+            st.warning("⚠️ Facebook API 호출 한도에 도달했습니다. 잠시 후 다시 시도해주세요.")
         logger.error(f"Error fetching campaigns: {e}")
         return []
 
@@ -217,14 +229,14 @@ def fetch_active_adsets_cached(account_id: str, campaign_id: str) -> list[dict]:
                 filtered.append({"id": a["id"], "name": a["name"]})
         return filtered
     except Exception as e:
+        if _is_rate_limit_error(e):
+            st.warning("⚠️ Facebook API 호출 한도에 도달했습니다. 잠시 후 다시 시도해주세요.")
         logger.error(f"Error fetching adsets: {e}")
         return []
 
 @st.cache_data(ttl=600, show_spinner=False)
-def fetch_latest_ad_creative_defaults(adset_id: str, force_refresh: float = 0.0) -> dict:
-    """
-    _force_refresh는 캐시를 무시하기 위한 더미 파라미터
-    """
+def fetch_latest_ad_creative_defaults(adset_id: str) -> dict:
+    """Fetch ad creative defaults from the highest-numbered active ad in the adset."""
     try:
         adset = AdSet(adset_id)
         # Fetch ads
@@ -357,8 +369,11 @@ def fetch_latest_ad_creative_defaults(adset_id: str, force_refresh: float = 0.0)
         }
 
     except Exception as e:
+        if _is_rate_limit_error(e):
+            st.warning("⚠️ Facebook API 호출 한도에 도달했습니다. 잠시 후 다시 시도해주세요.")
         logger.warning(f"Could not fetch ad defaults: {e}")
         return {}
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_ads_in_adset(adset_id: str) -> list[dict]:
     """
@@ -387,13 +402,14 @@ def fetch_ads_in_adset(adset_id: str) -> list[dict]:
         return result
         
     except Exception as e:
+        if _is_rate_limit_error(e):
+            st.warning("⚠️ Facebook API 호출 한도에 도달했습니다. 잠시 후 다시 시도해주세요.")
         logger.error(f"Error fetching ads: {e}")
         return []
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_ad_creative_by_ad_id(ad_id: str, force_refresh: float = 0.0) -> dict:
-    """
-    _force_refresh는 캐시를 무시하기 위한 더미 파라미터
-    """
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_ad_creative_by_ad_id(ad_id: str) -> dict:
+    """Fetch ad creative data by ad ID."""
     try:
         ad = Ad(ad_id)
         ad_data = ad.api_get(fields=[Ad.Field.name, Ad.Field.creative])
@@ -472,6 +488,8 @@ def fetch_ad_creative_by_ad_id(ad_id: str, force_refresh: float = 0.0) -> dict:
         }
         
     except Exception as e:
+        if _is_rate_limit_error(e):
+            st.warning("⚠️ Facebook API 호출 한도에 도달했습니다. 잠시 후 다시 시도해주세요.")
         logger.warning(f"Could not fetch ad creative: {e}")
         return {}
 
@@ -601,22 +619,24 @@ def render_facebook_settings_panel(container, game: str, idx: int, **kwargs) -> 
         if selected_template == "빈칸 (Empty)":
             # Empty template - no defaults but keep store URL from AdSet
             st.info("ℹ️ Using empty template (no text/headlines/CTA will be copied)")
-            
-            # ✅ Fetch store URL from AdSet's promoted_object
-            adset_store_url = ""
-            try:
-                adset = AdSet(sel_a_id)
-                adset_data = adset.api_get(fields=["promoted_object"])
-                promoted_obj = adset_data.get("promoted_object", {})
-                adset_store_url = promoted_obj.get("object_store_url", "")
-            except Exception as e:
-                logger.warning(f"Could not fetch AdSet store URL: {e}")
-            
+
+            # ✅ Fetch store URL from AdSet's promoted_object (cached in session state)
+            store_url_key = f"adset_store_url_{sel_a_id}"
+            if store_url_key not in st.session_state:
+                try:
+                    adset = AdSet(sel_a_id)
+                    adset_data = adset.api_get(fields=["promoted_object"])
+                    promoted_obj = adset_data.get("promoted_object", {})
+                    st.session_state[store_url_key] = promoted_obj.get("object_store_url", "")
+                except Exception as e:
+                    logger.warning(f"Could not fetch AdSet store URL: {e}")
+                    st.session_state[store_url_key] = ""
+
             defaults = {
                 "primary_texts": [],
                 "headlines": [],
                 "call_to_action": "INSTALL_MOBILE_APP",
-                "store_url": adset_store_url,  # ✅ AdSet URL 유지
+                "store_url": st.session_state[store_url_key],
                 "source_ad_name": "Empty Template"
             }
             
@@ -626,9 +646,7 @@ def render_facebook_settings_panel(container, game: str, idx: int, **kwargs) -> 
             
             if not st.session_state.get(defaults_flag, False):
                 with st.spinner("Loading template from highest ad..."):
-                    # ✅ 템플릿이 바뀌면 캐시 무시
-                    import time
-                    defaults = fetch_latest_ad_creative_defaults(sel_a_id, force_refresh=time.time())
+                    defaults = fetch_latest_ad_creative_defaults(sel_a_id)
                     st.session_state[f"mimic_data_auto_{idx}"] = defaults
                 st.session_state[defaults_flag] = True
             else:
@@ -644,9 +662,7 @@ def render_facebook_settings_panel(container, game: str, idx: int, **kwargs) -> 
                 
                 if not st.session_state.get(defaults_flag, False):
                     with st.spinner(f"Loading template from {ad_name}..."):
-                        # ✅ 템플릿이 바뀌면 캐시 무시
-                        import time
-                        defaults = fetch_ad_creative_by_ad_id(selected_ad['id'], force_refresh=time.time())
+                        defaults = fetch_ad_creative_by_ad_id(selected_ad['id'])
                         st.session_state[f"mimic_data_{selected_ad['id']}_{idx}"] = defaults
                         st.session_state[defaults_flag] = True
                 else:
