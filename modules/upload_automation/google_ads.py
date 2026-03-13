@@ -45,12 +45,33 @@ def _customer_id() -> str:
 
 # ── Query Helpers ────────────────────────────────────────────────────
 
+def _extract_google_ads_error(exc) -> str:
+    """Extract detailed error info from GoogleAdsException."""
+    try:
+        from google.ads.googleads.errors import GoogleAdsException
+        if isinstance(exc, GoogleAdsException):
+            parts = [f"request_id: {exc.request_id}"]
+            for error in exc.failure.errors:
+                parts.append(
+                    f"error_code: {error.error_code}, "
+                    f"message: {error.message}, "
+                    f"trigger: {getattr(error, 'trigger', 'N/A')}, "
+                    f"location: {getattr(error, 'location', 'N/A')}"
+                )
+            return " | ".join(parts)
+    except Exception:
+        pass
+    return str(exc)
+
+
 def list_campaigns(game: str = None) -> List[Dict]:
     """
     Fetch all App campaigns (MULTI_CHANNEL or APP type).
     If game is provided, filters by game_mapping codename in campaign name.
     Returns list of {id, name, status, type}.
     """
+    import time
+
     client = _get_client()
     ga_service = client.get_service("GoogleAdsService")
     customer_id = _customer_id()
@@ -67,19 +88,37 @@ def list_campaigns(game: str = None) -> List[Dict]:
         ORDER BY campaign.name
     """
     results = []
-    try:
-        response = ga_service.search_stream(customer_id=customer_id, query=query)
-        for batch in response:
-            for row in batch.results:
-                results.append({
-                    "id": str(row.campaign.id),
-                    "name": row.campaign.name,
-                    "status": row.campaign.status.name,
-                    "type": row.campaign.advertising_channel_type.name,
-                })
-    except Exception as e:
-        logger.error(f"Failed to list campaigns: {e}")
-        raise
+    max_retries = 3
+    last_exc = None
+    for attempt in range(max_retries):
+        try:
+            response = ga_service.search_stream(customer_id=customer_id, query=query)
+            for batch in response:
+                for row in batch.results:
+                    results.append({
+                        "id": str(row.campaign.id),
+                        "name": row.campaign.name,
+                        "status": row.campaign.status.name,
+                        "type": row.campaign.advertising_channel_type.name,
+                    })
+            last_exc = None
+            break
+        except Exception as e:
+            last_exc = e
+            detail = _extract_google_ads_error(e)
+            logger.error(f"Failed to list campaigns (attempt {attempt+1}/{max_retries}): {detail}")
+            if "INTERNAL" in str(e).upper() or "500" in str(e):
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    # Re-create client in case of stale connection
+                    client = _get_client()
+                    ga_service = client.get_service("GoogleAdsService")
+                    results = []
+                    continue
+            raise
+
+    if last_exc is not None:
+        raise last_exc
 
     # Filter by game codename if mapping exists
     if game:
