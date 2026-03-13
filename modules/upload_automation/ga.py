@@ -77,11 +77,25 @@ def render_google_settings_panel(
         st.markdown("**캠페인 선택**")
 
         cache_key = f"{kp}gads_campaigns_{game}"
-        if cache_key not in st.session_state:
+        reload_btn = st.button("🔄 캠페인 새로고침", key=f"{kp}gads_reload_campaigns_{game}_{idx}")
+        if cache_key not in st.session_state or reload_btn:
             try:
                 st.session_state[cache_key] = gads.list_campaigns(game=game)
             except Exception as e:
-                st.error(f"Google Ads 연결 실패: {e}")
+                err_str = str(e)
+                st.error(f"Google Ads 연결 실패: {err_str[:200]}")
+                # 상세 디버깅 정보
+                with st.expander("🔍 디버깅 정보", expanded=False):
+                    st.code(err_str)
+                    try:
+                        cfg = st.secrets.get("google_ads", {})
+                        st.write(f"developer_token 존재: {bool(cfg.get('developer_token'))}")
+                        st.write(f"client_id 존재: {bool(cfg.get('client_id'))}")
+                        st.write(f"refresh_token 존재: {bool(cfg.get('refresh_token'))}")
+                        st.write(f"login_customer_id: {cfg.get('login_customer_id', 'N/A')}")
+                        st.write(f"customer_id: {cfg.get('customer_id', 'N/A')}")
+                    except Exception as cfg_err:
+                        st.error(f"secrets 읽기 실패: {cfg_err}")
                 st.session_state[cache_key] = []
 
         campaigns = st.session_state[cache_key]
