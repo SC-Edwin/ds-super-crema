@@ -292,8 +292,11 @@ def check_authentication():
         return True
     
     # 2. 쿠키에서 세션 복원 시도
-    controller = get_cookie_manager()
-    session_cookie = controller.get(COOKIE_NAME)
+    try:
+        controller = get_cookie_manager()
+        session_cookie = controller.get(COOKIE_NAME)
+    except (TypeError, Exception):
+        session_cookie = None
     
     print(f"[AUTH] Cookie check: {session_cookie}")
     
