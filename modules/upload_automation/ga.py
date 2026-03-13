@@ -85,7 +85,7 @@ def render_google_settings_panel(
                 err_str = str(e)
                 st.error(f"Google Ads 연결 실패: {err_str[:200]}")
                 # 상세 디버깅 정보
-                with st.expander("🔍 디버깅 정보", expanded=False):
+                with st.expander("🔍 디버깅 정보", expanded=True):
                     st.code(err_str)
                     try:
                         cfg = st.secrets.get("google_ads", {})
@@ -94,6 +94,50 @@ def render_google_settings_panel(
                         st.write(f"refresh_token 존재: {bool(cfg.get('refresh_token'))}")
                         st.write(f"login_customer_id: {cfg.get('login_customer_id', 'N/A')}")
                         st.write(f"customer_id: {cfg.get('customer_id', 'N/A')}")
+
+                        # 토큰 값 길이 및 앞뒤 확인 (TOML 파싱 오류 진단)
+                        rt = cfg.get("refresh_token", "")
+                        st.write(f"refresh_token 길이: {len(rt)}")
+                        st.write(f"refresh_token 앞 10자: {rt[:10]}...")
+                        st.write(f"refresh_token 뒤 10자: ...{rt[-10:]}")
+                        st.write(f"refresh_token 줄바꿈 포함: {chr(10) in rt or chr(13) in rt}")
+
+                        cs = cfg.get("client_secret", "")
+                        st.write(f"client_secret 길이: {len(cs)}")
+
+                        dt = cfg.get("developer_token", "")
+                        st.write(f"developer_token 길이: {len(dt)}")
+
+                        # 실제 클라이언트 생성 테스트
+                        st.markdown("---")
+                        st.write("**클라이언트 생성 테스트:**")
+                        try:
+                            from google.ads.googleads.client import GoogleAdsClient
+                            test_creds = {
+                                "developer_token": dt,
+                                "client_id": cfg.get("client_id", ""),
+                                "client_secret": cs,
+                                "refresh_token": rt,
+                                "use_proto_plus": True,
+                            }
+                            lid = cfg.get("login_customer_id")
+                            if lid:
+                                test_creds["login_customer_id"] = str(lid).replace("-", "")
+                            test_client = GoogleAdsClient.load_from_dict(test_creds)
+                            st.success("클라이언트 생성 성공")
+
+                            # OAuth 토큰 갱신 테스트
+                            st.write("**OAuth 토큰 갱신 테스트:**")
+                            try:
+                                import google.auth.transport.requests
+                                request = google.auth.transport.requests.Request()
+                                test_client.credentials.refresh(request)
+                                st.success(f"OAuth 토큰 갱신 성공! access_token 앞 20자: {test_client.credentials.token[:20]}...")
+                            except Exception as oauth_err:
+                                st.error(f"OAuth 토큰 갱신 실패: {oauth_err}")
+                                st.code(str(oauth_err))
+                        except Exception as client_err:
+                            st.error(f"클라이언트 생성 실패: {client_err}")
                     except Exception as cfg_err:
                         st.error(f"secrets 읽기 실패: {cfg_err}")
                 st.session_state[cache_key] = []
