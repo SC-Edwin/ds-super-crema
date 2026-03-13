@@ -117,7 +117,11 @@ def handle_google_callback():
         return idinfo.get("email")
 
     except Exception as e:
+        if "invalid_grant" in str(e):
+            st.query_params.clear()
+            st.rerun()
         st.error(f"OAuth 처리 실패: {repr(e)}")
+        st.query_params.clear()
         return None
 
 
