@@ -185,11 +185,55 @@ def _build_video_ranges_label(nums: list[int]) -> str:
     parts = [_fmt(a, b) for (a, b, _) in others] + [_fmt(main[0], main[1])]
     return ", ".join(parts)
 
+# --- Rate Limit Helper ---
+
+_RATE_LIMIT_CODES = {17, 32, 4}  # User limit, API too many calls, App limit
+_RATE_LIMIT_COOLDOWN_SECONDS = 300  # 5분 쿨다운
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    """Check if a Facebook API error is a rate limit error."""
+    if isinstance(e, FacebookRequestError):
+        return e.api_error_code() in _RATE_LIMIT_CODES
+    return False
+
+
+def _set_rate_limit_cooldown() -> None:
+    """Rate limit이 발생하면 글로벌 쿨다운 설정 — 모든 FB API 호출을 일시 차단."""
+    st.session_state["fb_rate_limit_until"] = time.time() + _RATE_LIMIT_COOLDOWN_SECONDS
+
+
+def _is_in_cooldown() -> bool:
+    """현재 rate limit 쿨다운 상태인지 확인."""
+    until = st.session_state.get("fb_rate_limit_until", 0)
+    if time.time() < until:
+        return True
+    return False
+
+
+def _cooldown_remaining() -> int:
+    """남은 쿨다운 시간(초)."""
+    until = st.session_state.get("fb_rate_limit_until", 0)
+    remaining = int(until - time.time())
+    return max(0, remaining)
+
+
+def _handle_rate_limit(e: Exception, context: str) -> None:
+    """Rate limit 에러 처리: 쿨다운 설정 + 사용자 경고."""
+    _set_rate_limit_cooldown()
+    remaining = _cooldown_remaining()
+    minutes = remaining // 60
+    seconds = remaining % 60
+    st.warning(
+        f"⚠️ Facebook API 호출 한도에 도달했습니다 ({context}). "
+        f"{minutes}분 {seconds}초 후 자동으로 재시도됩니다. 페이지를 새로고침하지 마세요."
+    )
+
+
 # --- Cached Data Fetchers ---
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_active_campaigns_cached(account_id: str) -> list[dict]:
-    """Fetch ACTIVE campaigns."""
+    """Fetch ACTIVE campaigns. Rate limit 에러는 re-raise하여 캐싱 방지."""
     try:
         account = init_fb_from_secrets(account_id)
         campaigns = account.get_campaigns(
@@ -198,12 +242,14 @@ def fetch_active_campaigns_cached(account_id: str) -> list[dict]:
         )
         return [{"id": c["id"], "name": c["name"]} for c in campaigns]
     except Exception as e:
+        if _is_rate_limit_error(e):
+            raise  # re-raise → @st.cache_data가 빈 결과를 캐싱하지 않음
         logger.error(f"Error fetching campaigns: {e}")
         return []
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_active_adsets_cached(account_id: str, campaign_id: str) -> list[dict]:
-    """Fetch adsets (excluding DELETED/ARCHIVED)."""
+    """Fetch adsets (excluding DELETED/ARCHIVED). Rate limit 에러는 re-raise하여 캐싱 방지."""
     try:
         campaign = Campaign(campaign_id)
         adsets_all = campaign.get_ad_sets(
@@ -217,14 +263,14 @@ def fetch_active_adsets_cached(account_id: str, campaign_id: str) -> list[dict]:
                 filtered.append({"id": a["id"], "name": a["name"]})
         return filtered
     except Exception as e:
+        if _is_rate_limit_error(e):
+            raise  # re-raise → @st.cache_data가 빈 결과를 캐싱하지 않음
         logger.error(f"Error fetching adsets: {e}")
         return []
 
 @st.cache_data(ttl=600, show_spinner=False)
-def fetch_latest_ad_creative_defaults(adset_id: str, force_refresh: float = 0.0) -> dict:
-    """
-    _force_refresh는 캐시를 무시하기 위한 더미 파라미터
-    """
+def fetch_latest_ad_creative_defaults(adset_id: str) -> dict:
+    """Fetch ad creative defaults from the highest-numbered active ad in the adset."""
     try:
         adset = AdSet(adset_id)
         # Fetch ads
@@ -357,9 +403,12 @@ def fetch_latest_ad_creative_defaults(adset_id: str, force_refresh: float = 0.0)
         }
 
     except Exception as e:
+        if _is_rate_limit_error(e):
+            raise  # re-raise → @st.cache_data가 빈 결과를 캐싱하지 않음
         logger.warning(f"Could not fetch ad defaults: {e}")
         return {}
-@st.cache_data(ttl=300, show_spinner=False)
+
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_ads_in_adset(adset_id: str) -> list[dict]:
     """
     Fetch all ads in an adset and return list with name and creative data.
@@ -372,7 +421,7 @@ def fetch_ads_in_adset(adset_id: str) -> list[dict]:
             # Template Source: active ads only
             params={"limit": 100, "effective_status": ["ACTIVE"]}
         )
-        
+
         result = []
         for ad in ads:
             num = _extract_number_from_name(ad['name'])
@@ -381,19 +430,34 @@ def fetch_ads_in_adset(adset_id: str) -> list[dict]:
                 "name": ad["name"],
                 "number": num
             })
-        
+
         # Sort by number (highest first)
         result.sort(key=lambda x: x["number"], reverse=True)
         return result
-        
+
     except Exception as e:
+        if _is_rate_limit_error(e):
+            raise  # re-raise → @st.cache_data가 빈 결과를 캐싱하지 않음
         logger.error(f"Error fetching ads: {e}")
         return []
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_ad_creative_by_ad_id(ad_id: str, force_refresh: float = 0.0) -> dict:
-    """
-    _force_refresh는 캐시를 무시하기 위한 더미 파라미터
-    """
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_adset_store_url_cached(adset_id: str) -> str:
+    """Fetch store URL from AdSet's promoted_object (cached)."""
+    try:
+        adset = AdSet(adset_id)
+        adset_data = adset.api_get(fields=["promoted_object"])
+        promoted_obj = adset_data.get("promoted_object", {})
+        return promoted_obj.get("object_store_url", "")
+    except Exception as e:
+        if _is_rate_limit_error(e):
+            raise  # re-raise → @st.cache_data가 빈 결과를 캐싱하지 않음
+        logger.warning(f"Could not fetch AdSet store URL: {e}")
+        return ""
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_ad_creative_by_ad_id(ad_id: str) -> dict:
+    """Fetch ad creative data by ad ID."""
     try:
         ad = Ad(ad_id)
         ad_data = ad.api_get(fields=[Ad.Field.name, Ad.Field.creative])
@@ -472,6 +536,8 @@ def fetch_ad_creative_by_ad_id(ad_id: str, force_refresh: float = 0.0) -> dict:
         }
         
     except Exception as e:
+        if _is_rate_limit_error(e):
+            raise  # re-raise → @st.cache_data가 빈 결과를 캐싱하지 않음
         logger.warning(f"Could not fetch ad creative: {e}")
         return {}
 
@@ -482,13 +548,36 @@ def render_facebook_settings_panel(container, game: str, idx: int, **kwargs) -> 
     """Render Facebook settings with Smart Defaults logic."""
     with container:
         st.markdown(f"#### {game} Settings")
-        
+
+        # --- Global rate limit cooldown guard ---
+        if _is_in_cooldown():
+            remaining = _cooldown_remaining()
+            minutes = remaining // 60
+            seconds = remaining % 60
+            st.warning(
+                f"⚠️ Facebook API 호출 한도 쿨다운 중입니다. "
+                f"{minutes}분 {seconds}초 후에 다시 시도해주세요."
+            )
+            # 쿨다운 중에는 캐시된 데이터만 사용 — 새 API 호출 차단
+            # 이전에 선택한 캠페인/AdSet 정보가 session_state에 있으면 표시
+            prev_campaign = st.session_state.get(f"fb_c_{idx}")
+            prev_adset = st.session_state.get(f"fb_a_{idx}")
+            if prev_campaign:
+                st.info(f"📌 마지막 선택: Campaign `{prev_campaign}` / AdSet `{prev_adset or 'N/A'}`")
+            return
+
         # 1. Config & Selection
         cfg = FB_GAME_MAPPING.get(game)
         account_id = cfg["account_id"]
-        
+
         # Campaign Select
-        campaigns = fetch_active_campaigns_cached(account_id)
+        try:
+            campaigns = fetch_active_campaigns_cached(account_id)
+        except FacebookRequestError as e:
+            if _is_rate_limit_error(e):
+                _handle_rate_limit(e, "campaigns 조회")
+                return
+            raise
         if not campaigns: return
         
         c_opts = [f"{c['name']} ({c['id']})" for c in campaigns]
@@ -504,7 +593,13 @@ def render_facebook_settings_panel(container, game: str, idx: int, **kwargs) -> 
         st.session_state[c_key] = sel_c_id
         
         # AdSet Select
-        adsets = fetch_active_adsets_cached(account_id, sel_c_id)
+        try:
+            adsets = fetch_active_adsets_cached(account_id, sel_c_id)
+        except FacebookRequestError as e:
+            if _is_rate_limit_error(e):
+                _handle_rate_limit(e, "adsets 조회")
+                return
+            raise
         if not adsets: return
         
         a_opts = [f"{a['name']} ({a['id']})" for a in adsets]
@@ -543,7 +638,13 @@ def render_facebook_settings_panel(container, game: str, idx: int, **kwargs) -> 
         st.markdown("**📋 Template Source**")
 
         # Fetch ad list
-        ads_in_adset = fetch_ads_in_adset(sel_a_id)
+        try:
+            ads_in_adset = fetch_ads_in_adset(sel_a_id)
+        except FacebookRequestError as e:
+            if _is_rate_limit_error(e):
+                _handle_rate_limit(e, "ads 목록 조회")
+                return
+            raise
 
         # Build options: [빈칸] + [Highest Number (Auto)] + [All Ads]
         template_options = ["빈칸 (Empty)"]
@@ -598,59 +699,55 @@ def render_facebook_settings_panel(container, game: str, idx: int, **kwargs) -> 
         # ====================================================================
         defaults = {}
 
-        if selected_template == "빈칸 (Empty)":
-            # Empty template - no defaults but keep store URL from AdSet
-            st.info("ℹ️ Using empty template (no text/headlines/CTA will be copied)")
-            
-            # ✅ Fetch store URL from AdSet's promoted_object
-            adset_store_url = ""
-            try:
-                adset = AdSet(sel_a_id)
-                adset_data = adset.api_get(fields=["promoted_object"])
-                promoted_obj = adset_data.get("promoted_object", {})
-                adset_store_url = promoted_obj.get("object_store_url", "")
-            except Exception as e:
-                logger.warning(f"Could not fetch AdSet store URL: {e}")
-            
-            defaults = {
-                "primary_texts": [],
-                "headlines": [],
-                "call_to_action": "INSTALL_MOBILE_APP",
-                "store_url": adset_store_url,  # ✅ AdSet URL 유지
-                "source_ad_name": "Empty Template"
-            }
-            
-        elif selected_template.startswith("🏆"):
-            # Auto mode - highest number
-            defaults_flag = f"defaults_fetched_auto_{idx}"
-            
-            if not st.session_state.get(defaults_flag, False):
-                with st.spinner("Loading template from highest ad..."):
-                    # ✅ 템플릿이 바뀌면 캐시 무시
-                    import time
-                    defaults = fetch_latest_ad_creative_defaults(sel_a_id, force_refresh=time.time())
-                    st.session_state[f"mimic_data_auto_{idx}"] = defaults
-                st.session_state[defaults_flag] = True
-            else:
-                defaults = st.session_state.get(f"mimic_data_auto_{idx}", {})
-                
-        elif selected_template.startswith("📄"):
-            # Specific ad selected
-            ad_name = selected_template.replace("📄 ", "")
-            selected_ad = next((a for a in ads_in_adset if a["name"] == ad_name), None)
-            
-            if selected_ad:
-                defaults_flag = f"defaults_fetched_{selected_ad['id']}_{idx}"
-                
+        try:
+            if selected_template == "빈칸 (Empty)":
+                # Empty template - no defaults but keep store URL from AdSet
+                st.info("ℹ️ Using empty template (no text/headlines/CTA will be copied)")
+
+                # ✅ Fetch store URL from AdSet's promoted_object (cached via @st.cache_data)
+                store_url = fetch_adset_store_url_cached(sel_a_id)
+
+                defaults = {
+                    "primary_texts": [],
+                    "headlines": [],
+                    "call_to_action": "INSTALL_MOBILE_APP",
+                    "store_url": store_url,
+                    "source_ad_name": "Empty Template"
+                }
+
+            elif selected_template.startswith("🏆"):
+                # Auto mode - highest number
+                defaults_flag = f"defaults_fetched_auto_{idx}"
+
                 if not st.session_state.get(defaults_flag, False):
-                    with st.spinner(f"Loading template from {ad_name}..."):
-                        # ✅ 템플릿이 바뀌면 캐시 무시
-                        import time
-                        defaults = fetch_ad_creative_by_ad_id(selected_ad['id'], force_refresh=time.time())
-                        st.session_state[f"mimic_data_{selected_ad['id']}_{idx}"] = defaults
-                        st.session_state[defaults_flag] = True
+                    with st.spinner("Loading template from highest ad..."):
+                        defaults = fetch_latest_ad_creative_defaults(sel_a_id)
+                        st.session_state[f"mimic_data_auto_{idx}"] = defaults
+                    st.session_state[defaults_flag] = True
                 else:
-                    defaults = st.session_state.get(f"mimic_data_{selected_ad['id']}_{idx}", {})
+                    defaults = st.session_state.get(f"mimic_data_auto_{idx}", {})
+
+            elif selected_template.startswith("📄"):
+                # Specific ad selected
+                ad_name = selected_template.replace("📄 ", "")
+                selected_ad = next((a for a in ads_in_adset if a["name"] == ad_name), None)
+
+                if selected_ad:
+                    defaults_flag = f"defaults_fetched_{selected_ad['id']}_{idx}"
+
+                    if not st.session_state.get(defaults_flag, False):
+                        with st.spinner(f"Loading template from {ad_name}..."):
+                            defaults = fetch_ad_creative_by_ad_id(selected_ad['id'])
+                            st.session_state[f"mimic_data_{selected_ad['id']}_{idx}"] = defaults
+                            st.session_state[defaults_flag] = True
+                    else:
+                        defaults = st.session_state.get(f"mimic_data_{selected_ad['id']}_{idx}", {})
+
+        except FacebookRequestError as e:
+            if _is_rate_limit_error(e):
+                _handle_rate_limit(e, "template 데이터 조회")
+                return
+            logger.warning(f"Could not fetch template data: {e}")
 
         # ====================================================================
         # PREPARE DEFAULT VALUES (rest stays the same)
