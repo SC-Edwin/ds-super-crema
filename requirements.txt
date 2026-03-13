@@ -11,7 +11,7 @@ plotly==6.5.0
 
 
 # 3. Google Cloud 및 OAuth
-google-cloud-bigquery==3.11.0
+google-cloud-bigquery>=3.25.0
 
 google-api-python-client==2.100.0
 google-auth>=2.23.0,<3.0.0
@@ -36,7 +36,4 @@ streamlit-cookies-controller
 # 6. Google Ads API
 google-ads==29.2.0
 grpcio>=1.59.0,<2.0.0
-protobuf>=4.25.0,<7.0.0
-
-
-
+protobuf>=5.26.1,<7.0.0

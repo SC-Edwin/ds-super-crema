@@ -16,8 +16,6 @@ from datetime import timedelta
 
 
 # ========== Config ==========
-SPREADSHEET_ID = st.secrets["user_management"]["spreadsheet_id"]
-SHEET_NAME = "super_crema_users"
 
 
 # ========== Cookie 설정 ==========
