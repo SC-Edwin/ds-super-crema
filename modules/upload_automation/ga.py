@@ -81,7 +81,8 @@ def render_google_settings_panel(
             try:
                 st.session_state[cache_key] = gads.list_campaigns(game=game)
             except Exception as e:
-                st.error(f"Google Ads 연결 실패: {e}")
+                logger.error(f"Google Ads 캠페인 로드 실패: {gads._extract_google_ads_error(e)}")
+                st.error(f"Google Ads 연결 실패: {str(e)[:200]}")
                 st.session_state[cache_key] = []
 
         campaigns = st.session_state[cache_key]

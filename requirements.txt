@@ -1,18 +1,21 @@
 # 1. Streamlit 및 핵심 데이터 처리
 streamlit==1.51.0
 pandas==2.3.3
-numpy<2.0.0  # ← 이 줄 추가: OpenCV 호환성을 위해 NumPy 1.x 사용
+numpy<2.0.0
 db-dtypes==1.4.4
 requests
 
 # 2. 시각화
 plotly==6.5.0
 
-# 3. Google Cloud 및 OAuth (안정 버전 통합)
-google-cloud-bigquery==3.11.0
+
+
+# 3. Google Cloud 및 OAuth
+google-cloud-bigquery>=3.25.0
+
 google-api-python-client==2.100.0
-google-auth==2.23.0
-google-auth-oauthlib==1.1.0
+google-auth>=2.23.0,<3.0.0
+google-auth-oauthlib>=1.1.0,<2.0.0
 google-auth-httplib2==0.1.1
 
 # 4. Video processing (thumbnail extraction)
@@ -20,10 +23,14 @@ opencv-python-headless
 
 # 5. 외부 모듈 및 기타
 facebook-business
-streamlit-extras
+
+
+
+
+
+
 
 # 6. Google Ads API
-google-ads
-
-
-
+google-ads==29.2.0
+grpcio>=1.59.0,<2.0.0
+protobuf>=5.26.1,<7.0.0
