@@ -197,6 +197,28 @@ def render_google_settings_panel(
         ad_groups = st.session_state.get(ag_cache_key, [])
         if ad_groups:
             _render_ad_groups_table(ad_groups)
+
+            # ── Clone option ──
+            from datetime import datetime as _dt
+            top_ag = ad_groups[0]
+            clone_cb_key = f"{kp}gads_clone_enabled_{game}_{idx}"
+            clone_enabled = st.checkbox(
+                "영상 남을시 애드그룹 생성하기",
+                value=st.session_state.get(clone_cb_key, False),
+                key=clone_cb_key,
+            )
+            if clone_enabled:
+                default_name = f"{top_ag['name'].rsplit('_', 1)[0]}_{_dt.now().strftime('%y%m%d')}"
+                clone_name_key = f"{kp}gads_clone_name_{game}_{idx}"
+                clone_name = st.text_input(
+                    "생성될 광고그룹 이름",
+                    value=st.session_state.get(clone_name_key, default_name),
+                    key=clone_name_key,
+                )
+                st.caption(
+                    f"원본: **{top_ag['name']}** (7일 비용 1위) → "
+                    f"텍스트/이미지/플레이어블 복사, 영상만 미배치분으로 교체"
+                )
         else:
             st.info("'광고그룹 불러오기' 버튼을 클릭하세요.")
 
@@ -493,11 +515,23 @@ def _render_category_tabs(
                 "playable_rns": {**selected_playable_rns, **{n: uploaded_assets[n] for n in selected_playables if n in uploaded_assets}},
             }
 
+    # Clone option state
+    clone_cb_key = f"{kp}gads_clone_enabled_{game}_{idx}"
+    clone_name_key = f"{kp}gads_clone_name_{game}_{idx}"
+    clone_settings = {}
+    if st.session_state.get(clone_cb_key, False) and ad_groups:
+        clone_settings = {
+            "enabled": True,
+            "source_ad_group": ad_groups[0],
+            "new_name": st.session_state.get(clone_name_key, ""),
+        }
+
     # Save all settings to session state
     st.session_state[sk][game] = {
         "campaign_id": campaign["id"],
         "campaign_name": campaign["name"],
         "category_selections": category_selections,
+        "clone": clone_settings,
     }
 
 
@@ -667,6 +701,7 @@ def distribute_by_category(
     total_failed = 0
     all_errors = []
     details = []
+    all_unplaced_rns = []  # collect unplaced video resource names across categories
 
     # Debug: log category_selections state
     logger.info(f"[distribute] category_selections keys: {list(category_selections.keys())}")
@@ -724,11 +759,13 @@ def distribute_by_category(
                 if result["errors"]:
                     all_errors.extend(f"[{cat_label}] {e}" for e in result["errors"])
 
+                unplaced_rns = plan.get("unplaced", [])
+                all_unplaced_rns.extend(unplaced_rns)
                 details.append({
                     "category": cat_label,
                     "type": "video",
-                    "placed": len(ordered_asset_rns) - len(plan.get("unplaced", [])),
-                    "unplaced": len(plan.get("unplaced", [])),
+                    "placed": len(ordered_asset_rns) - len(unplaced_rns),
+                    "unplaced": len(unplaced_rns),
                     "ad_groups_modified": result["success"],
                 })
 
@@ -776,6 +813,33 @@ def distribute_by_category(
     else:
         error_msg = None
 
+    # Auto-clone: if enabled and there are unplaced videos
+    clone_settings = settings.get("clone", {})
+    clone_result = None
+    if all_unplaced_rns and clone_settings.get("enabled"):
+        source_ag = clone_settings.get("source_ad_group")
+        clone_name = clone_settings.get("new_name", "")
+        if source_ag and clone_name:
+            try:
+                clone_result = gads.clone_ad_group(
+                    campaign_id=campaign_id,
+                    source_ad_group_id=source_ag["id"],
+                    new_name=clone_name,
+                    new_video_assets=all_unplaced_rns,
+                    copy_playables=True,
+                )
+                if clone_result.get("success"):
+                    details.append({
+                        "type": "clone",
+                        "name": clone_name,
+                        "video_count": len(all_unplaced_rns),
+                        "source": source_ag["name"],
+                    })
+                else:
+                    all_errors.append(f"[복제] {clone_result.get('error', '알 수 없는 오류')}")
+            except Exception as e:
+                all_errors.append(f"[복제] {e}")
+
     return {
         "success": total_failed == 0 and total_success > 0,
         "total_success": total_success,
@@ -783,4 +847,6 @@ def distribute_by_category(
         "errors": all_errors,
         "details": details,
         "error": error_msg,
+        "unplaced_video_rns": all_unplaced_rns,
+        "clone_result": clone_result,
     }

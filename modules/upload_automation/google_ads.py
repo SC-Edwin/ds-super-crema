@@ -950,6 +950,197 @@ def add_playable_to_app_ad(
         raise
 
 
+# ── Ad Group Clone ───────────────────────────────────────────────────
+
+def get_full_app_ad(campaign_id: str, ad_group_id: str) -> Optional[Dict]:
+    """
+    Fetch complete AppAd including headlines, descriptions, images, videos, and playables.
+    Used for cloning an ad group's ad to a new ad group.
+    """
+    client = _get_client()
+    ga_service = client.get_service("GoogleAdsService")
+    customer_id = _customer_id()
+
+    query = f"""
+        SELECT
+            ad_group_ad.ad.resource_name,
+            ad_group_ad.ad.app_ad.headlines,
+            ad_group_ad.ad.app_ad.descriptions,
+            ad_group_ad.ad.app_ad.images,
+            ad_group_ad.ad.app_ad.youtube_videos,
+            ad_group_ad.ad.app_ad.html5_media_bundles
+        FROM ad_group_ad
+        WHERE ad_group.id = {ad_group_id}
+        AND campaign.id = {campaign_id}
+        AND ad_group_ad.status != 'REMOVED'
+        LIMIT 1
+    """
+    try:
+        response = ga_service.search_stream(customer_id=customer_id, query=query)
+        for batch in response:
+            for row in batch.results:
+                app_ad = row.ad_group_ad.ad.app_ad
+                return {
+                    "ad_resource_name": row.ad_group_ad.ad.resource_name,
+                    "headlines": [h.text for h in app_ad.headlines],
+                    "descriptions": [d.text for d in app_ad.descriptions],
+                    "images": [img.asset for img in app_ad.images],
+                    "video_assets": [v.asset for v in app_ad.youtube_videos],
+                    "html5_assets": [h.asset for h in app_ad.html5_media_bundles],
+                }
+    except Exception as e:
+        logger.error(f"Failed to get full AppAd: {_extract_google_ads_error(e)}")
+        raise
+    return None
+
+
+def create_ad_group(campaign_id: str, name: str) -> str:
+    """
+    Create a new ENABLED ad group in a campaign.
+    Returns the new ad group resource name.
+    """
+    client = _get_client()
+    ag_service = client.get_service("AdGroupService")
+    customer_id = _customer_id()
+
+    campaign_rn = client.get_service("CampaignService").campaign_path(customer_id, campaign_id)
+
+    operation = client.get_type("AdGroupOperation")
+    ag = operation.create
+    ag.name = name
+    ag.campaign = campaign_rn
+    ag.status = client.enums.AdGroupStatusEnum.ENABLED
+
+    try:
+        response = ag_service.mutate_ad_groups(
+            customer_id=customer_id,
+            operations=[operation],
+        )
+        new_rn = response.results[0].resource_name
+        logger.info(f"Created ad group: {new_rn}")
+        return new_rn
+    except Exception as e:
+        logger.error(f"Failed to create ad group: {_extract_google_ads_error(e)}")
+        raise
+
+
+def create_app_ad(
+    ad_group_resource_name: str,
+    headlines: List[str],
+    descriptions: List[str],
+    image_assets: List[str],
+    video_assets: List[str],
+    html5_assets: List[str],
+) -> str:
+    """
+    Create a new AppAd in a given ad group with full creative assets.
+    Returns the new ad_group_ad resource name.
+    """
+    client = _get_client()
+    ag_ad_service = client.get_service("AdGroupAdService")
+    customer_id = _customer_id()
+
+    operation = client.get_type("AdGroupAdOperation")
+    ag_ad = operation.create
+    ag_ad.ad_group = ad_group_resource_name
+    ag_ad.status = client.enums.AdGroupAdStatusEnum.ENABLED
+
+    ad = ag_ad.ad
+    # Headlines
+    for text in headlines:
+        headline = client.get_type("AdTextAsset")
+        headline.text = text
+        ad.app_ad.headlines.append(headline)
+
+    # Descriptions
+    for text in descriptions:
+        desc = client.get_type("AdTextAsset")
+        desc.text = text
+        ad.app_ad.descriptions.append(desc)
+
+    # Images
+    for asset_rn in image_assets:
+        img = client.get_type("AdImageAsset")
+        img.asset = asset_rn
+        ad.app_ad.images.append(img)
+
+    # Videos
+    for asset_rn in video_assets:
+        vid = client.get_type("AdVideoAsset")
+        vid.asset = asset_rn
+        ad.app_ad.youtube_videos.append(vid)
+
+    # HTML5 / Playables
+    for asset_rn in html5_assets:
+        bundle = client.get_type("AdMediaBundleAsset")
+        bundle.asset = asset_rn
+        ad.app_ad.html5_media_bundles.append(bundle)
+
+    try:
+        response = ag_ad_service.mutate_ad_group_ads(
+            customer_id=customer_id,
+            operations=[operation],
+        )
+        new_rn = response.results[0].resource_name
+        logger.info(f"Created AppAd: {new_rn}")
+        return new_rn
+    except Exception as e:
+        logger.error(f"Failed to create AppAd: {_extract_google_ads_error(e)}")
+        raise
+
+
+def clone_ad_group(
+    campaign_id: str,
+    source_ad_group_id: str,
+    new_name: str,
+    new_video_assets: List[str],
+    copy_playables: bool = True,
+) -> Dict:
+    """
+    Clone an ad group: create new ad group + copy AppAd with new videos.
+
+    Steps:
+      1. Fetch source AppAd (headlines, descriptions, images, playables)
+      2. Create new ad group with new_name
+      3. Create AppAd in new ad group with source's text/images + new videos
+
+    Returns: {success: bool, ad_group_resource_name, ad_resource_name, error}
+    """
+    try:
+        # 1. Get source AppAd
+        source_ad = get_full_app_ad(campaign_id, source_ad_group_id)
+        if not source_ad:
+            return {"success": False, "error": "원본 광고그룹에 AppAd가 없습니다."}
+
+        # 2. Create new ad group
+        ag_rn = create_ad_group(campaign_id, new_name)
+
+        # 3. Create AppAd with source text/images + new videos
+        html5 = source_ad["html5_assets"] if copy_playables else []
+        ad_rn = create_app_ad(
+            ad_group_resource_name=ag_rn,
+            headlines=source_ad["headlines"],
+            descriptions=source_ad["descriptions"],
+            image_assets=source_ad["images"],
+            video_assets=new_video_assets,
+            html5_assets=html5,
+        )
+
+        return {
+            "success": True,
+            "ad_group_resource_name": ag_rn,
+            "ad_resource_name": ad_rn,
+            "error": None,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "ad_group_resource_name": None,
+            "ad_resource_name": None,
+            "error": _extract_google_ads_error(e),
+        }
+
+
 # ── Distribution Logic ───────────────────────────────────────────────
 
 def distribute_videos(
