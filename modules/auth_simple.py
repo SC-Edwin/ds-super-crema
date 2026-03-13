@@ -266,17 +266,18 @@ def log_action(user_email, login_method, action):
 
 def _save_session_cookie(user_email, user_name, user_role, login_method):
     """세션 정보를 쿠키에 저장"""
-    controller = get_cookie_manager()
-    
-    session_data = {
-        'user_email': user_email,
-        'user_name': user_name,
-        'user_role': user_role,
-        'login_method': login_method,
-    }
-    
-    controller.set(COOKIE_NAME, json.dumps(session_data))
-    print(f"[AUTH] Cookie saved for: {user_email}")
+    try:
+        controller = get_cookie_manager()
+        session_data = {
+            'user_email': user_email,
+            'user_name': user_name,
+            'user_role': user_role,
+            'login_method': login_method,
+        }
+        controller.set(COOKIE_NAME, json.dumps(session_data))
+        print(f"[AUTH] Cookie saved for: {user_email}")
+    except Exception:
+        print(f"[AUTH] Cookie save skipped (controller not ready)")
 
     
 
@@ -397,9 +398,12 @@ def logout():
         )
     
     # 쿠키 삭제
-    cookie_manager = get_cookie_manager()
-    cookie_manager.delete(COOKIE_NAME)
-    print(f"[AUTH] Cookie deleted")
+    try:
+        cookie_manager = get_cookie_manager()
+        cookie_manager.delete(COOKIE_NAME)
+        print(f"[AUTH] Cookie deleted")
+    except Exception:
+        print(f"[AUTH] Cookie delete skipped (controller not ready)")
         
     for key in ['authenticated', 'user_email', 'user_name', 'user_role', 'login_method']:
         if key in st.session_state:
