@@ -63,7 +63,7 @@ def list_campaigns(game: str = None) -> List[Dict]:
             campaign.advertising_channel_type
         FROM campaign
         WHERE campaign.advertising_channel_type = 'MULTI_CHANNEL'
-        AND campaign.status = 'ENABLED'
+        AND campaign.status != 'REMOVED'
         ORDER BY campaign.name
     """
     results = []
@@ -379,11 +379,29 @@ def upload_video_asset(video_bytes: bytes, display_name: str) -> str:
     """
     Upload a video to Google Ads:
     1. Upload to YouTube (unlisted) via YouTube Data API
-    2. Create YOUTUBE_VIDEO asset referencing the video ID
+    2. Wait for YouTube processing, then create YOUTUBE_VIDEO asset
     Returns the asset resource name.
     """
+    import time
+
     youtube_video_id = _upload_to_youtube(video_bytes, display_name)
-    return upload_video_asset_by_youtube_id(youtube_video_id, display_name)
+
+    # YouTube needs time to process before Google Ads can find the video
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            return upload_video_asset_by_youtube_id(youtube_video_id, display_name)
+        except Exception as e:
+            err_str = str(e)
+            if "VIDEO_NOT_FOUND" in err_str and attempt < max_retries - 1:
+                wait = (attempt + 1) * 5  # 5s, 10s, 15s, 20s
+                logger.info(
+                    f"YouTube video {youtube_video_id} not ready yet, "
+                    f"retrying in {wait}s (attempt {attempt + 1}/{max_retries})"
+                )
+                time.sleep(wait)
+            else:
+                raise
 
 
 def upload_video_asset_by_youtube_id(youtube_video_id: str, display_name: str) -> str:
