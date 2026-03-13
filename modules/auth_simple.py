@@ -16,6 +16,7 @@ from datetime import timedelta
 
 
 # ========== Config ==========
+SPREADSHEET_ID = st.secrets["user_management"]["spreadsheet_id"]
 SHEET_NAME = "super_crema_users"
 
 
@@ -96,6 +97,15 @@ def handle_google_callback():
     if st.session_state.get("oauth_code_used") == code:
         return None
 
+    state = query_params.get("state")
+    if isinstance(state, list):
+        state = state[0]
+
+    expected_state = st.session_state.get("oauth_state")
+    if expected_state and state and state != expected_state:
+        st.error("OAuth state mismatch")
+        return None
+
     try:
         flow = get_google_oauth_flow()
         flow.fetch_token(code=code)
@@ -116,12 +126,7 @@ def handle_google_callback():
         return idinfo.get("email")
 
     except Exception as e:
-        # invalid_grant = code 만료/재사용 → URL 정리 후 재로그인 유도
-        if "invalid_grant" in str(e):
-            st.query_params.clear()
-            st.rerun()
         st.error(f"OAuth 처리 실패: {repr(e)}")
-        st.query_params.clear()
         return None
 
 
@@ -266,18 +271,17 @@ def log_action(user_email, login_method, action):
 
 def _save_session_cookie(user_email, user_name, user_role, login_method):
     """세션 정보를 쿠키에 저장"""
-    try:
-        controller = get_cookie_manager()
-        session_data = {
-            'user_email': user_email,
-            'user_name': user_name,
-            'user_role': user_role,
-            'login_method': login_method,
-        }
-        controller.set(COOKIE_NAME, json.dumps(session_data))
-        print(f"[AUTH] Cookie saved for: {user_email}")
-    except Exception as e:
-        print(f"[AUTH] Cookie save failed (non-critical): {e}")
+    controller = get_cookie_manager()
+    
+    session_data = {
+        'user_email': user_email,
+        'user_name': user_name,
+        'user_role': user_role,
+        'login_method': login_method,
+    }
+    
+    controller.set(COOKIE_NAME, json.dumps(session_data))
+    print(f"[AUTH] Cookie saved for: {user_email}")
 
     
 
@@ -293,13 +297,9 @@ def check_authentication():
         return True
     
     # 2. 쿠키에서 세션 복원 시도
-    try:
-        controller = get_cookie_manager()
-        session_cookie = controller.get(COOKIE_NAME)
-    except (TypeError, Exception):
-        # 쿠키 컨트롤러가 아직 로드되지 않은 경우
-        session_cookie = None
-
+    controller = get_cookie_manager()
+    session_cookie = controller.get(COOKIE_NAME)
+    
     print(f"[AUTH] Cookie check: {session_cookie}")
     
     if session_cookie:
