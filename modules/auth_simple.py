@@ -117,7 +117,12 @@ def handle_google_callback():
         return idinfo.get("email")
 
     except Exception as e:
+        # invalid_grant = code 만료/재사용 → URL 정리 후 재로그인 유도
+        if "invalid_grant" in str(e):
+            st.query_params.clear()
+            st.rerun()
         st.error(f"OAuth 처리 실패: {repr(e)}")
+        st.query_params.clear()
         return None
 
 
