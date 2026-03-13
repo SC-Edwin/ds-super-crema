@@ -31,8 +31,6 @@ streamlit-extras
 
 
 
-streamlit-cookies-controller
-
 # 6. Google Ads API
 google-ads==29.2.0
 grpcio>=1.59.0,<2.0.0
