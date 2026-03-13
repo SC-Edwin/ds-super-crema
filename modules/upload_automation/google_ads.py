@@ -193,7 +193,7 @@ def list_ad_group_videos(campaign_id: str, ad_group_id: str) -> List[Dict]:
     query = f"""
         SELECT
             ad_group_ad.ad.id,
-            ad_group_ad.ad.app_ad.videos,
+            ad_group_ad.ad.app_ad.youtube_videos,
             ad_group_ad.ad.app_ad.headlines,
             ad_group_ad.ad_strength
         FROM ad_group_ad
@@ -207,7 +207,7 @@ def list_ad_group_videos(campaign_id: str, ad_group_id: str) -> List[Dict]:
         for batch in response:
             for row in batch.results:
                 app_ad = row.ad_group_ad.ad.app_ad
-                for video_asset in app_ad.videos:
+                for video_asset in app_ad.youtube_videos:
                     asset_rn = video_asset.asset
                     videos.append({
                         "asset_resource_name": asset_rn,
@@ -219,11 +219,15 @@ def list_ad_group_videos(campaign_id: str, ad_group_id: str) -> List[Dict]:
 
     # Enrich with asset details + performance
     if videos:
-        videos = _enrich_video_assets(videos)
+        videos = _enrich_video_assets(videos, campaign_id, ad_group_id)
     return videos
 
 
-def _enrich_video_assets(videos: List[Dict]) -> List[Dict]:
+def _enrich_video_assets(
+    videos: List[Dict],
+    campaign_id: str = "",
+    ad_group_id: str = "",
+) -> List[Dict]:
     """Fetch asset name + performance label for each video asset."""
     client = _get_client()
     ga_service = client.get_service("GoogleAdsService")
@@ -264,8 +268,10 @@ def _enrich_video_assets(videos: List[Dict]) -> List[Dict]:
     except Exception as e:
         logger.warning(f"Failed to enrich video assets: {e}")
 
-    # Also fetch performance labels via ad_group_asset
-    perf_map = _get_asset_performance_labels(resource_names)
+    # Fetch performance labels with campaign/ad_group context
+    perf_map = _get_asset_performance_labels(
+        resource_names, campaign_id=campaign_id, ad_group_id=ad_group_id
+    )
 
     for v in videos:
         rn = v["asset_resource_name"]
@@ -277,7 +283,11 @@ def _enrich_video_assets(videos: List[Dict]) -> List[Dict]:
     return videos
 
 
-def _get_asset_performance_labels(asset_resource_names: List[str]) -> Dict[str, str]:
+def _get_asset_performance_labels(
+    asset_resource_names: List[str],
+    campaign_id: str = "",
+    ad_group_id: str = "",
+) -> Dict[str, str]:
     """
     Get performance labels for assets.
     Returns {asset_resource_name: "LOW" | "GOOD" | "BEST" | "LEARNING" | ...}
@@ -289,21 +299,28 @@ def _get_asset_performance_labels(asset_resource_names: List[str]) -> Dict[str, 
     ga_service = client.get_service("GoogleAdsService")
     customer_id = _customer_id()
 
-    rn_list = ", ".join(f"'{rn}'" for rn in asset_resource_names)
+    # Build WHERE conditions with campaign/ad_group context
+    conditions = ["ad_group_ad_asset_view.field_type = 'YOUTUBE_VIDEO'"]
+    if campaign_id:
+        conditions.append(f"campaign.id = {campaign_id}")
+    if ad_group_id:
+        conditions.append(f"ad_group.id = {ad_group_id}")
+    where_clause = " AND ".join(conditions)
+
     query = f"""
         SELECT
-            ad_group_asset.asset,
-            ad_group_asset.performance_label
-        FROM ad_group_asset
-        WHERE ad_group_asset.asset IN ({rn_list})
+            ad_group_ad_asset_view.performance_label,
+            asset.resource_name
+        FROM ad_group_ad_asset_view
+        WHERE {where_clause}
     """
     perf_map: Dict[str, str] = {}
     try:
         response = ga_service.search_stream(customer_id=customer_id, query=query)
         for batch in response:
             for row in batch.results:
-                perf_map[row.ad_group_asset.asset] = (
-                    row.ad_group_asset.performance_label.name
+                perf_map[row.asset.resource_name] = (
+                    row.ad_group_ad_asset_view.performance_label.name
                 )
     except Exception as e:
         logger.warning(f"Failed to get performance labels: {e}")
@@ -786,7 +803,7 @@ def get_app_ad_resource(campaign_id: str, ad_group_id: str) -> Optional[Dict]:
         SELECT
             ad_group_ad.resource_name,
             ad_group_ad.ad.resource_name,
-            ad_group_ad.ad.app_ad.videos,
+            ad_group_ad.ad.app_ad.youtube_videos,
             ad_group_ad.ad.app_ad.html5_media_bundles
         FROM ad_group_ad
         WHERE ad_group.id = {ad_group_id}
@@ -802,7 +819,7 @@ def get_app_ad_resource(campaign_id: str, ad_group_id: str) -> Optional[Dict]:
                 return {
                     "ad_group_ad_resource_name": row.ad_group_ad.resource_name,
                     "ad_resource_name": row.ad_group_ad.ad.resource_name,
-                    "video_assets": [v.asset for v in app_ad.videos],
+                    "video_assets": [v.asset for v in app_ad.youtube_videos],
                     "html5_assets": [h.asset for h in app_ad.html5_media_bundles],
                 }
     except Exception as e:
@@ -833,12 +850,13 @@ def mutate_app_ad_videos(
     for asset_rn in new_video_assets:
         ad_info = client.get_type("AdVideoAsset")
         ad_info.asset = asset_rn
-        ad.app_ad.videos.append(ad_info)
+        ad.app_ad.youtube_videos.append(ad_info)
 
     # Set field mask to only update videos
-    field_mask = client.get_type("FieldMask")
-    field_mask.paths.append("app_ad.videos")
-    ad_operation.update_mask.CopyFrom(field_mask)
+    from google.protobuf import field_mask_pb2
+    ad_operation.update_mask.CopyFrom(
+        field_mask_pb2.FieldMask(paths=["app_ad.youtube_videos"])
+    )
 
     try:
         ad_service.mutate_ads(
@@ -876,9 +894,10 @@ def add_playable_to_app_ad(
         bundle.asset = asset_rn
         ad.app_ad.html5_media_bundles.append(bundle)
 
-    field_mask = client.get_type("FieldMask")
-    field_mask.paths.append("app_ad.html5_media_bundles")
-    ad_operation.update_mask.CopyFrom(field_mask)
+    from google.protobuf import field_mask_pb2
+    ad_operation.update_mask.CopyFrom(
+        field_mask_pb2.FieldMask(paths=["app_ad.html5_media_bundles"])
+    )
 
     try:
         ad_service.mutate_ads(
@@ -995,10 +1014,17 @@ def distribute_videos(
             continue
 
         current_videos = list_ad_group_videos(campaign_id, ag["id"])
+        perf_labels = [v.get("performance_label") for v in current_videos]
+        logger.info(
+            f"[distribute] AG {ag['name']}: "
+            f"total_videos={len(current_videos)}, "
+            f"perf_labels={perf_labels}"
+        )
         low_performers = [
             v for v in current_videos
             if v.get("performance_label") == "LOW"
         ]
+        logger.info(f"[distribute] AG {ag['name']}: low_count={len(low_performers)}")
 
         to_replace = min(len(low_performers), len(normal_remaining))
         if to_replace == 0:

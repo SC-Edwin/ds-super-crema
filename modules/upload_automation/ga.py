@@ -569,6 +569,16 @@ def distribute_by_category(
     all_errors = []
     details = []
 
+    # Debug: log category_selections state
+    logger.info(f"[distribute] category_selections keys: {list(category_selections.keys())}")
+    for _dbg_k, _dbg_v in category_selections.items():
+        logger.info(
+            f"[distribute] cat={_dbg_k}: videos={_dbg_v.get('selected_videos', [])}, "
+            f"playables={_dbg_v.get('selected_playables', [])}, "
+            f"video_rns_keys={list(_dbg_v.get('video_rns', {}).keys())}"
+        )
+    logger.info(f"[distribute] ad_groups count={len(ad_groups)}, names={[ag['name'] for ag in ad_groups[:5]]}")
+
     for cat_id, cat_label in CATEGORIES:
         sel = category_selections.get(cat_id, {})
         selected_videos = sel.get("selected_videos", [])
@@ -576,10 +586,16 @@ def distribute_by_category(
         video_rns = sel.get("video_rns", {})      # name → resource_name
         playable_rns = sel.get("playable_rns", {})  # name → resource_name
 
+        logger.info(
+            f"[distribute] Processing cat={cat_id}: "
+            f"videos={len(selected_videos)}, playables={len(selected_playables)}"
+        )
+
         if not selected_videos and not selected_playables:
             continue
 
         filtered_ags = gads.filter_ad_groups_by_category(ad_groups, cat_id)
+        logger.info(f"[distribute] cat={cat_id}: filtered_ags={len(filtered_ags)}")
         if not filtered_ags:
             all_errors.append(f"[{cat_label}] 해당 카테고리에 맞는 광고그룹이 없습니다.")
             continue
@@ -654,10 +670,18 @@ def distribute_by_category(
                     "ad_groups_failed": p_failed,
                 })
 
+    if total_success == 0 and total_failed == 0 and not all_errors:
+        error_msg = "배치 대상이 없습니다. 광고그룹에 매칭되는 카테고리가 없거나 선택한 소재의 resource name을 확인해주세요."
+    elif all_errors and total_success == 0:
+        error_msg = "; ".join(all_errors[:3])
+    else:
+        error_msg = None
+
     return {
         "success": total_failed == 0 and total_success > 0,
         "total_success": total_success,
         "total_failed": total_failed,
         "errors": all_errors,
         "details": details,
+        "error": error_msg,
     }
