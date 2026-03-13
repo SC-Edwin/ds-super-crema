@@ -375,14 +375,58 @@ def _upload_to_youtube(video_bytes: bytes, title: str) -> str:
 
 # ── Asset Upload ─────────────────────────────────────────────────────
 
+def _find_existing_video_asset(display_name: str) -> str | None:
+    """
+    Check if a YOUTUBE_VIDEO asset with the same name already exists.
+    Returns the asset resource_name if found, None otherwise.
+    """
+    client = _get_client()
+    ga_service = client.get_service("GoogleAdsService")
+    customer_id = _customer_id()
+
+    # Search by youtube_video_title (original filename) or asset name
+    query = """
+        SELECT
+            asset.resource_name,
+            asset.name,
+            asset.youtube_video_asset.youtube_video_title
+        FROM asset
+        WHERE asset.type = 'YOUTUBE_VIDEO'
+    """
+    try:
+        response = ga_service.search_stream(customer_id=customer_id, query=query)
+        for batch in response:
+            for row in batch.results:
+                yt_title = getattr(
+                    row.asset.youtube_video_asset, "youtube_video_title", ""
+                ) or ""
+                asset_name = row.asset.name or ""
+                if yt_title == display_name or asset_name == display_name:
+                    logger.info(
+                        f"Found existing asset for '{display_name}': "
+                        f"{row.asset.resource_name}"
+                    )
+                    return row.asset.resource_name
+    except Exception as e:
+        logger.warning(f"Failed to check for existing asset: {e}")
+    return None
+
+
 def upload_video_asset(video_bytes: bytes, display_name: str) -> str:
     """
     Upload a video to Google Ads:
-    1. Upload to YouTube (unlisted) via YouTube Data API
-    2. Wait for YouTube processing, then create YOUTUBE_VIDEO asset
+    1. Check if asset with same name already exists (skip if duplicate)
+    2. Upload to YouTube (unlisted) via YouTube Data API
+    3. Wait for YouTube processing, then create YOUTUBE_VIDEO asset
     Returns the asset resource name.
     """
     import time
+
+    # Duplicate check
+    existing_rn = _find_existing_video_asset(display_name)
+    if existing_rn:
+        logger.info(f"Skipping duplicate upload for '{display_name}'")
+        return existing_rn
 
     youtube_video_id = _upload_to_youtube(video_bytes, display_name)
 
