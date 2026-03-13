@@ -8,6 +8,7 @@ Author: Edwin
 
 
 
+from click import style
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -19,6 +20,18 @@ from datetime import datetime, timedelta
 import pandas as pd
 import streamlit.components.v1 as components
 
+
+
+import base64
+import os
+
+def _img_b64(path: str) -> str | None:
+    """이미지 파일을 base64 data URI로 변환 (png/jpeg 모두 지원)"""
+    if os.path.exists(path):
+        mime = "image/jpeg" if path.lower().endswith((".jpg", ".jpeg")) else "image/png"
+        with open(path, "rb") as f:
+            return f"data:{mime};base64," + base64.b64encode(f.read()).decode()
+    return None
 
 
 
@@ -654,24 +667,156 @@ def run():
 
     st.markdown("---")
 
+    
     if selected_app == 'All':
-        st.markdown("""
-            <div style="
-                background: rgba(26, 26, 26, 0.85);
-                border: 1px solid rgba(255, 0, 110, 0.3);
-                border-radius: 12px;
-                padding: 60px 20px;
-                text-align: center;
-            ">
-                <div style="font-size: 3rem;">📱</div>
-                <div style="font-size: 1.4rem; color: #ff006e; font-weight: 600; margin: 12px 0;">
-                    앱을 선택해주세요
-                </div>
-                <div style="color: rgba(255,255,255,0.5); font-size: 0.95rem;">
-                    위 App 필터에서 앱을 선택하면 네트워크별 소재 분석이 표시됩니다
+    # 캐릭터 이미지 로드 (없으면 이모지 폴백)
+        
+        chars = [
+            ("assets/characters/dino.png",    "🦖"),
+            ("assets/characters/prison.jpeg", "🚔"),
+            ("assets/characters/snake.jpeg",  "🐍"),
+            ("assets/characters/xp.jpeg",     "⚔️"),
+            ("assets/characters/pizza.jpeg",  "🍕"),
+        ]
+
+        
+        
+        
+        
+        
+        # 높이, 바닥offset, 기울기 — 무대 위 자연스러운 배치
+        heights = ["140px", "175px", "200px", "170px", "145px"]
+        offsets = ["10px",  "4px",   "0px",   "6px",   "12px"]
+        rotates = ["-4deg", "-1deg", "0deg",  "2deg",  "5deg"]
+
+        char_items = ""
+        for i, (path, emoji) in enumerate(chars):
+            h = heights[i]
+            b64 = _img_b64(path)
+            
+
+            
+            off = offsets[i]
+            rot = rotates[i]
+            if b64:
+                char_items += f'<div class="char" style="flex:1; display:flex; align-items:flex-end; justify-content:center; margin-bottom:{off}; transform:rotate({rot});"><img src="{b64}" style="height:{h};"></div>'
+            else:
+                char_items += f'<div class="char" style="flex:1; display:flex; align-items:flex-end; justify-content:center; font-size:4.5rem; margin-bottom:{off}; transform:rotate({rot});">{emoji}</div>'
+        
+        
+        components.html(f"""
+            <style>
+                * {{ margin:0; padding:0; box-sizing:border-box; }}
+                body {{ background:#1a0808; }}
+                .stage {{
+                    position: relative;
+                    width: 100%;
+                    height: 280px;
+                    background:
+                        radial-gradient(ellipse at 50% 100%, rgba(120,0,40,0.6) 0%, transparent 70%),
+                        linear-gradient(180deg, #1a0808 0%, #2d0d0d 40%, #1a0808 100%);
+                    border-radius: 16px;
+                    overflow: hidden;
+                    border: 1px solid rgba(180,0,60,0.3);
+                }}
+                .curtain-left, .curtain-right {{
+                    position: absolute;
+                    top: 0; bottom: 0;
+                    width: 22%;
+                    background: linear-gradient(
+                        to bottom,
+                        #5c0a1a 0%,
+                        #8b1a2a 20%,
+                        #6b1020 50%,
+                        #8b1a2a 80%,
+                        #5c0a1a 100%
+                    );
+                    z-index: 2;
+                }}
+                .curtain-left {{
+                    left: 0;
+                    border-right: 2px solid rgba(255,100,100,0.15);
+                    box-shadow: inset -8px 0 20px rgba(0,0,0,0.5), 4px 0 15px rgba(0,0,0,0.4);
+                    clip-path: polygon(0 0, 85% 0, 100% 8%, 88% 25%, 100% 45%, 88% 65%, 100% 82%, 88% 100%, 0 100%);
+                }}
+                .curtain-right {{
+                    right: 0;
+                    border-left: 2px solid rgba(255,100,100,0.15);
+                    box-shadow: inset 8px 0 20px rgba(0,0,0,0.5), -4px 0 15px rgba(0,0,0,0.4);
+                    clip-path: polygon(15% 0, 100% 0, 100% 100%, 12% 100%, 0% 82%, 12% 65%, 0% 45%, 12% 25%, 0% 8%);
+                }}
+                .curtain-top {{
+                    position: absolute;
+                    top: 0; left: 0; right: 0;
+                    height: 28px;
+                    background: linear-gradient(180deg, #8b1a2a 0%, #5c0a1a 100%);
+                    z-index: 3;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+                }}
+                .curtain-top::after {{
+                    content: '';
+                    position: absolute;
+                    bottom: -6px; left: 0; right: 0;
+                    height: 6px;
+                    background: repeating-linear-gradient(
+                        90deg,
+                        #8b1a2a 0px, #8b1a2a 18px,
+                        #5c0a1a 18px, #5c0a1a 36px
+                    );
+                }}
+                .text-area {{
+                    position: absolute;
+                    top: 38px; left: 0; right: 0;
+                    text-align: center;
+                    z-index: 4;
+                    font-family: -apple-system, sans-serif;
+                }}
+                .title {{
+                    font-size: 1.1rem;
+                    color: rgba(255,180,160,0.9);
+                    font-weight: 600;
+                    letter-spacing: 0.5px;
+                    text-shadow: 0 0 20px rgba(255,80,80,0.4);
+                }}
+                .subtitle {{
+                    font-size: 0.75rem;
+                    color: rgba(255,255,255,0.2);
+                    margin-top: 4px;
+                }}
+                .chars {{
+                    position: absolute;
+                    bottom: 0; left: 15%; right: 15%;
+                    display: flex;
+                    align-items: flex-end;
+                    justify-content: center;
+                    z-index: 1;
+                }}
+                .char img {{
+                    display: block;
+                    mix-blend-mode: luminosity;
+                    opacity: 0.82;
+                    filter: brightness(0.9) contrast(1.1);
+                    transition: all 0.3s ease;
+                    object-fit: contain;
+                    max-width: 100%;
+                }}
+                .char:hover img {{
+                    mix-blend-mode: normal;
+                    opacity: 1;
+                    filter: brightness(1.1) drop-shadow(0 -4px 12px rgba(255,100,100,0.5));
+                    transform: translateY(-8px) scale(1.05);
+                }}
+            </style>
+            <div class="stage">
+                <div class="curtain-top"></div>
+                <div class="curtain-left"></div>
+                <div class="curtain-right"></div>
+                <div class="chars">
+                    {char_items}
                 </div>
             </div>
-        """, unsafe_allow_html=True)
+        """, height=295)
+
     else:
         tabs = st.tabs([f"📊 {net.upper()}" for net in future_networks])
 

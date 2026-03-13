@@ -8,6 +8,8 @@ requests
 # 2. 시각화
 plotly==6.5.0
 
+
+
 # 3. Google Cloud 및 OAuth
 google-cloud-bigquery==3.11.0
 
@@ -35,3 +37,6 @@ streamlit-cookies-controller
 google-ads==29.2.0
 grpcio>=1.59.0,<2.0.0
 protobuf>=4.25.0,<7.0.0
+
+
+
