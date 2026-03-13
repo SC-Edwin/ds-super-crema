@@ -97,15 +97,6 @@ def handle_google_callback():
     if st.session_state.get("oauth_code_used") == code:
         return None
 
-    state = query_params.get("state")
-    if isinstance(state, list):
-        state = state[0]
-
-    expected_state = st.session_state.get("oauth_state")
-    if expected_state and state and state != expected_state:
-        st.error("OAuth state mismatch")
-        return None
-
     try:
         flow = get_google_oauth_flow()
         flow.fetch_token(code=code)
