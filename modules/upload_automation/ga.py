@@ -11,6 +11,7 @@ Features:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Dict, List
 
 import streamlit as st
@@ -49,6 +50,57 @@ def _get_game_codename(game: str) -> str:
     """Get the game codename from secrets mapping."""
     mapping = st.secrets.get("google_ads", {}).get("game_mapping", {})
     return mapping.get(game, "").lower()
+
+
+_RES_PATTERN = re.compile(r"(\d{3,4})x(\d{3,4})")
+# Strip trailing YouTube ID suffix like " (abc123)" from display labels
+_YT_SUFFIX = re.compile(r"\s*\([^)]+\)\s*$")
+
+
+def _strip_yt_suffix(label: str) -> str:
+    """Remove trailing ' (yt_id)' from a display label to get the raw filename."""
+    return _YT_SUFFIX.sub("", label)
+
+
+def _orientation_sort_key(label: str) -> int:
+    """Sort key for orientation: 정방(square)=0, 가로(landscape)=1, 세로(portrait)=2."""
+    m = _RES_PATTERN.search(label)
+    if not m:
+        return 3
+    w, h = int(m.group(1)), int(m.group(2))
+    if w == h:
+        return 0  # 정방
+    elif w > h:
+        return 1  # 가로
+    else:
+        return 2  # 세로
+
+
+def _find_orientation_variants(selected_label: str, all_options: List[str]) -> List[str]:
+    """Given a selected video label, find other orientation variants from all_options.
+
+    Compares only the filename part (stripping YouTube ID suffix) so that
+    different uploads of the same creative match correctly.
+    Returns list sorted by: 정방 → 가로 → 세로, NOT including the original.
+    """
+    name = _strip_yt_suffix(selected_label)
+    m = _RES_PATTERN.search(name)
+    if not m:
+        return []
+    base = name[:m.start()] + "{RES}" + name[m.end():]
+    variants = []
+    for opt in all_options:
+        if opt == selected_label:
+            continue
+        opt_name = _strip_yt_suffix(opt)
+        m2 = _RES_PATTERN.search(opt_name)
+        if not m2:
+            continue
+        opt_base = opt_name[:m2.start()] + "{RES}" + opt_name[m2.end():]
+        if opt_base == base:
+            variants.append(opt)
+    variants.sort(key=_orientation_sort_key)
+    return variants
 
 
 # ── Settings Panel ───────────────────────────────────────────────────
@@ -90,11 +142,29 @@ def render_google_settings_panel(
             st.warning("사용 가능한 캠페인이 없습니다.")
             return
 
-        campaign_labels = [f"{c['name']} ({c['status']})" for c in campaigns]
+        # Search / paste filter
+        search_key = f"{kp}gads_campaign_search_{game}_{idx}"
+        search_query = st.text_input(
+            "캠페인 검색 (이름 붙여넣기 또는 키워드 입력)",
+            value="",
+            key=search_key,
+            placeholder="캠페인 이름 검색...",
+        )
+
+        filtered_campaigns = campaigns
+        if search_query.strip():
+            q = search_query.strip().lower()
+            filtered_campaigns = [c for c in campaigns if q in c["name"].lower()]
+
+        if not filtered_campaigns:
+            st.warning(f"'{search_query}'에 해당하는 캠페인이 없습니다.")
+            return
+
+        campaign_labels = [f"{c['name']} ({c['status']})" for c in filtered_campaigns]
         prev_idx = 0
         prev_settings = st.session_state[sk].get(game, {})
         if prev_settings.get("campaign_id"):
-            for ci, c in enumerate(campaigns):
+            for ci, c in enumerate(filtered_campaigns):
                 if c["id"] == prev_settings["campaign_id"]:
                     prev_idx = ci
                     break
@@ -106,7 +176,7 @@ def render_google_settings_panel(
             index=prev_idx,
             key=f"{kp}gads_campaign_{game}_{idx}",
         )
-        selected_campaign = campaigns[sel_campaign_idx]
+        selected_campaign = filtered_campaigns[sel_campaign_idx]
 
         # ── 2. Ad Groups (sorted by spend) ───────────────────
         st.markdown("**광고그룹 (7일 비용 소진 순)**")
@@ -234,6 +304,11 @@ def _render_category_tabs(
     else:
         st.info("'GA 라이브러리 불러오기'를 클릭하거나, 왼쪽에서 파일을 가져오세요.")
 
+    # Full video name display in multiselect
+    st.markdown("""<style>
+    [data-baseweb="tag"] span { max-width: none !important; }
+    </style>""", unsafe_allow_html=True)
+
     # ── Categorize GA library assets ──
     # AI 영상은 일반 탭에도 표시
     cat_lib_videos: Dict[str, List[Dict]] = {cat_id: [] for cat_id, _ in CATEGORIES}
@@ -328,13 +403,36 @@ def _render_category_tabs(
 
             if all_vid_options:
                 st.markdown(f"**영상 ({len(all_vid_options)}개)**")
+                ms_key = f"{kp}gads_cat_videos_{cat_id}_{game}_{idx}"
+                auto_pending_key = f"{ms_key}_auto_orient_pending"
+
+                # Apply pending auto-select BEFORE widget renders
+                if st.session_state.pop(auto_pending_key, False):
+                    current = st.session_state.get(ms_key, [])
+                    new_selections = list(current)
+                    for label in current:
+                        for variant in _find_orientation_variants(label, all_vid_options):
+                            if variant not in new_selections:
+                                new_selections.append(variant)
+                    new_selections.sort(key=_orientation_sort_key)
+                    st.session_state[ms_key] = new_selections
+
                 selected_raw = st.multiselect(
                     "배치할 영상 선택 (선택 순서 = 우선순위)",
                     all_vid_options,
-                    default=[],
-                    key=f"{kp}gads_cat_videos_{cat_id}_{game}_{idx}",
+                    key=ms_key,
                     label_visibility="collapsed",
                 )
+
+                # Auto-select orientation variants button
+                auto_key = f"{kp}gads_auto_orient_{cat_id}_{game}_{idx}"
+                if selected_raw and st.button(
+                    "방향별 자동선택 (정방→가로→세로)",
+                    key=auto_key,
+                ):
+                    st.session_state[auto_pending_key] = True
+                    st.rerun()
+
                 for sr in selected_raw:
                     selected_videos.append(sr)
                     if sr in lib_label_to_rn:
