@@ -8,11 +8,11 @@ requests
 # 2. 시각화
 plotly==6.5.0
 
-# 3. Google Cloud 및 OAuth (안정 버전 통합)
+# 3. Google Cloud 및 OAuth
 google-cloud-bigquery==3.11.0
 google-api-python-client==2.100.0
-google-auth==2.23.0
-google-auth-oauthlib==1.1.0
+google-auth>=2.23.0,<3.0.0
+google-auth-oauthlib>=1.1.0,<2.0.0
 google-auth-httplib2==0.1.1
 
 # 4. Video processing (thumbnail extraction)
@@ -32,3 +32,5 @@ streamlit-cookies-controller
 
 # 6. Google Ads API
 google-ads==29.2.0
+grpcio>=1.59.0,<2.0.0
+protobuf>=4.25.0,<7.0.0
