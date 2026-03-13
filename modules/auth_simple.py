@@ -392,7 +392,7 @@ def show_login_page():
             # Google 로그인 버튼
             auth_url = get_google_login_url()
             st.markdown(f"""
-            <a href="{auth_url}" target="_blank" rel="noopener noreferrer">
+            <a href="{auth_url}" target="_top">
                 <button style="
                     width: 100%;
                     padding: 12px;
