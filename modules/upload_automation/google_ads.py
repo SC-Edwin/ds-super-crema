@@ -33,7 +33,7 @@ def _get_client():
     # MCC (Manager) account requires login_customer_id header
     if cfg.get("login_customer_id"):
         credentials["login_customer_id"] = str(cfg["login_customer_id"]).replace("-", "")
-    client = GoogleAdsClient.load_from_dict(credentials)
+    client = GoogleAdsClient.load_from_dict(credentials, version="v20")
     return client
 
 
