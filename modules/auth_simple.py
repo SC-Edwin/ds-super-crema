@@ -144,7 +144,7 @@ def load_users():
     return {
         # ===== Admin =====
         "edwin": {
-            "password_hash": h("edwin42"),
+            "password_hash": h("edwin123"),
             "name": "Edwin",
             "role": "admin",
         },
