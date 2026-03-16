@@ -1211,9 +1211,16 @@ def distribute_videos(
             if v.get("performance_label") == "LOW"
         ]
 
-        to_replace = min(len(low_performers), len(exc_assets))
-        removed = [v["asset_resource_name"] for v in low_performers[:to_replace]]
-        added = exc_assets[:to_replace]
+        # Remove ALL low performers + fill empty slots up to MAX
+        MAX_VIDEOS = 20
+        removed = [v["asset_resource_name"] for v in low_performers]
+        after_removal = len(current_videos) - len(removed)
+        available_slots = max(0, MAX_VIDEOS - after_removal)
+        to_add = min(available_slots, len(exc_assets))
+        added = exc_assets[:to_add]
+
+        if to_add == 0 and len(removed) == 0:
+            continue
 
         # Build new video list
         current_rns = [v["asset_resource_name"] for v in current_videos]
@@ -1235,6 +1242,8 @@ def distribute_videos(
                 remaining.remove(rn)
 
     # Step 3: Handle normal videos (spend-based distribution)
+    # Strategy: remove ALL LOW performers + fill empty slots up to MAX_VIDEOS
+    MAX_VIDEOS = 20
     normal_remaining = [rn for rn in normal_videos if rn in remaining]
 
     for ag in ad_groups:
@@ -1254,14 +1263,24 @@ def distribute_videos(
             v for v in current_videos
             if v.get("performance_label") == "LOW"
         ]
-        logger.info(f"[distribute] AG {ag['name']}: low_count={len(low_performers)}")
 
-        to_replace = min(len(low_performers), len(normal_remaining))
-        if to_replace == 0:
+        # Remove ALL low performers
+        removed = [v["asset_resource_name"] for v in low_performers]
+
+        # Calculate available slots: freed slots + empty slots up to MAX
+        after_removal = len(current_videos) - len(removed)
+        available_slots = max(0, MAX_VIDEOS - after_removal)
+        to_add = min(available_slots, len(normal_remaining))
+
+        logger.info(
+            f"[distribute] AG {ag['name']}: low={len(low_performers)}, "
+            f"after_removal={after_removal}, available_slots={available_slots}, to_add={to_add}"
+        )
+
+        if to_add == 0 and len(removed) == 0:
             continue
 
-        removed = [v["asset_resource_name"] for v in low_performers[:to_replace]]
-        added = normal_remaining[:to_replace]
+        added = normal_remaining[:to_add]
 
         current_rns = [v["asset_resource_name"] for v in current_videos]
         new_rns = [rn for rn in current_rns if rn not in removed] + added
@@ -1275,7 +1294,7 @@ def distribute_videos(
             "type": "normal",
         })
 
-        normal_remaining = normal_remaining[to_replace:]
+        normal_remaining = normal_remaining[to_add:]
         for rn in added:
             if rn in remaining:
                 remaining.remove(rn)
