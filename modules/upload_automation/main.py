@@ -1435,7 +1435,17 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                             f"[{cat}] 플레이어블 '{d.get('name', '')}' → "
                                             f"{d.get('ad_groups_success', 0)}개 광고그룹"
                                         )
+                                    elif d["type"] == "clone":
+                                        detail_lines.append(
+                                            f"[복제] '{d.get('name', '')}' 생성 — "
+                                            f"미배치 영상 {d.get('video_count', 0)}개 (원본: {d.get('source', '')})"
+                                        )
                                 msg += "\n\n" + "\n".join(detail_lines)
+
+                            # Unplaced info
+                            unplaced_rns = result.get("unplaced_video_rns", [])
+                            if unplaced_rns and not result.get("clone_result"):
+                                msg += f"\n\n⚠️ 미배치 영상 {len(unplaced_rns)}개"
                             google_ok_placeholder.success(msg)
                         else:
                             google_ok_placeholder.error(
