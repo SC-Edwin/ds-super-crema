@@ -431,12 +431,23 @@ def _render_category_tabs(
                 # Apply pending auto-select BEFORE widget renders
                 if st.session_state.pop(auto_pending_key, False):
                     current = st.session_state.get(ms_key, [])
-                    new_selections = list(current)
+                    # Group: for each originally selected video, collect it + its variants
+                    seen = set()
+                    grouped = []  # list of groups, each group = [label, ...]
                     for label in current:
+                        base_key = _strip_yt_suffix(label)
+                        m = _RES_PATTERN.search(base_key)
+                        bk = base_key[:m.start()] + "{RES}" + base_key[m.end():] if m else base_key
+                        if bk in seen:
+                            continue
+                        seen.add(bk)
+                        group = [label]
                         for variant in _find_orientation_variants(label, all_vid_options):
-                            if variant not in new_selections:
-                                new_selections.append(variant)
-                    new_selections.sort(key=_orientation_sort_key)
+                            if variant not in group:
+                                group.append(variant)
+                        group.sort(key=_orientation_sort_key)
+                        grouped.append(group)
+                    new_selections = [lbl for grp in grouped for lbl in grp]
                     st.session_state[ms_key] = new_selections
 
                 selected_raw = st.multiselect(
