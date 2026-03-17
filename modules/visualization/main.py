@@ -151,7 +151,7 @@ def load_prediction_data():
             ROUND(cost_1 + cost_2 + cost_3,2) as sum_costs,
             COALESCE(ROUND(SAFE_DIVIDE((cost_1 + cost_2 + cost_3), (installs_1 + installs_2 + installs_3)),2),0) as sum_CPI,
             ROW_NUMBER() OVER (
-                PARTITION BY subject, network, app, past_network, future_locality
+                PARTITION BY subject, network, app, past_network, future_locality, test_market
                 ORDER BY SAFE_CAST(prediction_timestamp AS TIMESTAMP) DESC
             ) AS row_num
             FROM WeekendData
@@ -185,6 +185,7 @@ def load_prediction_data():
         ROUND(SAFE_DIVIDE(sum_installs * 100, sum_clicks), 2) as CVR,
         ROUND(SAFE_DIVIDE(sum_installs * 100, sum_impressions), 2) as CVR_IMP,
         retention_rate_sum_1to3,
+        test_market,
         engagement_quality_2,
         ROW_NUMBER() OVER (
             PARTITION BY app, past_network, network, future_locality
@@ -212,7 +213,7 @@ def create_plotly_theme():
 
 
 
-def run():
+def run(test_market='WW', key_prefix='ww'):
     """시각화 모듈 메인"""
     
     st.markdown("""
@@ -297,17 +298,24 @@ def run():
     with st.spinner("🔄 데이터 로딩 중..."):
         try:
             df = load_prediction_data()
-            # st.success(f"✅ {len(df)}개 크리에이티브 로드 완료!")
+
+            if 'test_market' in df.columns:
+                df = df[df['test_market'] == test_market].copy()
+                print(f"[DEBUG] test_market={test_market}, rows={len(df)}")
+
         except Exception as e:
             st.error(f"❌ 데이터 로드 실패: {str(e)}")
             st.info("💡 GCP 인증이 필요합니다.")
             st.code("gcloud auth application-default login")
             return
         
+
+
+
     # ========== 주차 계산 추가 ==========
     # day_1 기준으로 업로드 주차 계산
     df['upload_week'] = df['day_1'].apply(get_friday_based_week)
-    
+
     # ========== Locality 이모지 라벨 ==========
     df['subject_label_emoji'] = df.apply(
         lambda x: f"{x['subject_label']} 🇺🇸" if x['future_locality'] == 'US' 
@@ -316,6 +324,7 @@ def run():
     )
                 
     
+
     # 현재 기준 주차들 계산
     today = datetime.now()
     reference_weeks = {
@@ -336,12 +345,13 @@ def run():
 
     with col1:
             all_apps = ['All'] + sorted(df['app'].unique().tolist())
-            selected_app = st.selectbox("📱 App", all_apps)
+            selected_app = st.selectbox("📱 App", all_apps, key=f"app_{key_prefix}")
+
 
                         
             clicked_hk = st.button(
                 "One Click View",
-                key="ai_btn",
+                key=f"ai_btn_{key_prefix}",
                 help="AI-powered quick insights"
             )
                         
@@ -353,7 +363,7 @@ def run():
 
     with col2:
             all_future_localities = ['All'] + sorted(df['future_locality'].dropna().unique().tolist())
-            selected_future_locality = st.selectbox("🎯 투자 지역", all_future_localities)
+            selected_future_locality = st.selectbox("🎯 투자 지역", all_future_localities, key=f"locality_{key_prefix}")
 
     with col3:
         # 주차 목록 (최신순, None 제외)
@@ -377,7 +387,7 @@ def run():
         # 변경 후
         # available_weeks는 이미 reverse=True 정렬 → index 1 = 가장 최신 주차
         default_week_idx = 1 if len(week_options) > 1 else 0
-        selected_week_label = st.selectbox("📅 테스트 날짜", week_options, index=default_week_idx)        
+        selected_week_label = st.selectbox("📅 테스트 날짜", week_options, index=default_week_idx, key=f"week_{key_prefix}")
 
         
         # 레이블 → 실제 주차 코드 변환
@@ -402,6 +412,7 @@ def run():
 
     if len(filtered_df) == 0:
         st.warning("⚠️ 선택한 조건에 맞는 데이터가 없습니다.")
+        print(f"[DEBUG] filtered_df empty! test_market={test_market}")
         return
         
 
@@ -670,7 +681,7 @@ def run():
     
     if selected_app == 'All':
     # 캐릭터 이미지 로드 (없으면 이모지 폴백)
-        
+
         chars = [
             ("assets/characters/dino.png",    "🦖"),
             ("assets/characters/prison.jpeg", "🚔"),
@@ -1249,23 +1260,4 @@ def run():
 
 if __name__ == "__main__":
     run()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
