@@ -392,8 +392,8 @@ def show_login_page():
             # Google 로그인 버튼
             auth_url = get_google_login_url()
             st.markdown(f"""
-            <a href="{auth_url}" target="_top">
-                <button style="
+            <a href="{auth_url}" target="_top" style="text-decoration: none;">
+                <div style="
                     width: 100%;
                     padding: 12px;
                     background: white;
@@ -403,10 +403,11 @@ def show_login_page():
                     font-size: 16px;
                     cursor: pointer;
                     font-weight: 600;
-                    margin-bottom: 25px; /* 아래 ID/PW 섹션과의 간격 */
+                    margin-bottom: 25px;
+                    text-align: center;
                 ">
                     🌐 Sign in with Google
-                </button>
+                </div>
             </a>
             """, unsafe_allow_html=True)
             
