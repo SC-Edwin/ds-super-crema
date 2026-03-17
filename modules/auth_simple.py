@@ -315,7 +315,13 @@ def login_with_password(username, password):
 
 
     log_action(username, 'password', 'login')
-    
+
+    try:
+        from modules.upload_automation.upload_logger import log_event
+        log_event("login")
+    except Exception as e:
+        print(f"[upload_logger] {e}")
+
     return True, "로그인 성공"
 
 def login_with_google(email):
@@ -346,7 +352,13 @@ def login_with_google(email):
 
     # 5. 로그 기록
     log_action(email, 'google', 'login')
-    
+
+    try:
+        from modules.upload_automation.upload_logger import log_event
+        log_event("login")
+    except Exception as e:
+        print(f"[upload_logger] {e}")
+
     return True, f"✅ 환영합니다, {name}님!"
 
 
@@ -360,7 +372,12 @@ def logout():
             st.session_state.get('login_method', 'unknown'),
             'logout'
         )
-    
+        try:
+            from modules.upload_automation.upload_logger import log_event
+            log_event("logout")
+        except Exception:
+            pass
+
     for key in ['authenticated', 'user_email', 'user_name', 'user_role', 'login_method']:
         if key in st.session_state:
             del st.session_state[key]
