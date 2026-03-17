@@ -12,6 +12,9 @@ from google.auth.transport.requests import Request
 import os
 import json
 from datetime import timedelta
+from streamlit_cookies_controller import CookieController
+cookie = CookieController()
+
 
 
 # ========== Config ==========
@@ -267,22 +270,28 @@ def log_action(user_email, login_method, action):
 
 
 def _save_session_cookie(user_email, user_name, user_role, login_method):
-    """세션 정보 저장 (session_state only)"""
-    print(f"[AUTH] Session saved for: {user_email}")
-
-    
+    cookie.set('sc_email', user_email)
+    cookie.set('sc_name', user_name)
+    cookie.set('sc_role', user_role)
+    cookie.set('sc_method', login_method)
 
 
 
 # ========== 인증 함수 ==========
 def check_authentication():
-    """현재 세션 인증 상태 확인 (session_state 기반)"""
-
     if st.session_state.get('authenticated', False):
-        print(f"[AUTH] Session active: {st.session_state.get('user_email')}")
         return True
 
-    print(f"[AUTH] Not authenticated")
+    # 쿠키에서 복원
+    email = cookie.get('sc_email')
+    if email:
+        st.session_state.authenticated = True
+        st.session_state.user_email = email
+        st.session_state.user_name = cookie.get('sc_name')
+        st.session_state.user_role = cookie.get('sc_role')
+        st.session_state.login_method = cookie.get('sc_method')
+        return True
+
     return False
 
 
@@ -353,14 +362,8 @@ def login_with_google(email):
 
 
 def logout():
-    """로그아웃"""
-    if 'user_email' in st.session_state:
-        log_action(
-            st.session_state.user_email,
-            st.session_state.get('login_method', 'unknown'),
-            'logout'
-        )
-    
+    for key in ['sc_email', 'sc_name', 'sc_role', 'sc_method']:
+        cookie.set(key, '')
     for key in ['authenticated', 'user_email', 'user_name', 'user_role', 'login_method']:
         if key in st.session_state:
             del st.session_state[key]

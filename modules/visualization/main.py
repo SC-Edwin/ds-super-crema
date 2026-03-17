@@ -19,11 +19,11 @@ from google.cloud import bigquery
 from datetime import datetime, timedelta
 import pandas as pd
 import streamlit.components.v1 as components
-
-
-
 import base64
 import os
+
+
+
 
 def _img_b64(path: str) -> str | None:
     """이미지 파일을 base64 data URI로 변환 (png/jpeg 모두 지원)"""
@@ -62,6 +62,9 @@ def get_friday_based_week(date):
     week_num = week_friday.isocalendar()[1]
     
     return f"{year}-W{week_num:02d}"
+
+
+
 
 
 def get_week_label(week_str, reference_weeks):
