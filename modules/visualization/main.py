@@ -687,7 +687,9 @@ def run(test_market='WW', key_prefix='ww'):
 
     
 
-    if selected_app == 'All' and test_market == 'WW':
+    # if selected_app == 'All' and test_market == 'WW':
+    if selected_app == 'All':
+
 
     # 캐릭터 이미지 로드 (없으면 이모지 폴백)
         
