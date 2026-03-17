@@ -8,6 +8,7 @@ Author: Edwin
 
 
 
+from click import style
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -18,6 +19,21 @@ from google.cloud import bigquery
 from datetime import datetime, timedelta
 import pandas as pd
 import streamlit.components.v1 as components
+
+
+
+import base64
+import os
+
+def _img_b64(path: str) -> str | None:
+    """이미지 파일을 base64 data URI로 변환 (png/jpeg 모두 지원)"""
+    if os.path.exists(path):
+        mime = "image/jpeg" if path.lower().endswith((".jpg", ".jpeg")) else "image/png"
+        with open(path, "rb") as f:
+            return f"data:{mime};base64," + base64.b64encode(f.read()).decode()
+    return None
+
+
 
 
 def get_friday_based_week(date):
@@ -50,24 +66,37 @@ def get_friday_based_week(date):
 
 def get_week_label(week_str, reference_weeks):
     """
-    주차 코드를 사용자 친화적 레이블로 변환
-    
-    Args:
-        week_str: 'YYYY-Wnn' 형식
-        reference_weeks: dict {'this': 'YYYY-Wnn', 'last': ..., 'two_ago': ...}
-    
-    Returns:
-        str: '이번주 (2024-W49)' 같은 형식
+    주차 코드를 날짜+요일 레이블로 변환
+    예: '2026-W05' → '2026-01-30 (금)'
     """
-    if week_str == reference_weeks['this']:
-        return f"이번주 ({week_str})"
-    elif week_str == reference_weeks['last']:
-        return f"전주 ({week_str})"
-    elif week_str == reference_weeks['two_ago']:
-        return f"전전주 ({week_str})"
-    else:
+    if not week_str:
         return week_str
     
+    try:
+        year = int(week_str.split('-W')[0])
+        week_num = int(week_str.split('-W')[1])
+        
+        # ISO 주차의 금요일 날짜 계산
+        jan4 = datetime(year, 1, 4)
+        week1_friday = jan4 + timedelta(days=(4 - jan4.weekday()))
+        target_friday = week1_friday + timedelta(weeks=(week_num - 1))
+        
+        # 요일 한글
+        day_names = ['월', '화', '수', '목', '금', '토', '일']
+        day_name = day_names[target_friday.weekday()]
+        
+        date_label = f"{target_friday.strftime('%Y-%m-%d')} ({day_name})"
+        
+    except:
+        date_label = week_str
+    
+    return date_label
+
+    
+
+
+
+
 
 
 # ================================
@@ -95,71 +124,74 @@ def get_bigquery_client():
     return bigquery.Client(project='roas-test-456808')  # ← 로컬 인증 사용
 
 
+
+
+
+
 @st.cache_data(ttl=300)
 def load_prediction_data():
     """최신 예측 결과 데이터 로드"""
     client = get_bigquery_client()
     
-    query = """
-    WITH WeekendData AS (
-      SELECT *
-      FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
-      WHERE 
-        prediction_timestamp = (
-          SELECT MAX(prediction_timestamp)
-          FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
+    query = """        
+        WITH WeekendData AS (
+            SELECT *
+            FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
+            WHERE 
+                CAST(day_1 AS DATE) >= DATE_SUB(CURRENT_DATE(), INTERVAL 8 WEEK)
+            ),
+        LatestSnapshot AS (
+        SELECT *
+        FROM (
+            SELECT
+            *,
+            impressions_1 + impressions_2 + impressions_3 as sum_impressions,
+            installs_1 + installs_2 + installs_3 as sum_installs,
+            clicks_1 + clicks_2 + clicks_3 as sum_clicks,
+            ROUND(cost_1 + cost_2 + cost_3,2) as sum_costs,
+            COALESCE(ROUND(SAFE_DIVIDE((cost_1 + cost_2 + cost_3), (installs_1 + installs_2 + installs_3)),2),0) as sum_CPI,
+            ROW_NUMBER() OVER (
+                PARTITION BY subject, network, app, past_network, future_locality
+                ORDER BY SAFE_CAST(prediction_timestamp AS TIMESTAMP) DESC
+            ) AS row_num
+            FROM WeekendData
         )
-    ),
-    LatestSnapshot AS (
-      SELECT *
-      FROM (
+        WHERE row_num = 1
+        )
         SELECT
-          *,
-        impressions_1 + impressions_2 + impressions_3 as sum_impressions,
-        installs_1 + installs_2 + installs_3 as sum_installs,
-        clicks_1 + clicks_2 + clicks_3 as sum_clicks,
-        ROUND(cost_1 + cost_2 + cost_3,2) as sum_costs,
-        COALESCE(ROUND(SAFE_DIVIDE((cost_1 + cost_2 + cost_3), (installs_1 + installs_2 + installs_3)),2),0) as sum_CPI,
-          ROW_NUMBER() OVER (
-            PARTITION BY subject, network, app, past_network
-            ORDER BY SAFE_CAST(prediction_timestamp AS TIMESTAMP) DESC) AS row_num
-        FROM WeekendData
-      )
-      WHERE row_num = 1
-    )
-    SELECT
-      subject,
-      COALESCE(
-        REGEXP_EXTRACT(subject, r'(-?\\d+)'),
-        subject
-      ) AS subject_label,
-      network,
-      app,
-      locality,
-      day_1,
-      day_2,
-      day_3,
-      prediction_score,  
-      ranking_score,
-      past_network,
-      sum_impressions,
-      sum_installs,
-      sum_clicks,
-      sum_costs,
-      sum_CPI,
-      roas_sum_1to3,
-      ROUND(SAFE_DIVIDE(sum_installs * 1000, sum_impressions), 2) as IPM,
-      ROUND(SAFE_DIVIDE(sum_clicks * 100, sum_impressions), 2) as CTR,
-      ROUND(SAFE_DIVIDE(sum_installs * 100, sum_clicks), 2) as CVR,
-      ROUND(SAFE_DIVIDE(sum_installs * 100, sum_impressions), 2) as CVR_IMP,
-      retention_rate_sum_1to3,
-      engagement_quality_2,
-      ROW_NUMBER() OVER (
-        PARTITION BY app, past_network, network
-        ORDER BY ranking_score DESC
-      ) AS rank_per_network
-    FROM LatestSnapshot
-    """
+        subject,
+        COALESCE(
+            REGEXP_EXTRACT(subject, r'(-?\\d+)'),
+            subject
+        ) AS subject_label,
+        network,
+        app,
+        locality,
+        future_locality,
+        day_1,
+        day_2,
+        day_3,
+        prediction_score,  
+        ranking_score,
+        past_network,
+        sum_impressions,
+        sum_installs,
+        sum_clicks,
+        sum_costs,
+        sum_CPI,
+        roas_sum_1to3,
+        ROUND(SAFE_DIVIDE(sum_installs * 1000, sum_impressions), 2) as IPM,
+        ROUND(SAFE_DIVIDE(sum_clicks * 100, sum_impressions), 2) as CTR,
+        ROUND(SAFE_DIVIDE(sum_installs * 100, sum_clicks), 2) as CVR,
+        ROUND(SAFE_DIVIDE(sum_installs * 100, sum_impressions), 2) as CVR_IMP,
+        retention_rate_sum_1to3,
+        engagement_quality_2,
+        ROW_NUMBER() OVER (
+            PARTITION BY app, past_network, network, future_locality
+            ORDER BY ranking_score DESC
+        ) AS rank_per_network
+        FROM LatestSnapshot
+        """
     
     df = client.query(query).to_dataframe()
     return df
@@ -275,6 +307,13 @@ def run():
     # ========== 주차 계산 추가 ==========
     # day_1 기준으로 업로드 주차 계산
     df['upload_week'] = df['day_1'].apply(get_friday_based_week)
+    
+    # ========== Locality 이모지 라벨 ==========
+    df['subject_label_emoji'] = df.apply(
+        lambda x: f"{x['subject_label']} 🇺🇸" if x['future_locality'] == 'US' 
+                  else f"{x['subject_label']} 🌍", 
+        axis=1
+    )
                 
     
     # 현재 기준 주차들 계산
@@ -313,8 +352,8 @@ def run():
 
 
     with col2:
-        all_localities = ['All'] + sorted(df['locality'].unique().tolist())
-        selected_locality = st.selectbox("🌍 Locality", all_localities)
+            all_future_localities = ['All'] + sorted(df['future_locality'].dropna().unique().tolist())
+            selected_future_locality = st.selectbox("🎯 투자 지역", all_future_localities)
 
     with col3:
         # 주차 목록 (최신순, None 제외)
@@ -323,21 +362,26 @@ def run():
             reverse=True
         )
         
-        # 사용자 친화적 레이블 생성
-        week_options = ['All'] + [
-            get_week_label(w, reference_weeks) for w in available_weeks
-        ]
+        # 레이블 → 주차코드 매핑 생성
+        week_label_to_code = {'All': 'All'}
+        week_options = ['All']
         
-        selected_week_label = st.selectbox("📅 업로드 주차", week_options)
+        for w in available_weeks:
+            label = get_week_label(w, reference_weeks)
+            week_label_to_code[label] = w
+            week_options.append(label)
+        
+        
+        # selected_week_label = st.selectbox("📅 테스트 날짜", week_options)
+
+        # 변경 후
+        # available_weeks는 이미 reverse=True 정렬 → index 1 = 가장 최신 주차
+        default_week_idx = 1 if len(week_options) > 1 else 0
+        selected_week_label = st.selectbox("📅 테스트 날짜", week_options, index=default_week_idx)        
+
         
         # 레이블 → 실제 주차 코드 변환
-        if selected_week_label == 'All':
-            selected_week = 'All'
-        else:
-            # 괄호 안의 주차 코드 추출 (예: "이번주 (2024-W49)" → "2024-W49")
-            import re
-            match = re.search(r'\((.*?)\)', selected_week_label)
-            selected_week = match.group(1) if match else selected_week_label
+        selected_week = week_label_to_code.get(selected_week_label, 'All')
 
 
     # 필터 적용
@@ -345,16 +389,38 @@ def run():
     if selected_app != 'All':
         filtered_df = filtered_df[filtered_df['app'] == selected_app]
 
-    if selected_locality != 'All':
-        filtered_df = filtered_df[filtered_df['locality'] == selected_locality]
-    
+    if selected_future_locality != 'All':
+            filtered_df = filtered_df[filtered_df['future_locality'] == selected_future_locality]
+
     if selected_week != 'All':
+        # 디버깅 로그
+        print(f"[DEBUG] selected_week_label: {selected_week_label}")
+        print(f"[DEBUG] selected_week (코드): {selected_week}")
+        print(f"[DEBUG] df의 upload_week 값들: {df['upload_week'].unique().tolist()}")
+        
         filtered_df = filtered_df[filtered_df['upload_week'] == selected_week]
 
     if len(filtered_df) == 0:
         st.warning("⚠️ 선택한 조건에 맞는 데이터가 없습니다.")
         return
-    
+        
+
+
+
+
+    # ========== 테스트 소재 목록 ==========
+    unique_subjects = filtered_df['subject_label'].unique()
+    # 숫자 정렬 (001, 002, 003 순서로)
+    unique_subjects_sorted = sorted(unique_subjects, key=lambda x: int(x) if x.isdigit() else float('inf'))
+    subject_count = len(unique_subjects_sorted)
+
+
+    # video001 형식으로 변환
+    subject_list_display = ', '.join([f"video{str(s).zfill(3)}" for s in unique_subjects_sorted[:25]])
+    if subject_count > 25:  # ← 여기도 25로
+        subject_list_display += f" ... (+{subject_count - 25}개 더)"
+
+    st.info(f"📋 **테스트 소재 ({subject_count}개):** {subject_list_display}")    
 
 
 
@@ -375,24 +441,7 @@ def run():
         st.markdown("---")
 
         
-        
-        # # 소재별 최적 경로 계산
-        # best_per_creative = filtered_df.loc[
-        #     filtered_df.groupby('subject_label')['ranking_score'].idxmax()
-        # ]
-        
-        # best_per_creative['path'] = (
-        #     best_per_creative['past_network'] + ' → ' + 
-        #     best_per_creative['network']
-        # )
-        
-        # # 2등과의 차이 계산
-        # def get_score_gap(row):
-        #     same_creative = filtered_df[filtered_df['subject_label'] == row['subject_label']]
-        #     sorted_scores = same_creative['ranking_score'].sort_values(ascending=False)
-        #     if len(sorted_scores) >= 2:
-        #         return sorted_scores.iloc[0] - sorted_scores.iloc[1]
-        #     return 0
+
         
         # best_per_creative['gap'] = best_per_creative.apply(get_score_gap, axis=1)
 
@@ -411,9 +460,26 @@ def run():
         st.markdown("### 📊 소재별 최적 투자 경로")
 
         # 모든 네트워크 데이터 사용
+        # 수정: 확률에 패널티 적용
         all_data = filtered_df.copy()
         all_data['path'] = all_data['past_network'] + ' → ' + all_data['network']
-        all_data['probability_pct'] = (all_data['prediction_score'] * 100).round(1)
+
+        # 패널티 적용된 확률 계산
+        # 패널티 적용된 확률 계산
+        all_data['probability_pct'] = all_data['prediction_score'] * 100
+        all_data.loc[all_data['sum_installs'] == 0, 'probability_pct'] *= 0.1
+        all_data.loc[all_data['sum_impressions'] == 0, 'probability_pct'] *= 0.05
+        all_data['probability_pct'] = all_data['probability_pct'].round(1)
+
+
+        # # 디버그: 593 소재 확인
+        # debug_593 = all_data[all_data['subject_label'] == '593']
+
+        # print("🐛 DEBUG 593:", debug_593[['subject_label', 'sum_impressions', 'sum_installs', 'prediction_score', 'probability_pct']].to_dict())
+
+
+        # if len(debug_593) > 0:
+        #     st.write("🐛 DEBUG 593:", debug_593[['subject_label', 'sum_impressions', 'sum_installs', 'prediction_score', 'probability_pct']].to_dict())
 
 
         # 네트워크 목록
@@ -433,22 +499,26 @@ def run():
         for idx, net in enumerate(networks[:min(3, num_networks)]):
             with cols[idx]:
                 network_data = all_data[all_data['network'] == net].copy()
+                
                 network_data = network_data.sort_values('probability_pct', ascending=False)
+                
+                # 중복 제거: 같은 소재는 가장 높은 확률만 유지
+                network_data = network_data.drop_duplicates(subset=['subject_label'], keep='first')
                 
                 st.markdown(f"#### 🎯 {net.upper()}")
                 st.caption(f"{len(network_data)}개 소재")
                 
-                # display_df에서 rank_per_network 제거
+                # past_network 추가
                 display_df = network_data[[
-                    'subject_label', 'probability_pct', 'sum_CPI'
-                ]].head(10)
+                    'subject_label', 'past_network', 'probability_pct'
+                ]]
 
                 st.dataframe(
                     display_df,
                     column_config={
                         'subject_label': st.column_config.TextColumn('소재', width='small'),
-                        'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small'),
-                        'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small')
+                        'past_network': st.column_config.TextColumn('Past', width='small'),
+                        'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small')
                     },
                     hide_index=True,
                     width="stretch",
@@ -464,24 +534,28 @@ def run():
             for idx, net in enumerate(remaining_networks):
                 with cols2[idx]:
                     network_data = all_data[all_data['network'] == net].copy()
+            
                     network_data = network_data.sort_values('probability_pct', ascending=False)
+                    
+                    # 중복 제거: 같은 소재는 가장 높은 확률만 유지
+                    network_data = network_data.drop_duplicates(subset=['subject_label'], keep='first')
                     
                     st.markdown(f"#### 🎯 {net.upper()}")
                     st.caption(f"{len(network_data)}개 소재")
 
                     
-                    # display_df에서 rank_per_network 제거
+                    # past_network 추가
                     display_df = network_data[[
-                         'subject_label', 'probability_pct', 'sum_CPI'  # ← 'icon' 제거 필요
-                    ]].head(10)
+                         'subject_label', 'past_network', 'probability_pct'
+                    ]]
                     
                     st.dataframe(
                         display_df,
-                        column_config={
-                            'subject_label': st.column_config.TextColumn('소재', width='small'),
-                            'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small'),
-                            'sum_CPI': st.column_config.NumberColumn('CPI', format="$%.2f", width='small')
-                        },
+                    column_config={
+                        'subject_label': st.column_config.TextColumn('소재', width='small'),
+                        'past_network': st.column_config.TextColumn('Past', width='small'),
+                        'probability_pct': st.column_config.NumberColumn('확률순위', format="%.1f%%", width='small')
+                    },
                         hide_index=True,
                         width="stretch",
                         height=400
@@ -584,208 +658,553 @@ def run():
 
     # 버튼 클릭 시 팝업 호출
     if st.session_state.get('show_ai_recommendation', False):
-        show_ai_modal(filtered_df, selected_app, selected_locality, selected_week_label)
-        st.session_state['show_ai_recommendation'] = False  # 리셋
+        show_ai_modal(filtered_df, selected_app, selected_future_locality, selected_week_label)
+        st.session_state['show_ai_recommendation'] = False  
     
     # ========== 새로운 탭 구조: Future Network 중심 ==========
+
     future_networks = sorted(filtered_df['network'].unique())
 
     st.markdown("---")
 
-    # 탭 생성 (Future Network만)
-    tabs = st.tabs([f"📊 {net.upper()}" for net in future_networks])
+    
+    if selected_app == 'All':
+    # 캐릭터 이미지 로드 (없으면 이모지 폴백)
+        
+        chars = [
+            ("assets/characters/dino.png",    "🦖"),
+            ("assets/characters/prison.jpeg", "🚔"),
+            ("assets/characters/snake.jpeg",  "🐍"),
+            ("assets/characters/xp.jpeg",     "⚔️"),
+            ("assets/characters/pizza.jpeg",  "🍕"),
+        ]
 
-    for idx, future_net in enumerate(future_networks):
-        with tabs[idx]:
-            # 해당 Future Network 데이터
-            future_net_df = filtered_df[filtered_df['network'] == future_net].copy()
+        
+        
+        
+        
+        
+        # 높이, 바닥offset, 기울기 — 무대 위 자연스러운 배치
+        heights = ["140px", "175px", "200px", "170px", "145px"]
+        offsets = ["10px",  "4px",   "0px",   "6px",   "12px"]
+        rotates = ["-4deg", "-1deg", "0deg",  "2deg",  "5deg"]
+
+        char_items = ""
+        for i, (path, emoji) in enumerate(chars):
+            h = heights[i]
+            b64 = _img_b64(path)
             
-            # Past Network 목록
-            past_networks = sorted(future_net_df['past_network'].unique())
+
             
-            st.markdown(f"### 🎯 {future_net.upper()} Network")
-            st.markdown(f"**Past Networks:** {', '.join([p.upper() for p in past_networks])}")
-            st.markdown("---")
-            
-            # Past Network별로 섹션 구분
-            if len(past_networks) == 2:
-                st.markdown("### 📊 Past Network 비교")
+            off = offsets[i]
+            rot = rotates[i]
+            if b64:
+                char_items += f'<div class="char" style="flex:1; display:flex; align-items:flex-end; justify-content:center; margin-bottom:{off}; transform:rotate({rot});"><img src="{b64}" style="height:{h};"></div>'
+            else:
+                char_items += f'<div class="char" style="flex:1; display:flex; align-items:flex-end; justify-content:center; font-size:4.5rem; margin-bottom:{off}; transform:rotate({rot});">{emoji}</div>'
+        
+        
+        components.html(f"""
+            <style>
+                * {{ margin:0; padding:0; box-sizing:border-box; }}
+                body {{ background:#1a0808; }}
+                .stage {{
+                    position: relative;
+                    width: 100%;
+                    height: 280px;
+                    background:
+                        radial-gradient(ellipse at 50% 100%, rgba(120,0,40,0.6) 0%, transparent 70%),
+                        linear-gradient(180deg, #1a0808 0%, #2d0d0d 40%, #1a0808 100%);
+                    border-radius: 16px;
+                    overflow: hidden;
+                    border: 1px solid rgba(180,0,60,0.3);
+                }}
+                .curtain-left, .curtain-right {{
+                    position: absolute;
+                    top: 0; bottom: 0;
+                    width: 22%;
+                    background: linear-gradient(
+                        to bottom,
+                        #5c0a1a 0%,
+                        #8b1a2a 20%,
+                        #6b1020 50%,
+                        #8b1a2a 80%,
+                        #5c0a1a 100%
+                    );
+                    z-index: 2;
+                }}
+                .curtain-left {{
+                    left: 0;
+                    border-right: 2px solid rgba(255,100,100,0.15);
+                    box-shadow: inset -8px 0 20px rgba(0,0,0,0.5), 4px 0 15px rgba(0,0,0,0.4);
+                    clip-path: polygon(0 0, 85% 0, 100% 8%, 88% 25%, 100% 45%, 88% 65%, 100% 82%, 88% 100%, 0 100%);
+                }}
+                .curtain-right {{
+                    right: 0;
+                    border-left: 2px solid rgba(255,100,100,0.15);
+                    box-shadow: inset 8px 0 20px rgba(0,0,0,0.5), -4px 0 15px rgba(0,0,0,0.4);
+                    clip-path: polygon(15% 0, 100% 0, 100% 100%, 12% 100%, 0% 82%, 12% 65%, 0% 45%, 12% 25%, 0% 8%);
+                }}
+                .curtain-top {{
+                    position: absolute;
+                    top: 0; left: 0; right: 0;
+                    height: 28px;
+                    background: linear-gradient(180deg, #8b1a2a 0%, #5c0a1a 100%);
+                    z-index: 3;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+                }}
+                .curtain-top::after {{
+                    content: '';
+                    position: absolute;
+                    bottom: -6px; left: 0; right: 0;
+                    height: 6px;
+                    background: repeating-linear-gradient(
+                        90deg,
+                        #8b1a2a 0px, #8b1a2a 18px,
+                        #5c0a1a 18px, #5c0a1a 36px
+                    );
+                }}
+                .text-area {{
+                    position: absolute;
+                    top: 38px; left: 0; right: 0;
+                    text-align: center;
+                    z-index: 4;
+                    font-family: -apple-system, sans-serif;
+                }}
+                .title {{
+                    font-size: 1.1rem;
+                    color: rgba(255,180,160,0.9);
+                    font-weight: 600;
+                    letter-spacing: 0.5px;
+                    text-shadow: 0 0 20px rgba(255,80,80,0.4);
+                }}
+                .subtitle {{
+                    font-size: 0.75rem;
+                    color: rgba(255,255,255,0.2);
+                    margin-top: 4px;
+                }}
+                .chars {{
+                    position: absolute;
+                    bottom: 0; left: 15%; right: 15%;
+                    display: flex;
+                    align-items: flex-end;
+                    justify-content: center;
+                    z-index: 1;
+                }}
+                .char img {{
+                    display: block;
+                    mix-blend-mode: luminosity;
+                    opacity: 0.82;
+                    filter: brightness(0.9) contrast(1.1);
+                    transition: all 0.3s ease;
+                    object-fit: contain;
+                    max-width: 100%;
+                }}
+                .char:hover img {{
+                    mix-blend-mode: normal;
+                    opacity: 1;
+                    filter: brightness(1.1) drop-shadow(0 -4px 12px rgba(255,100,100,0.5));
+                    transform: translateY(-8px) scale(1.05);
+                }}
+            </style>
+            <div class="stage">
+                <div class="curtain-top"></div>
+                <div class="curtain-left"></div>
+                <div class="curtain-right"></div>
+                <div class="chars">
+                    {char_items}
+                </div>
+            </div>
+        """, height=295)
+
+    else:
+        tabs = st.tabs([f"📊 {net.upper()}" for net in future_networks])
+
+        
+        for idx, future_net in enumerate(future_networks):
+            with tabs[idx]:
+                # 해당 Future Network 데이터
+                future_net_df = filtered_df[filtered_df['network'] == future_net].copy()
                 
-                col_left, col_divider, col_right = st.columns([10, 0.3, 10])
+                # Past Network 목록
+                past_networks = sorted(future_net_df['past_network'].unique())
                 
-                # 구분선
-                with col_divider:
-                    st.markdown("""
-                    <div style="
-                        width: 1px;
-                        height: 100%;
-                        background: linear-gradient(
-                            to bottom,
-                            transparent 0%,
-                            rgba(255, 0, 110, 0.2) 10%,
-                            rgba(255, 0, 110, 0.4) 50%,
-                            rgba(255, 0, 110, 0.2) 90%,
-                            transparent 100%
-                        );
-                        margin: 0 auto;
-                    "></div>
-                    """, unsafe_allow_html=True)
+                st.markdown(f"### 🎯 {future_net.upper()} Network")
+                st.markdown(f"**Past Networks:** {', '.join([p.upper() for p in past_networks])}")
+                st.markdown("---")
                 
-                for col_idx, (col, past_net) in enumerate(zip([col_left, col_right], past_networks)):
-                    with col:
+                # Past Network별로 섹션 구분
+                if len(past_networks) == 2:
+                    st.markdown("### 📊 Past Network 비교")
+                    
+                    col_left, col_divider, col_right = st.columns([10, 0.3, 10])
+                    
+                    # 구분선
+                    with col_divider:
+                        st.markdown("""
+                        <div style="
+                            width: 1px;
+                            height: 100%;
+                            background: linear-gradient(
+                                to bottom,
+                                transparent 0%,
+                                rgba(255, 0, 110, 0.2) 10%,
+                                rgba(255, 0, 110, 0.4) 50%,
+                                rgba(255, 0, 110, 0.2) 90%,
+                                transparent 100%
+                            );
+                            margin: 0 auto;
+                        "></div>
+                        """, unsafe_allow_html=True)
+                    
+                    for col_idx, (col, past_net) in enumerate(zip([col_left, col_right], past_networks)):
+                        with col:
+                            # 해당 조합 데이터
+                            combo_df = future_net_df[future_net_df['past_network'] == past_net].copy()
+                            combo_df = combo_df.sort_values('ranking_score', ascending=False).reset_index(drop=True)
+                            
+                            # 필터링 후 rank 재계산 (1부터 시작)
+                            combo_df['rank_per_network'] = range(1, len(combo_df) + 1)
+                            
+                            top_10_bubble = combo_df
+                            all_data_df = combo_df
+                            
+                            if len(top_10_bubble) == 0:
+                                st.warning(f"⚠️ {past_net.upper()} 데이터 없음")
+                                continue
+                            
+                            # 섹션 헤더
+                            st.markdown(f"#### 🔄 {past_net.upper()} → {future_net.upper()}")
+                            st.markdown("---")
+                            
+                            theme = create_plotly_theme()
+                            
+                            # 버블 차트
+                            st.markdown("##### 🎯 소재 순위")
+                            
+                            bubble_size = top_10_bubble['ranking_score'] * 8 + 20
+                            
+                            fig_bubble = go.Figure()
+                            
+                            # Locality별 색상
+                            locality_colors = top_10_bubble['future_locality'].map({
+                                'US': '#ff006e', 'GLOBAL': '#8b00ff'
+                            }).fillna('#ff006e')
+                            
+                            fig_bubble.add_trace(go.Scatter(
+                                x=top_10_bubble['rank_per_network'],
+                                y=top_10_bubble['ranking_score'],
+                                mode='markers+text',
+                                marker=dict(
+                                    size=bubble_size,
+                                    color=locality_colors,
+                                    showscale=False,
+                                    line=dict(color='rgba(255, 255, 255, 0.5)', width=2),
+                                    opacity=0.9
+                                ),
+                                text=top_10_bubble['subject_label_emoji'],
+                                textposition='top center',
+                                textfont=dict(color='white', size=9),
+                                hovertemplate='<b>%{text}</b><br>Rank: %{x}<br>Score: %{y:.2f}<extra></extra>'
+                            ))
+                            
+                            fig_bubble.update_layout(
+                                **theme,
+                                height=400,
+                                margin=dict(l=20, r=20, t=20, b=40),
+                                xaxis_title='순위',
+                                yaxis_title='Score',
+                                xaxis=dict(autorange='reversed', showgrid=False),
+                                yaxis=dict(showgrid=True, gridcolor='rgba(255, 255, 255, 0.1)', gridwidth=1),
+                                showlegend=False
+                            )
+                            
+                            st.plotly_chart(fig_bubble, width="stretch", key=f'bubble_{future_net}_{past_net}_{col_idx}')
+                            
+                            # 6개 차트 (2x3 그리드로 축소)
+                            st.markdown("##### 📊 주요 지표")
+                            
+                            chart_height = 180
+                            
+                            def bar_with_headroom(
+                                df: pd.DataFrame,
+                                *,
+                                x: str,
+                                y: str,
+                                text: str,
+                                theme: dict,
+                                height: int,
+                                color: str,
+                                texttemplate: str,
+                                headroom_pct: float = 0.12,
+                            ):
+                                fig = px.bar(df, x=x, y=y, text=text, color_discrete_sequence=[color])
+                                y_max = float(df[y].max()) if len(df) else 0.0
+                                headroom = y_max * headroom_pct if y_max > 0 else 1.0
+                                fig.update_layout(
+                                    **theme,
+                                    height=height,
+                                    margin=dict(l=20, r=20, t=30, b=40),
+                                    showlegend=False,
+                                    xaxis=dict(tickangle=-45, title="", showgrid=False),
+                                    yaxis=dict(title="", showgrid=True, gridcolor="rgba(255,255,255,0.1)", range=[0, y_max + headroom]),
+                                )
+                                fig.update_traces(
+                                    texttemplate=texttemplate,
+                                    textposition="outside",
+                                    cliponaxis=False,
+                                    marker=dict(line=dict(color=color, width=2)),
+                                )
+                                return fig
+                            
+                            # Row 1
+                            row1_col1, row1_col2 = st.columns(2)
+                            
+                            with row1_col1:
+                                st.markdown("###### 👁️ Impressions")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="sum_impressions",
+                                    text="sum_impressions", theme=theme, height=chart_height,
+                                    color="#0096ff", texttemplate="%{text:,.0f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'imp_{future_net}_{past_net}_{col_idx}')
+                            
+                            with row1_col2:
+                                st.markdown("###### 📲 Installs")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="sum_installs",
+                                    text="sum_installs", theme=theme, height=chart_height,
+                                    color="#a855f7", texttemplate="%{text:,.0f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'inst_{future_net}_{past_net}_{col_idx}')
+                            
+                            # Row 2
+                            row2_col1, row2_col2 = st.columns(2)
+                            
+                            with row2_col1:
+                                st.markdown("###### 💰 CPI")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="sum_CPI",
+                                    text="sum_CPI", theme=theme, height=chart_height,
+                                    color="#ff006e", texttemplate="$%{text:.2f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'cpi_{future_net}_{past_net}_{col_idx}')
+                            
+                            with row2_col2:
+                                st.markdown("###### 📈 IPM")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="IPM",
+                                    text="IPM", theme=theme, height=chart_height,
+                                    color="#ff4d8f", texttemplate="%{text:.2f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'ipm_{future_net}_{past_net}_{col_idx}')
+                            
+                            # Row 3
+                            row3_col1, row3_col2 = st.columns(2)
+                            
+                            with row3_col1:
+                                st.markdown("###### 🎯 CTR")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="CTR",
+                                    text="CTR", theme=theme, height=chart_height,
+                                    color="#ff77a0", texttemplate="%{text:.2f}%"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'ctr_{future_net}_{past_net}_{col_idx}')
+                            
+                            with row3_col2:
+                                st.markdown("###### 💎 ROAS")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="roas_sum_1to3",
+                                    text="roas_sum_1to3", theme=theme, height=chart_height,
+                                    color="#8b00ff", texttemplate="%{text:.2f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'roas_{future_net}_{past_net}_{col_idx}')
+                            
+                            # 테이블
+                            st.markdown("---")
+                            st.markdown("##### 📋 Details")
+                            
+                            display_table = all_data_df[[
+                                'rank_per_network', 'app', 'subject_label',
+                                'sum_impressions', 'sum_installs', 'sum_CPI', 'IPM', 'CTR', 'CVR', 'CVR_IMP','sum_costs','roas_sum_1to3', 'ranking_score'
+                            ]].copy()
+                            
+                            display_table.columns = ['Rank', 'App', '소재', 'Impressions', 'Installs', 'CPI', 'IPM', 'CTR%', 'CVR%', 'CVR_IMP%','COST','ROAS', 'Score']
+                            
+                            st.dataframe(
+                                display_table,
+                                hide_index=True,
+                                width="stretch",
+                                height=300
+                            )
+                            
+                            # Export
+                            csv = all_data_df.to_csv(index=False)
+                            st.download_button(
+                                label="📥 Export CSV",
+                                data=csv,
+                                file_name=f"{past_net}_to_{future_net}_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime="text/csv",
+                                key=f'export_{future_net}_{past_net}_{col_idx}',
+                                width="stretch"
+                            )
+                
+                else:
+                    # ========== 2개 아닐 때: 기존 방식 (세로 배치) ==========
+                    for past_idx, past_net in enumerate(past_networks):
                         # 해당 조합 데이터
                         combo_df = future_net_df[future_net_df['past_network'] == past_net].copy()
-                        combo_df = combo_df.sort_values(['app', 'rank_per_network']).reset_index(drop=True)
+                        combo_df = combo_df.sort_values('ranking_score', ascending=False).reset_index(drop=True)
                         
-                        top_10_bubble = combo_df.head(10)
+                        # 필터링 후 rank 재계산 (1부터 시작)
+                        combo_df['rank_per_network'] = range(1, len(combo_df) + 1)
+                        
+                        top_10_bubble = combo_df
                         all_data_df = combo_df
                         
                         if len(top_10_bubble) == 0:
-                            st.warning(f"⚠️ {past_net.upper()} 데이터 없음")
                             continue
                         
-                        # 섹션 헤더
-                        st.markdown(f"#### 🔄 {past_net.upper()} → {future_net.upper()}")
-                        st.markdown("---")
+                        # Past Network 섹션 헤더
+                        st.markdown(f"#### 🔄 Past: {past_net.upper()} → Future: {future_net.upper()}")
+                        
+                        # Row 1: 버블 차트 + 6개 지표 차트
+                        col_bubble, col_charts = st.columns([1, 3])
                         
                         theme = create_plotly_theme()
                         
-                        # 버블 차트
-                        st.markdown("##### 🎯 소재 순위")
-                        
-                        bubble_size = top_10_bubble['ranking_score'] * 8 + 20
-                        
-                        fig_bubble = go.Figure()
-                        
-                        fig_bubble.add_trace(go.Scatter(
-                            x=top_10_bubble['rank_per_network'],
-                            y=top_10_bubble['ranking_score'],
-                            mode='markers+text',
-                            marker=dict(
-                                size=bubble_size,
-                                color=top_10_bubble['ranking_score'],
-                                colorscale=[[0, '#ff77a0'], [0.5, '#ff4d8f'], [1, '#ff006e']],
-                                showscale=False,
-                                line=dict(color='rgba(255, 255, 255, 0.5)', width=2),
-                                opacity=0.9
-                            ),
-                            text=top_10_bubble['subject_label'],
-                            textposition='top center',
-                            textfont=dict(color='white', size=9),
-                            hovertemplate='<b>%{text}</b><br>Rank: %{x}<br>Score: %{y:.2f}<extra></extra>'
-                        ))
-                        
-                        fig_bubble.update_layout(
-                            **theme,
-                            height=400,
-                            margin=dict(l=20, r=20, t=20, b=40),
-                            xaxis_title='순위',
-                            yaxis_title='Score',
-                            xaxis=dict(autorange='reversed', showgrid=False),
-                            yaxis=dict(showgrid=True, gridcolor='rgba(255, 255, 255, 0.1)', gridwidth=1),
-                            showlegend=False
-                        )
-                        
-                        st.plotly_chart(fig_bubble, width="stretch", key=f'bubble_{future_net}_{past_net}_{col_idx}')
-                        
-                        # 6개 차트 (2x3 그리드로 축소)
-                        st.markdown("##### 📊 주요 지표")
-                        
-                        chart_height = 180
-                        
-                        def bar_with_headroom(
-                            df: pd.DataFrame,
-                            *,
-                            x: str,
-                            y: str,
-                            text: str,
-                            theme: dict,
-                            height: int,
-                            color: str,
-                            texttemplate: str,
-                            headroom_pct: float = 0.12,
-                        ):
-                            fig = px.bar(df, x=x, y=y, text=text, color_discrete_sequence=[color])
-                            y_max = float(df[y].max()) if len(df) else 0.0
-                            headroom = y_max * headroom_pct if y_max > 0 else 1.0
-                            fig.update_layout(
+                        with col_bubble:
+                            st.markdown("##### 🎯 소재 순위")
+                            
+                            bubble_size = top_10_bubble['ranking_score'] * 8 + 20
+                            
+                            fig_bubble = go.Figure()
+                            
+                            # Locality별 색상
+                            locality_colors = top_10_bubble['future_locality'].map({
+                                'US': '#ff006e', 'GLOBAL': '#8b00ff'
+                            }).fillna('#ff006e')
+                            
+                            fig_bubble.add_trace(go.Scatter(
+                                x=top_10_bubble['rank_per_network'],
+                                y=top_10_bubble['ranking_score'],
+                                mode='markers+text',
+                                marker=dict(
+                                    size=bubble_size,
+                                    color=locality_colors,
+                                    showscale=False,
+                                    line=dict(color='rgba(255, 255, 255, 0.5)', width=2),
+                                    opacity=0.9
+                                ),
+                                text=top_10_bubble['subject_label_emoji'],
+                                textposition='top center',
+                                textfont=dict(color='white', size=9),
+                                hovertemplate='<b>%{text}</b><br>Rank: %{x}<br>Score: %{y:.2f}<extra></extra>'
+                            ))
+                            
+                            fig_bubble.update_layout(
                                 **theme,
-                                height=height,
-                                margin=dict(l=20, r=20, t=30, b=40),
-                                showlegend=False,
-                                xaxis=dict(tickangle=-45, title="", showgrid=False),
-                                yaxis=dict(title="", showgrid=True, gridcolor="rgba(255,255,255,0.1)", range=[0, y_max + headroom]),
+                                height=580,
+                                margin=dict(l=20, r=20, t=20, b=40),
+                                xaxis_title='순위',
+                                yaxis_title='Score',
+                                xaxis=dict(autorange='reversed', showgrid=False),
+                                yaxis=dict(showgrid=True, gridcolor='rgba(255, 255, 255, 0.1)', gridwidth=1),
+                                showlegend=False
                             )
-                            fig.update_traces(
-                                texttemplate=texttemplate,
-                                textposition="outside",
-                                cliponaxis=False,
-                                marker=dict(line=dict(color=color, width=2)),
-                            )
-                            return fig
+                            
+                            st.plotly_chart(fig_bubble, width="stretch", key=f'bubble_{future_net}_{past_net}_{past_idx}')
                         
-                        # Row 1
-                        row1_col1, row1_col2 = st.columns(2)
-                        
-                        with row1_col1:
-                            st.markdown("###### 👁️ Impressions")
-                            fig = bar_with_headroom(
-                                top_10_bubble, x="subject_label", y="sum_impressions",
-                                text="sum_impressions", theme=theme, height=chart_height,
-                                color="#0096ff", texttemplate="%{text:,.0f}"
-                            )
-                            st.plotly_chart(fig, width="stretch", key=f'imp_{future_net}_{past_net}_{col_idx}')
-                        
-                        with row1_col2:
-                            st.markdown("###### 📲 Installs")
-                            fig = bar_with_headroom(
-                                top_10_bubble, x="subject_label", y="sum_installs",
-                                text="sum_installs", theme=theme, height=chart_height,
-                                color="#a855f7", texttemplate="%{text:,.0f}"
-                            )
-                            st.plotly_chart(fig, width="stretch", key=f'inst_{future_net}_{past_net}_{col_idx}')
-                        
-                        # Row 2
-                        row2_col1, row2_col2 = st.columns(2)
-                        
-                        with row2_col1:
-                            st.markdown("###### 💰 CPI")
-                            fig = bar_with_headroom(
-                                top_10_bubble, x="subject_label", y="sum_CPI",
-                                text="sum_CPI", theme=theme, height=chart_height,
-                                color="#ff006e", texttemplate="$%{text:.2f}"
-                            )
-                            st.plotly_chart(fig, width="stretch", key=f'cpi_{future_net}_{past_net}_{col_idx}')
-                        
-                        with row2_col2:
-                            st.markdown("###### 📈 IPM")
-                            fig = bar_with_headroom(
-                                top_10_bubble, x="subject_label", y="IPM",
-                                text="IPM", theme=theme, height=chart_height,
-                                color="#ff4d8f", texttemplate="%{text:.2f}"
-                            )
-                            st.plotly_chart(fig, width="stretch", key=f'ipm_{future_net}_{past_net}_{col_idx}')
-                        
-                        # Row 3
-                        row3_col1, row3_col2 = st.columns(2)
-                        
-                        with row3_col1:
-                            st.markdown("###### 🎯 CTR")
-                            fig = bar_with_headroom(
-                                top_10_bubble, x="subject_label", y="CTR",
-                                text="CTR", theme=theme, height=chart_height,
-                                color="#ff77a0", texttemplate="%{text:.2f}%"
-                            )
-                            st.plotly_chart(fig, width="stretch", key=f'ctr_{future_net}_{past_net}_{col_idx}')
-                        
-                        with row3_col2:
-                            st.markdown("###### 💎 ROAS")
-                            fig = bar_with_headroom(
-                                top_10_bubble, x="subject_label", y="roas_sum_1to3",
-                                text="roas_sum_1to3", theme=theme, height=chart_height,
-                                color="#8b00ff", texttemplate="%{text:.2f}"
-                            )
-                            st.plotly_chart(fig, width="stretch", key=f'roas_{future_net}_{past_net}_{col_idx}')
+                        with col_charts:
+                            row1_col1, row1_col2, row1_col3 = st.columns(3)
+                            row2_col1, row2_col2, row2_col3 = st.columns(3)
+                            
+                            chart_height = 250
+                            
+                            def bar_with_headroom(
+                                df: pd.DataFrame,
+                                *,
+                                x: str,
+                                y: str,
+                                text: str,
+                                theme: dict,
+                                height: int,
+                                color: str,
+                                texttemplate: str,
+                                headroom_pct: float = 0.12,
+                            ):
+                                fig = px.bar(df, x=x, y=y, text=text, color_discrete_sequence=[color])
+                                y_max = float(df[y].max()) if len(df) else 0.0
+                                headroom = y_max * headroom_pct if y_max > 0 else 1.0
+                                fig.update_layout(
+                                    **theme,
+                                    height=height,
+                                    margin=dict(l=20, r=20, t=40, b=60),
+                                    showlegend=False,
+                                    xaxis=dict(tickangle=-45, title="", showgrid=False),
+                                    yaxis=dict(title="", showgrid=True, gridcolor="rgba(255,255,255,0.1)", range=[0, y_max + headroom]),
+                                )
+                                fig.update_traces(
+                                    texttemplate=texttemplate,
+                                    textposition="outside",
+                                    cliponaxis=False,
+                                    marker=dict(line=dict(color=color, width=2)),
+                                )
+                                return fig
+                            
+                            with row1_col1:
+                                st.markdown("##### 👁️ Impressions")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="sum_impressions",
+                                    text="sum_impressions", theme=theme, height=chart_height,
+                                    color="#0096ff", texttemplate="%{text:,.0f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'imp_{future_net}_{past_net}_{past_idx}')
+                            
+                            with row1_col2:
+                                st.markdown("##### 📲 Installs")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="sum_installs",
+                                    text="sum_installs", theme=theme, height=chart_height,
+                                    color="#a855f7", texttemplate="%{text:,.0f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'inst_{future_net}_{past_net}_{past_idx}')
+                            
+                            with row1_col3:
+                                st.markdown("##### 💰 CPI")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="sum_CPI",
+                                    text="sum_CPI", theme=theme, height=chart_height,
+                                    color="#ff006e", texttemplate="$%{text:.2f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'cpi_{future_net}_{past_net}_{past_idx}')
+                            
+                            with row2_col1:
+                                st.markdown("##### 📈 IPM")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="IPM",
+                                    text="IPM", theme=theme, height=chart_height,
+                                    color="#ff4d8f", texttemplate="%{text:.2f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'ipm_{future_net}_{past_net}_{past_idx}')
+                            
+                            with row2_col2:
+                                st.markdown("##### 🎯 CTR")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="CTR",
+                                    text="CTR", theme=theme, height=chart_height,
+                                    color="#ff77a0", texttemplate="%{text:.2f}%"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'ctr_{future_net}_{past_net}_{past_idx}')
+                            
+                            with row2_col3:
+                                st.markdown("##### 💎 ROAS")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="roas_sum_1to3",
+                                    text="roas_sum_1to3", theme=theme, height=chart_height,
+                                    color="#8b00ff", texttemplate="%{text:.2f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'roas_{future_net}_{past_net}_{past_idx}')
                         
                         # 테이블
                         st.markdown("---")
@@ -802,206 +1221,26 @@ def run():
                             display_table,
                             hide_index=True,
                             width="stretch",
-                            height=300
+                            height=400
                         )
                         
                         # Export
-                        csv = all_data_df.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Export CSV",
-                            data=csv,
-                            file_name=f"{past_net}_to_{future_net}_{datetime.now().strftime('%Y%m%d')}.csv",
-                            mime="text/csv",
-                            key=f'export_{future_net}_{past_net}_{col_idx}',
-                            width="stretch"
-                        )
-            
-            else:
-                # ========== 2개 아닐 때: 기존 방식 (세로 배치) ==========
-                for past_idx, past_net in enumerate(past_networks):
-                    # 해당 조합 데이터
-                    combo_df = future_net_df[future_net_df['past_network'] == past_net].copy()
-                    combo_df = combo_df.sort_values(['app', 'rank_per_network']).reset_index(drop=True)
-                    
-                    top_10_bubble = combo_df.head(10)
-                    all_data_df = combo_df
-                    
-                    if len(top_10_bubble) == 0:
-                        continue
-                    
-                    # Past Network 섹션 헤더
-                    st.markdown(f"#### 🔄 Past: {past_net.upper()} → Future: {future_net.upper()}")
-
-                    
-                    # Row 1: 버블 차트 + 6개 지표 차트
-                    col_bubble, col_charts = st.columns([1, 3])
-                    
-                    theme = create_plotly_theme()
-                    
-                    with col_bubble:
-                        st.markdown("##### 🎯 소재 순위")
-                        
-                        bubble_size = top_10_bubble['ranking_score'] * 8 + 20
-                        
-                        fig_bubble = go.Figure()
-                        
-                        fig_bubble.add_trace(go.Scatter(
-                            x=top_10_bubble['rank_per_network'],
-                            y=top_10_bubble['ranking_score'],
-                            mode='markers+text',
-                            marker=dict(
-                                size=bubble_size,
-                                color=top_10_bubble['ranking_score'],
-                                colorscale=[[0, '#ff77a0'], [0.5, '#ff4d8f'], [1, '#ff006e']],
-                                showscale=False,
-                                line=dict(color='rgba(255, 255, 255, 0.5)', width=2),
-                                opacity=0.9
-                            ),
-                            text=top_10_bubble['subject_label'],
-                            textposition='top center',
-                            textfont=dict(color='white', size=9),
-                            hovertemplate='<b>%{text}</b><br>Rank: %{x}<br>Score: %{y:.2f}<extra></extra>'
-                        ))
-                        
-                        fig_bubble.update_layout(
-                            **theme,
-                            height=580,
-                            margin=dict(l=20, r=20, t=20, b=40),
-                            xaxis_title='순위',
-                            yaxis_title='Score',
-                            xaxis=dict(autorange='reversed', showgrid=False),
-                            yaxis=dict(showgrid=True, gridcolor='rgba(255, 255, 255, 0.1)', gridwidth=1),
-                            showlegend=False
-                        )
-                        
-                        st.plotly_chart(fig_bubble, width="stretch", key=f'bubble_{future_net}_{past_net}_{past_idx}')
-                    
-                    with col_charts:
-                        row1_col1, row1_col2, row1_col3 = st.columns(3)
-                        row2_col1, row2_col2, row2_col3 = st.columns(3)
-                        
-                        chart_height = 250
-                        
-                        def bar_with_headroom(
-                            df: pd.DataFrame,
-                            *,
-                            x: str,
-                            y: str,
-                            text: str,
-                            theme: dict,
-                            height: int,
-                            color: str,
-                            texttemplate: str,
-                            headroom_pct: float = 0.12,
-                        ):
-                            fig = px.bar(df, x=x, y=y, text=text, color_discrete_sequence=[color])
-                            y_max = float(df[y].max()) if len(df) else 0.0
-                            headroom = y_max * headroom_pct if y_max > 0 else 1.0
-                            fig.update_layout(
-                                **theme,
-                                height=height,
-                                margin=dict(l=20, r=20, t=40, b=60),
-                                showlegend=False,
-                                xaxis=dict(tickangle=-45, title="", showgrid=False),
-                                yaxis=dict(title="", showgrid=True, gridcolor="rgba(255,255,255,0.1)", range=[0, y_max + headroom]),
+                        col_export, col_space = st.columns([1, 3])
+                        with col_export:
+                            csv = all_data_df.to_csv(index=False)
+                            st.download_button(
+                                label="📥 Export CSV",
+                                data=csv,
+                                file_name=f"{past_net}_to_{future_net}_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime="text/csv",
+                                key=f'export_{future_net}_{past_net}_{past_idx}',
+                                width="stretch"
                             )
-                            fig.update_traces(
-                                texttemplate=texttemplate,
-                                textposition="outside",
-                                cliponaxis=False,
-                                marker=dict(line=dict(color=color, width=2)),
-                            )
-                            return fig
                         
-                        with row1_col1:
-                            st.markdown("##### 👁️ Impressions")
-                            fig = bar_with_headroom(
-                                top_10_bubble, x="subject_label", y="sum_impressions",
-                                text="sum_impressions", theme=theme, height=chart_height,
-                                color="#0096ff", texttemplate="%{text:,.0f}"
-                            )
-                            st.plotly_chart(fig, width="stretch", key=f'imp_{future_net}_{past_net}_{past_idx}')
-                        
-                        with row1_col2:
-                            st.markdown("##### 📲 Installs")
-                            fig = bar_with_headroom(
-                                top_10_bubble, x="subject_label", y="sum_installs",
-                                text="sum_installs", theme=theme, height=chart_height,
-                                color="#a855f7", texttemplate="%{text:,.0f}"
-                            )
-                            st.plotly_chart(fig, width="stretch", key=f'inst_{future_net}_{past_net}_{past_idx}')
-                        
-                        with row1_col3:
-                            st.markdown("##### 💰 CPI")
-                            fig = bar_with_headroom(
-                                top_10_bubble, x="subject_label", y="sum_CPI",
-                                text="sum_CPI", theme=theme, height=chart_height,
-                                color="#ff006e", texttemplate="$%{text:.2f}"
-                            )
-                            st.plotly_chart(fig, width="stretch", key=f'cpi_{future_net}_{past_net}_{past_idx}')
-                        
-                        with row2_col1:
-                            st.markdown("##### 📈 IPM")
-                            fig = bar_with_headroom(
-                                top_10_bubble, x="subject_label", y="IPM",
-                                text="IPM", theme=theme, height=chart_height,
-                                color="#ff4d8f", texttemplate="%{text:.2f}"
-                            )
-                            st.plotly_chart(fig, width="stretch", key=f'ipm_{future_net}_{past_net}_{past_idx}')
-                        
-                        with row2_col2:
-                            st.markdown("##### 🎯 CTR")
-                            fig = bar_with_headroom(
-                                top_10_bubble, x="subject_label", y="CTR",
-                                text="CTR", theme=theme, height=chart_height,
-                                color="#ff77a0", texttemplate="%{text:.2f}%"
-                            )
-                            st.plotly_chart(fig, width="stretch", key=f'ctr_{future_net}_{past_net}_{past_idx}')
-                        
-                        with row2_col3:
-                            st.markdown("##### 💎 ROAS")
-                            fig = bar_with_headroom(
-                                top_10_bubble, x="subject_label", y="roas_sum_1to3",
-                                text="roas_sum_1to3", theme=theme, height=chart_height,
-                                color="#8b00ff", texttemplate="%{text:.2f}"
-                            )
-                            st.plotly_chart(fig, width="stretch", key=f'roas_{future_net}_{past_net}_{past_idx}')
-                    
-                    # 테이블
-                    st.markdown("---")
-                    st.markdown("##### 📋 Details")
-                    
-                    display_table = all_data_df[[
-                        'rank_per_network', 'app', 'subject_label',
-                        'sum_impressions', 'sum_installs', 'sum_CPI', 'IPM', 'CTR', 'CVR', 'CVR_IMP','sum_costs','roas_sum_1to3', 'ranking_score'
-                    ]].copy()
-                    
-                    display_table.columns = ['Rank', 'App', '소재', 'Impressions', 'Installs', 'CPI', 'IPM', 'CTR%', 'CVR%', 'CVR_IMP%','COST','ROAS', 'Score']
-                    
-                    st.dataframe(
-                        display_table,
-                        hide_index=True,
-                        width="stretch",
-                        height=400
-                    )
-                    
-                    # Export
-                    col_export, col_space = st.columns([1, 3])
-                    with col_export:
-                        csv = all_data_df.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Export CSV",
-                            data=csv,
-                            file_name=f"{past_net}_to_{future_net}_{datetime.now().strftime('%Y%m%d')}.csv",
-                            mime="text/csv",
-                            key=f'export_{future_net}_{past_net}_{past_idx}',
-                            width="stretch"
-                        )
-                    
-                    # Past Network 구분선 (마지막 섹션 제외)
-                    if past_idx < len(past_networks) - 1:
-                        st.markdown("---")
-                        st.markdown("<br><br>", unsafe_allow_html=True)
+                        # Past Network 구분선 (마지막 섹션 제외)
+                        if past_idx < len(past_networks) - 1:
+                            st.markdown("---")
+                            st.markdown("<br><br>", unsafe_allow_html=True)
     
     st.markdown("---")
     st.caption(f"🕐 Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} KST")
@@ -1010,6 +1249,10 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+
+
+
 
 
 

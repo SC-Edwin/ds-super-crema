@@ -3,6 +3,7 @@ Super Crema - Creative Intelligence Platform
 """
 
 import streamlit as st
+from modules.auth_simple import check_authentication, show_login_page, logout, log_action  # ← 이 줄 추가
 
 import random
 
@@ -14,6 +15,10 @@ def get_random_animal_emoji():
         "🐘", "🦒", "🦓", "🦔", "🐕", "🐈", "🐇", "🐿️", "🦝", "🦛"
     ]
     return random.choice(animal_emojis)
+
+
+
+
 
 
 st.set_page_config(
@@ -228,6 +233,32 @@ def apply_theme():
         box-shadow: none !important;
     }
     /* ======================================================= */
+    /* ========== 로그인 폼 스타일 (st.container 타겟팅) ========== */
+            
+    /* col2 내부의 st.container() (data-testid="stVerticalBlock")을 타겟 */
+    [data-testid="column"]:nth-child(2) [data-testid="stVerticalBlock"] {
+        background: rgba(10, 10, 20, 0.95) !important; 
+        backdrop-filter: blur(15px) !important;
+        padding: 3rem 2.5rem !important; 
+        border-radius: 20px !important;
+        
+        border: 2px solid rgba(255, 0, 110, 0.4) !important; 
+        box-shadow: 
+            0 0 100px rgba(255, 0, 110, 0.5) !important, 
+            0 0 0 5px rgba(255, 255, 255, 0.05) !important; 
+        
+        /* 3D 효과를 살짝 약화 */
+        transform: perspective(1px) translateZ(0) !important;
+        transition: all 0.5s ease-out !important; 
+    }
+    
+    /* 호버 효과 추가 */
+    [data-testid="column"]:nth-child(2) [data-testid="stVerticalBlock"]:hover {
+        box-shadow: 
+            0 0 150px rgba(255, 0, 110, 0.6) !important, 
+            0 0 0 5px rgba(255, 255, 255, 0.1) !important;
+        transform: translateY(-5px) !important; 
+    }
 
     </style>
     """, unsafe_allow_html=True)
@@ -242,16 +273,76 @@ def render_header():
     </div>
     """, unsafe_allow_html=True)
 
+
+
 def main():
     apply_theme()
+    
+    # 임시: 인증 바이패스 (디버깅용)
+    if 'login_method' not in st.session_state:
+        st.session_state.login_method = 'password'
+        st.session_state.user_name = 'Test'
+        st.session_state.user_email = 'test@test.com'
+        st.session_state.user_role = 'admin'
+        st.session_state.authenticated = True
+
+    # if not check_authentication():
+    #     if 'logout' in st.query_params:
+    #         st.query_params.clear()
+    #     show_login_page()
+    #     return
+
         
-    render_header() 
+    render_header()
+    
+    # URL에 'logout' 파라미터가 감지되면 로그아웃 처리
+    if 'logout' in st.query_params:
+        logout()
+        st.query_params.clear() # 파라미터 제거
+        st.rerun() # 재실행하여 로그인 페이지로 이동
+        return
+
+    # ========== 사용자 정보 + 로그아웃 (옵션 1: 텍스트 링크로 대체) ==========
+    
+    # [여백, 전체 사용자 정보 블록]으로 컬럼 단순화
+    col1, col2 = st.columns([8.5, 1.5]) 
+        
+    emoji = get_random_animal_emoji()
+    method_emoji = "🔑" if st.session_state.login_method == 'password' else "🌐"
+    
+    with col1:
+        pass # 여백 유지
+    
+    with col2:
+        # 모든 텍스트 정보를 하나의 <div> 안에 넣고 오른쪽 정렬
+        # Logout 버튼을 쿼리 파라미터를 사용하는 HTML 링크로 대체합니다.
+        # '?logout=true' 파라미터를 URL에 추가하여 로그아웃 감지
+        st.markdown(f"""
+            <div style="text-align: right; line-height: 1.3; margin-top: 5px;">
+                <p style="font-size: 0.8rem; margin: 0; color: #fff;">
+                    {emoji} {st.session_state.user_name} ({st.session_state.user_role})
+                </p>
+                <p style="font-size: 0.7rem; margin: 0; color: #ccc; opacity: 0.9;">
+                    {method_emoji} {st.session_state.login_method} 
+                    <a href="?logout=true" style="color: #ff006e; margin-left: 5px; text-decoration: none; font-weight: 600;">
+                        🚪 Logout
+                    </a>
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+
+
+
+
+    st.markdown("---") 
     # ===================================================
 
+
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+
+    
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📊 Performance M/L",
-        "📈 Creative Performance Trend",
         "👁️ Creative Upload",
         "📊 Video M/L",
         "🌐 Localization",
@@ -267,6 +358,7 @@ def main():
     #     st.markdown('</div>', unsafe_allow_html=True)
 
     with tab1:
+        log_action(st.session_state.user_email, st.session_state.login_method, 'access_performance_ml')  
         st.markdown('<div id="viz-root">', unsafe_allow_html=True)
         from modules.visualization import main as viz_main
         viz_main.run()
@@ -275,36 +367,54 @@ def main():
 
 
     with tab2:
-        st.markdown('<div id="trend-root">', unsafe_allow_html=True)
-        from modules.creative_performance_trend import main as trend_main
-        trend_main.run()
-        st.markdown('</div>', unsafe_allow_html=True) 
+        try:
+            from modules.upload_automation import main as upload_main
+            upload_main.run()
+        except Exception as e:
+            st.error(f"소재 업로드 모듈 로드 실패: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+
     
 
     with tab3:
-        st.markdown('<div id="upload-root">', unsafe_allow_html=True)
-        from modules.upload_automation import main as upload_main
-        upload_main.run()
-        st.markdown('</div>', unsafe_allow_html=True)  
+        st.info("🚧 Comming Soon")  
 
 
     with tab4:
-        st.info("🚧 Comming Soon")  
+        # https://weapon-rpg.web.app/로 이동하는 링크 버튼
+        st.markdown("""
+        <div style="text-align: center; padding: 3rem;">
+            <h2 style="color: #ffffff; margin-bottom: 1rem;">
+                🌐 Localization 리다이렉팅
+            </h2>
+            <p style="color: #cccccc; font-size: 1rem; margin-bottom: 2rem;">
+                동영상 편집, 생성 서버와 연결하려면 아래 버튼을 클릭하세요.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns([2, 2, 2])
+        with col2:
+            # Streamlit의 link_button 사용 (새 탭에서 열림)
+            st.link_button(
+                "🌐 이동",
+                "https://creative-crema.web.app/",
+                use_container_width=True,
+                type="primary"
+            )  
         
 
     with tab5:
-        st.info("🚧 Comming Soon")  
-
-    with tab6:
         st.info("🚧 Comming Soon")
 
-    with tab7:
+    with tab6:
         st.markdown('<div id="upload-vn-root">', unsafe_allow_html=True)
         from modules.upload_automation import vietnam as vietnam_main
         vietnam_main.run()
-        st.markdown('</div>', unsafe_allow_html=True)  
-             
-    
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
     st.markdown("---")
     st.caption("© 2025 Super Crema - Supercent Marketing Intelligence Team")
 
