@@ -55,24 +55,28 @@ def get_google_oauth_flow():
 
 
 def get_google_login_url():
-    flow = get_google_oauth_flow()
+    """PKCE 없이 OAuth URL 생성 (Streamlit Cloud 호환)"""
+    import urllib.parse
 
-    # after (배포용)
+    redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
     print(f"[OAUTH] STREAMLIT_ENV={os.getenv('STREAMLIT_ENV')}")
-    print(f"[OAUTH] redirect_uri={flow.redirect_uri}")
+    print(f"[OAUTH] redirect_uri={redirect_uri}")
 
-    auth_url, state = flow.authorization_url(
-        access_type="offline",
-        prompt="select_account"
-    )
-    st.session_state.oauth_state = state
-    return auth_url
-
-
-
+    params = {
+        "response_type": "code",
+        "client_id": st.secrets["google_oauth"]["client_id"],
+        "redirect_uri": redirect_uri,
+        "scope": "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
+        "access_type": "offline",
+        "prompt": "select_account",
+    }
+    return f"https://accounts.google.com/o/oauth2/auth?{urllib.parse.urlencode(params)}"
 
 
 def handle_google_callback():
+    """PKCE 없이 토큰 교환 (세션 유실에 안전)"""
+    import requests as req
+
     query_params = st.query_params
 
     if "code" not in query_params:
@@ -82,24 +86,33 @@ def handle_google_callback():
     if isinstance(code, list):
         code = code[0]
 
-    # 🔒 이미 처리한 code면 무시 (중요)
+    # 🔒 이미 처리한 code면 무시
     if st.session_state.get("oauth_code_used") == code:
         return None
 
     try:
-        flow = get_google_oauth_flow()
-        flow.fetch_token(code=code)
+        # 직접 토큰 교환 (PKCE code_verifier 불필요)
+        token_resp = req.post("https://oauth2.googleapis.com/token", data={
+            "code": code,
+            "client_id": st.secrets["google_oauth"]["client_id"],
+            "client_secret": st.secrets["google_oauth"]["client_secret"],
+            "redirect_uri": st.secrets["google_oauth"]["redirect_uri"],
+            "grant_type": "authorization_code",
+        })
+        token_data = token_resp.json()
+
+        if "error" in token_data:
+            raise Exception(f"{token_data['error']}: {token_data.get('error_description', '')}")
 
         # 🔒 code 소비 완료 기록
         st.session_state.oauth_code_used = code
 
-        credentials = flow.credentials
-
+        # id_token에서 이메일 추출
         from google.oauth2 import id_token
         from google.auth.transport import requests
 
         idinfo = id_token.verify_oauth2_token(
-            credentials.id_token,
+            token_data["id_token"],
             requests.Request(),
             st.secrets["google_oauth"]["client_id"]
         )
