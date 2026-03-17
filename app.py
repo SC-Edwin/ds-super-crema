@@ -278,19 +278,19 @@ def render_header():
 def main():
     apply_theme()
     
-    # # 임시: 인증 바이패스 (디버깅용)
-    # if 'login_method' not in st.session_state:
-    #     st.session_state.login_method = 'password'
-    #     st.session_state.user_name = 'Test'
-    #     st.session_state.user_email = 'test@test.com'
-    #     st.session_state.user_role = 'admin'
-    #     st.session_state.authenticated = True
+    # 임시: 인증 바이패스 (디버깅용)
+    if 'login_method' not in st.session_state:
+        st.session_state.login_method = 'password'
+        st.session_state.user_name = 'Test'
+        st.session_state.user_email = 'test@test.com'
+        st.session_state.user_role = 'admin'
+        st.session_state.authenticated = True
 
-    if not check_authentication():
-        if 'logout' in st.query_params:
-            st.query_params.clear()
-        show_login_page()
-        return
+    # if not check_authentication():
+    #     if 'logout' in st.query_params:
+    #         st.query_params.clear()
+    #     show_login_page()
+    #     return
 
         
     render_header()
