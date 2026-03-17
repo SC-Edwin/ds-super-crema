@@ -7,7 +7,7 @@ CONFIG_FILE = "games_config.json"
 
 # Base list of games (Operation mode defaults)
 DEFAULT_GAME_NAMES = [
-    "XP HERO", "Dino Universe", "Snake Clash", "Pizza Ready", "Cafe Life",
+    "Cafe Life", "Dino Universe", "Snake Clash", "Pizza Ready", "XP HERO",
     "Suzy's Restaurant", "Office Life", "Lumber Chopper", "Burger Please", "Prison Life", "Arrow Flow"
 ]
 
