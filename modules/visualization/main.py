@@ -180,6 +180,9 @@ def load_prediction_data():
         sum_costs,
         sum_CPI,
         roas_sum_1to3,
+        cpm_sum_1to3,
+        cpi_sum_1to3,
+        cvr_sum_1to3,        
         ROUND(SAFE_DIVIDE(sum_installs * 1000, sum_impressions), 2) as IPM,
         ROUND(SAFE_DIVIDE(sum_clicks * 100, sum_impressions), 2) as CTR,
         ROUND(SAFE_DIVIDE(sum_installs * 100, sum_clicks), 2) as CVR,
@@ -980,79 +983,86 @@ def run(test_market='WW', key_prefix='ww'):
                                 return fig
                             
                             # Row 1
+
+
                             row1_col1, row1_col2 = st.columns(2)
-                            
+                            row2_col1, row2_col2 = st.columns(2)  # ← 추가
+                            row3_col1, row3_col2 = st.columns(2)  # ← 추가
+
+
+
+                                                        
+                            # Row 1
                             with row1_col1:
-                                st.markdown("###### 👁️ Impressions")
-                                fig = bar_with_headroom(
-                                    top_10_bubble, x="subject_label", y="sum_impressions",
-                                    text="sum_impressions", theme=theme, height=chart_height,
-                                    color="#0096ff", texttemplate="%{text:,.0f}"
-                                )
-                                st.plotly_chart(fig, width="stretch", key=f'imp_{future_net}_{past_net}_{col_idx}')
-                            
-                            with row1_col2:
-                                st.markdown("###### 📲 Installs")
-                                fig = bar_with_headroom(
-                                    top_10_bubble, x="subject_label", y="sum_installs",
-                                    text="sum_installs", theme=theme, height=chart_height,
-                                    color="#a855f7", texttemplate="%{text:,.0f}"
-                                )
-                                st.plotly_chart(fig, width="stretch", key=f'inst_{future_net}_{past_net}_{col_idx}')
-                            
-                            # Row 2
-                            row2_col1, row2_col2 = st.columns(2)
-                            
-                            with row2_col1:
-                                st.markdown("###### 💰 CPI")
-                                fig = bar_with_headroom(
-                                    top_10_bubble, x="subject_label", y="sum_CPI",
-                                    text="sum_CPI", theme=theme, height=chart_height,
-                                    color="#ff006e", texttemplate="$%{text:.2f}"
-                                )
-                                st.plotly_chart(fig, width="stretch", key=f'cpi_{future_net}_{past_net}_{col_idx}')
-                            
-                            with row2_col2:
-                                st.markdown("###### 📈 IPM")
+                                st.markdown("###### 📈 IPM (D1-3)")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="IPM",
                                     text="IPM", theme=theme, height=chart_height,
-                                    color="#ff4d8f", texttemplate="%{text:.2f}"
+                                    color="#0096ff", texttemplate="%{text:.2f}"
                                 )
                                 st.plotly_chart(fig, width="stretch", key=f'ipm_{future_net}_{past_net}_{col_idx}')
-                            
-                            # Row 3
-                            row3_col1, row3_col2 = st.columns(2)
-                            
-                            with row3_col1:
-                                st.markdown("###### 🎯 CTR")
+
+                            with row1_col2:
+                                st.markdown("###### 🎯 CTR (D1-3)")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="CTR",
                                     text="CTR", theme=theme, height=chart_height,
-                                    color="#ff77a0", texttemplate="%{text:.2f}%"
+                                    color="#a855f7", texttemplate="%{text:.2f}%"
                                 )
                                 st.plotly_chart(fig, width="stretch", key=f'ctr_{future_net}_{past_net}_{col_idx}')
-                            
-                            with row3_col2:
-                                st.markdown("###### 💎 ROAS")
+
+                            # Row 2
+                            with row2_col1:
+                                st.markdown("###### 🔄 CVR (D1-3)")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="cvr_sum_1to3",
+                                    text="cvr_sum_1to3", theme=theme, height=chart_height,
+                                    color="#ff006e", texttemplate="%{text:.3f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'cvr_{future_net}_{past_net}_{col_idx}')
+
+                            with row2_col2:
+                                st.markdown("###### 💚 Retention (D1-3)")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="retention_rate_sum_1to3",
+                                    text="retention_rate_sum_1to3", theme=theme, height=chart_height,
+                                    color="#ff4d8f", texttemplate="%{text:.3f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'ret_{future_net}_{past_net}_{col_idx}')
+
+                            # Row 3
+                            with row3_col1:
+                                st.markdown("###### 💎 ROAS (D1-3)")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="roas_sum_1to3",
                                     text="roas_sum_1to3", theme=theme, height=chart_height,
-                                    color="#8b00ff", texttemplate="%{text:.2f}"
+                                    color="#ff77a0", texttemplate="%{text:.2f}"
                                 )
                                 st.plotly_chart(fig, width="stretch", key=f'roas_{future_net}_{past_net}_{col_idx}')
+
+                            with row3_col2:
+                                st.markdown("###### 💰 CPM (D1-3)")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="cpm_sum_1to3",
+                                    text="cpm_sum_1to3", theme=theme, height=chart_height,
+                                    color="#8b00ff", texttemplate="%{text:.2f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'cpm_{future_net}_{past_net}_{col_idx}')
                             
                             # 테이블
                             st.markdown("---")
                             st.markdown("##### 📋 Details")
                             
+
                             display_table = all_data_df[[
                                 'rank_per_network', 'app', 'subject_label',
-                                'sum_impressions', 'sum_installs', 'sum_CPI', 'IPM', 'CTR', 'CVR', 'CVR_IMP','sum_costs','roas_sum_1to3', 'ranking_score'
+                                'IPM', 'CTR', 'cvr_sum_1to3', 'retention_rate_sum_1to3',
+                                'roas_sum_1to3', 'cpm_sum_1to3', 'cpi_sum_1to3', 'ranking_score'
                             ]].copy()
-                            
-                            display_table.columns = ['Rank', 'App', '소재', 'Impressions', 'Installs', 'CPI', 'IPM', 'CTR%', 'CVR%', 'CVR_IMP%','COST','ROAS', 'Score']
-                            
+                            display_table.columns = ['Rank', 'App', '소재', 'IPM', 'CTR%', 'CVR%', 'Retention%', 'ROAS', 'CPM', 'CPI', 'Score']
+
+
+
                             st.dataframe(
                                 display_table,
                                 hide_index=True,
@@ -1175,70 +1185,72 @@ def run(test_market='WW', key_prefix='ww'):
                                 return fig
                             
                             with row1_col1:
-                                st.markdown("##### 👁️ Impressions")
-                                fig = bar_with_headroom(
-                                    top_10_bubble, x="subject_label", y="sum_impressions",
-                                    text="sum_impressions", theme=theme, height=chart_height,
-                                    color="#0096ff", texttemplate="%{text:,.0f}"
-                                )
-                                st.plotly_chart(fig, width="stretch", key=f'imp_{future_net}_{past_net}_{past_idx}')
-                            
-                            with row1_col2:
-                                st.markdown("##### 📲 Installs")
-                                fig = bar_with_headroom(
-                                    top_10_bubble, x="subject_label", y="sum_installs",
-                                    text="sum_installs", theme=theme, height=chart_height,
-                                    color="#a855f7", texttemplate="%{text:,.0f}"
-                                )
-                                st.plotly_chart(fig, width="stretch", key=f'inst_{future_net}_{past_net}_{past_idx}')
-                            
-                            with row1_col3:
-                                st.markdown("##### 💰 CPI")
-                                fig = bar_with_headroom(
-                                    top_10_bubble, x="subject_label", y="sum_CPI",
-                                    text="sum_CPI", theme=theme, height=chart_height,
-                                    color="#ff006e", texttemplate="$%{text:.2f}"
-                                )
-                                st.plotly_chart(fig, width="stretch", key=f'cpi_{future_net}_{past_net}_{past_idx}')
-                            
-                            with row2_col1:
                                 st.markdown("##### 📈 IPM")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="IPM",
                                     text="IPM", theme=theme, height=chart_height,
-                                    color="#ff4d8f", texttemplate="%{text:.2f}"
+                                    color="#0096ff", texttemplate="%{text:.2f}"
                                 )
                                 st.plotly_chart(fig, width="stretch", key=f'ipm_{future_net}_{past_net}_{past_idx}')
-                            
-                            with row2_col2:
+
+                            with row1_col2:
                                 st.markdown("##### 🎯 CTR")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="CTR",
                                     text="CTR", theme=theme, height=chart_height,
-                                    color="#ff77a0", texttemplate="%{text:.2f}%"
+                                    color="#a855f7", texttemplate="%{text:.2f}%"
                                 )
                                 st.plotly_chart(fig, width="stretch", key=f'ctr_{future_net}_{past_net}_{past_idx}')
-                            
-                            with row2_col3:
+
+                            with row1_col3:
+                                st.markdown("##### 🔄 CVR")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="cvr_sum_1to3",
+                                    text="cvr_sum_1to3", theme=theme, height=chart_height,
+                                    color="#ff006e", texttemplate="%{text:.3f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'cvr_{future_net}_{past_net}_{past_idx}')
+
+                            with row2_col1:
+                                st.markdown("##### 💚 Retention")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="retention_rate_sum_1to3",
+                                    text="retention_rate_sum_1to3", theme=theme, height=chart_height,
+                                    color="#ff4d8f", texttemplate="%{text:.3f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'ret_{future_net}_{past_net}_{past_idx}')
+
+                            with row2_col2:
                                 st.markdown("##### 💎 ROAS")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="roas_sum_1to3",
                                     text="roas_sum_1to3", theme=theme, height=chart_height,
-                                    color="#8b00ff", texttemplate="%{text:.2f}"
+                                    color="#ff77a0", texttemplate="%{text:.2f}"
                                 )
                                 st.plotly_chart(fig, width="stretch", key=f'roas_{future_net}_{past_net}_{past_idx}')
-                        
+
+                            with row2_col3:
+                                st.markdown("##### 💰 CPM")
+                                fig = bar_with_headroom(
+                                    top_10_bubble, x="subject_label", y="cpm_sum_1to3",
+                                    text="cpm_sum_1to3", theme=theme, height=chart_height,
+                                    color="#8b00ff", texttemplate="%{text:.2f}"
+                                )
+                                st.plotly_chart(fig, width="stretch", key=f'cpm_{future_net}_{past_net}_{past_idx}')
                         # 테이블
                         st.markdown("---")
                         st.markdown("##### 📋 Details")
-                        
+                                                
+
                         display_table = all_data_df[[
                             'rank_per_network', 'app', 'subject_label',
-                            'sum_impressions', 'sum_installs', 'sum_CPI', 'IPM', 'CTR', 'CVR', 'CVR_IMP','sum_costs','roas_sum_1to3', 'ranking_score'
+                            'IPM', 'CTR', 'cvr_sum_1to3', 'retention_rate_sum_1to3',
+                            'roas_sum_1to3', 'cpm_sum_1to3', 'cpi_sum_1to3', 'ranking_score'
                         ]].copy()
-                        
-                        display_table.columns = ['Rank', 'App', '소재', 'Impressions', 'Installs', 'CPI', 'IPM', 'CTR%', 'CVR%', 'CVR_IMP%','COST','ROAS', 'Score']
-                        
+                        display_table.columns = ['Rank', 'App', '소재', 'IPM', 'CTR%', 'CVR%', 'Retention%', 'ROAS', 'CPM', 'CPI', 'Score']
+
+
+
                         st.dataframe(
                             display_table,
                             hide_index=True,
