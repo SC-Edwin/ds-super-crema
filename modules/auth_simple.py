@@ -404,6 +404,22 @@ def show_login_page():
             
             # Google 로그인 버튼
             auth_url = get_google_login_url()
+            st.markdown("""
+            <style>
+            /* Google 로그인 버튼 흰색 스타일 */
+            a[data-testid="stBaseLinkButton-secondary"] {
+                background: white !important;
+                color: #444 !important;
+                border: 1px solid #ddd !important;
+                border-radius: 8px !important;
+                font-weight: 600 !important;
+                margin-bottom: 25px !important;
+            }
+            a[data-testid="stBaseLinkButton-secondary"] p {
+                color: #444 !important;
+            }
+            </style>
+            """, unsafe_allow_html=True)
             st.link_button("🌐 Sign in with Google", auth_url, use_container_width=True)
             
             st.markdown("---") # 구분선 추가
