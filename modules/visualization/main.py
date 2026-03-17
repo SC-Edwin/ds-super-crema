@@ -347,7 +347,8 @@ def run(test_market='WW', key_prefix='ww'):
 
     with col1:
             all_apps = ['All'] + sorted(df['app'].unique().tolist())
-            selected_app = st.selectbox("📱 App", all_apps)
+            selected_app = st.selectbox("📱 App", all_apps, key=f"app_{key_prefix}")
+
 
                         
             clicked_hk = st.button(
@@ -364,7 +365,8 @@ def run(test_market='WW', key_prefix='ww'):
 
     with col2:
             all_future_localities = ['All'] + sorted(df['future_locality'].dropna().unique().tolist())
-            selected_future_locality = st.selectbox("🎯 투자 지역", all_future_localities)
+            selected_future_locality = st.selectbox("🎯 투자 지역", all_future_localities, key=f"locality_{key_prefix}")
+
 
 
 
@@ -392,7 +394,7 @@ def run(test_market='WW', key_prefix='ww'):
         # 변경 후
         # available_weeks는 이미 reverse=True 정렬 → index 1 = 가장 최신 주차
         default_week_idx = 1 if len(week_options) > 1 else 0
-        selected_week_label = st.selectbox("📅 테스트 날짜", week_options, index=default_week_idx)        
+        selected_week_label = st.selectbox("📅 테스트 날짜", week_options, index=default_week_idx, key=f"week_{key_prefix}")
 
         
         # 레이블 → 실제 주차 코드 변환
