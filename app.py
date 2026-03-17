@@ -340,22 +340,18 @@ def main():
 
     
 
-    
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊 Performance M/L",
         "👁️ Creative Upload",
         "📊 Video M/L",
         "🌐 Localization",
         "🎬 Video Generation",
         "🇻🇳 Creative Upload - Vietnam",
+        "🇻🇳 Performance M/L - Vietnam",
     ])
 
 
-    # with tab1:
-    #     st.markdown('<div id="viz-root">', unsafe_allow_html=True)
-    #     from modules.visualization import main as viz_main
-    #     viz_main.run()
-    #     st.markdown('</div>', unsafe_allow_html=True)
+
 
     with tab1:
         log_action(st.session_state.user_email, st.session_state.login_method, 'access_performance_ml')  
@@ -414,6 +410,19 @@ def main():
         vietnam_main.run()
         st.markdown('</div>', unsafe_allow_html=True)
 
+    with tab7:
+        log_action(st.session_state.user_email, st.session_state.login_method, 'access_performance_ml_vn')
+        st.markdown('<div id="viz-vn-root">', unsafe_allow_html=True)
+        try:
+            from modules.visualization import main as viz_main
+            viz_main.run(test_market='VN', key_prefix='vn')
+        except Exception as e:
+            st.error(f"VN 탭 오류: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+        st.markdown('</div>', unsafe_allow_html=True)
+                
+        
 
     st.markdown("---")
     st.caption("© 2025 Super Crema - Supercent Marketing Intelligence Team")
