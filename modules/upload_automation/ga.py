@@ -138,6 +138,9 @@ def render_google_settings_panel(
                 st.session_state[cache_key] = []
 
         campaigns = st.session_state[cache_key]
+        # ENABLED 캠페인 우선 정렬
+        _status_order = {"ENABLED": 0, "PAUSED": 1}
+        campaigns.sort(key=lambda c: (_status_order.get(c["status"], 2), c["name"]))
         if not campaigns:
             st.warning("사용 가능한 캠페인이 없습니다.")
             return
@@ -391,12 +394,12 @@ def _render_category_tabs(
             # 우선순위: youtube_video_title (원본 파일명) > name > yt_id > resource_name
             lib_vid_options = []  # display labels
             lib_label_to_rn = {}  # display label → resource_name
-            for v in lib_vids:
+
+            def _build_label(v):
                 name = v.get("name", "") or ""
                 yt_title = v.get("youtube_video_title", "") or ""
                 yt_id = v.get("youtube_video_id", "") or ""
                 rn = v["resource_name"]
-                # youtube_video_title에 원본 파일명이 들어있음
                 display = yt_title or name
                 if display and yt_id:
                     label = f"{display} ({yt_id})"
@@ -405,15 +408,41 @@ def _render_category_tabs(
                 elif yt_id:
                     label = yt_id
                 else:
-                    label = rn.split("/")[-1]  # last part of resource_name
-                # Ensure uniqueness
+                    label = rn.split("/")[-1]
                 if label in lib_label_to_rn:
                     label = f"{label} [{rn.split('/')[-1]}]"
+                return label, rn
+
+            for v in lib_vids:
+                label, rn = _build_label(v)
                 lib_vid_options.append(label)
                 lib_label_to_rn[label] = rn
 
+            # 로컬라이징/AI/인플루언서 탭: 다른 카테고리 영상도 추가 (해당 카테고리가 상단)
+            if cat_id != "normal":
+                included_rns = set(lib_label_to_rn.values())
+                for other_cat_id, _ in CATEGORIES:
+                    if other_cat_id == cat_id:
+                        continue
+                    for v in cat_lib_videos.get(other_cat_id, []):
+                        if v["resource_name"] in included_rns:
+                            continue
+                        included_rns.add(v["resource_name"])
+                        label, rn = _build_label(v)
+                        lib_vid_options.append(label)
+                        lib_label_to_rn[label] = rn
+
             # ── Local (new) videos ──
-            local_vids = cat_local_videos.get(cat_id, [])
+            local_vids = list(cat_local_videos.get(cat_id, []))
+            if cat_id != "normal":
+                seen_local = set(local_vids)
+                for other_cat_id, _ in CATEGORIES:
+                    if other_cat_id == cat_id:
+                        continue
+                    for fn in cat_local_videos.get(other_cat_id, []):
+                        if fn not in seen_local:
+                            seen_local.add(fn)
+                            local_vids.append(fn)
 
             # Combined: library labels + local new files
             all_vid_options = lib_vid_options + [
