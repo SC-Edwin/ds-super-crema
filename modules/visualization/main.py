@@ -1185,7 +1185,7 @@ def run(test_market='WW', key_prefix='ww'):
                                 return fig
                             
                             with row1_col1:
-                                st.markdown("##### 📈 IPM")
+                                st.markdown("##### 📈 IPM (D1-3)")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="IPM",
                                     text="IPM", theme=theme, height=chart_height,
@@ -1194,7 +1194,7 @@ def run(test_market='WW', key_prefix='ww'):
                                 st.plotly_chart(fig, width="stretch", key=f'ipm_{future_net}_{past_net}_{past_idx}')
 
                             with row1_col2:
-                                st.markdown("##### 🎯 CTR")
+                                st.markdown("##### 🎯 CTR (D1-3)")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="CTR",
                                     text="CTR", theme=theme, height=chart_height,
@@ -1203,7 +1203,7 @@ def run(test_market='WW', key_prefix='ww'):
                                 st.plotly_chart(fig, width="stretch", key=f'ctr_{future_net}_{past_net}_{past_idx}')
 
                             with row1_col3:
-                                st.markdown("##### 🔄 CVR")
+                                st.markdown("##### 🔄 CVR (D1-3)")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="cvr_sum_1to3",
                                     text="cvr_sum_1to3", theme=theme, height=chart_height,
@@ -1212,7 +1212,7 @@ def run(test_market='WW', key_prefix='ww'):
                                 st.plotly_chart(fig, width="stretch", key=f'cvr_{future_net}_{past_net}_{past_idx}')
 
                             with row2_col1:
-                                st.markdown("##### 💚 Retention")
+                                st.markdown("##### 💚 Retention (D1-3)")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="retention_rate_sum_1to3",
                                     text="retention_rate_sum_1to3", theme=theme, height=chart_height,
@@ -1221,7 +1221,7 @@ def run(test_market='WW', key_prefix='ww'):
                                 st.plotly_chart(fig, width="stretch", key=f'ret_{future_net}_{past_net}_{past_idx}')
 
                             with row2_col2:
-                                st.markdown("##### 💎 ROAS")
+                                st.markdown("##### 💎 ROAS (D1-3)")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="roas_sum_1to3",
                                     text="roas_sum_1to3", theme=theme, height=chart_height,
@@ -1230,7 +1230,7 @@ def run(test_market='WW', key_prefix='ww'):
                                 st.plotly_chart(fig, width="stretch", key=f'roas_{future_net}_{past_net}_{past_idx}')
 
                             with row2_col3:
-                                st.markdown("##### 💰 CPM")
+                                st.markdown("##### 💰 CPM (D1-3)")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="cpm_sum_1to3",
                                     text="cpm_sum_1to3", theme=theme, height=chart_height,
