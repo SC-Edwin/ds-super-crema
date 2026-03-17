@@ -315,6 +315,8 @@ def run(test_market='WW', key_prefix='ww'):
     # ========== 주차 계산 추가 ==========
     # day_1 기준으로 업로드 주차 계산
     df['upload_week'] = df['day_1'].apply(get_friday_based_week)
+    
+
 
     # ========== Locality 이모지 라벨 ==========
     df['subject_label_emoji'] = df.apply(
@@ -365,6 +367,11 @@ def run(test_market='WW', key_prefix='ww'):
             all_future_localities = ['All'] + sorted(df['future_locality'].dropna().unique().tolist())
             selected_future_locality = st.selectbox("🎯 투자 지역", all_future_localities, key=f"locality_{key_prefix}")
 
+
+
+
+
+
     with col3:
         # 주차 목록 (최신순, None 제외)
         available_weeks = sorted(
@@ -412,8 +419,8 @@ def run(test_market='WW', key_prefix='ww'):
 
     if len(filtered_df) == 0:
         st.warning("⚠️ 선택한 조건에 맞는 데이터가 없습니다.")
-        print(f"[DEBUG] filtered_df empty! test_market={test_market}")
-        return
+        print(f"[DEBUG] filtered_df empty! test_market={test_market}")  # ← 추가
+        return        
         
 
 
@@ -679,9 +686,13 @@ def run(test_market='WW', key_prefix='ww'):
     st.markdown("---")
 
     
-    if selected_app == 'All':
-    # 캐릭터 이미지 로드 (없으면 이모지 폴백)
 
+    # if selected_app == 'All' and test_market == 'WW':
+    if selected_app == 'All':
+
+
+    # 캐릭터 이미지 로드 (없으면 이모지 폴백)
+        
         chars = [
             ("assets/characters/dino.png",    "🦖"),
             ("assets/characters/prison.jpeg", "🚔"),
@@ -1260,4 +1271,6 @@ def run(test_market='WW', key_prefix='ww'):
 
 if __name__ == "__main__":
     run()
+
+
 
