@@ -3,10 +3,11 @@ Super Crema - Creative Intelligence Platform
 """
 
 import streamlit as st
-from modules.auth_simple import check_authentication, show_login_page, logout, log_action, _init_cookie
+from streamlit_cookies_controller import CookieController
+from modules.auth_simple import check_authentication, show_login_page, logout, log_action
 import random
 
-_init_cookie()
+st.session_state._cookie_ctrl = CookieController()
 
 
 # 랜덤 이모지를 생성하는 함수

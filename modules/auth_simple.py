@@ -18,20 +18,14 @@ from streamlit_cookies_controller import CookieController
 
 # ========== Config ==========
 
-# def _get_cookie():
-#     """세션별 독립 CookieController 반환"""
-#     if '_cookie_ctrl' not in st.session_state:
-#         st.session_state._cookie_ctrl = CookieController()
-#     return st.session_state._cookie_ctrl
 
 
-def _init_cookie():
-    """app.py 최상단에서 호출 — 세션별 독립 인스턴스 보장"""
-    if '_cookie_ctrl' not in st.session_state:
-        st.session_state._cookie_ctrl = CookieController()
 
 def _get_cookie():
     return st.session_state._cookie_ctrl
+
+
+
 
 # ========== Google OAuth 헬퍼 함수 ==========
 def get_google_oauth_flow():
@@ -66,8 +60,6 @@ def get_google_oauth_flow():
 
 
 
-
-
 def get_google_login_url():
     """PKCE 없이 OAuth URL 생성 (Streamlit Cloud 호환)"""
     import urllib.parse
@@ -85,6 +77,8 @@ def get_google_login_url():
         "prompt": "select_account",
     }
     return f"https://accounts.google.com/o/oauth2/auth?{urllib.parse.urlencode(params)}"
+
+
 
 
 def handle_google_callback():
@@ -139,7 +133,6 @@ def handle_google_callback():
         st.error(f"OAuth 처리 실패: {repr(e)}")
         st.query_params.clear()
         return None
-
 
 
 
@@ -252,6 +245,8 @@ def load_users():
             "role": "user",
         },
     }
+
+
 
 # ========== 로그 기록 ==========
 def log_action(user_email, login_method, action):
@@ -475,9 +470,6 @@ def show_login_page():
                         st.rerun()
                     else:
                         st.error(message)
-
-
-
 
 
 
