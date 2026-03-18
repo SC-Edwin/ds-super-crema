@@ -294,15 +294,9 @@ def check_authentication():
         st.session_state.user_name = cookie.get('sc_name')
         st.session_state.user_role = cookie.get('sc_role')
         st.session_state.login_method = cookie.get('sc_method')
+        return True
 
-    # 쿠키 복원 성공
-    st.session_state._cookie_load_attempted = False
-    st.session_state.authenticated = True
-    st.session_state.user_email = email
-    st.session_state.user_name = _get_cookie().get('sc_name')
-    st.session_state.user_role = _get_cookie().get('sc_role')
-    st.session_state.login_method = _get_cookie().get('sc_method')
-    return True
+    return False
 
 
 
