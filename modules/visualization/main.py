@@ -1016,7 +1016,7 @@ def run(test_market='WW', key_prefix='ww'):
 
                             # Row 2
                             with row2_col1:
-                                st.markdown("###### 🔄 CVR (D1-3)")
+                                st.markdown("###### 🔄 CVR (D1-3, clicks기준)")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="cvr_sum_1to3",
                                     text="cvr_sum_1to3", theme=theme, height=chart_height,
@@ -1206,7 +1206,7 @@ def run(test_market='WW', key_prefix='ww'):
                                 st.plotly_chart(fig, width="stretch", key=f'ctr_{future_net}_{past_net}_{past_idx}')
 
                             with row1_col3:
-                                st.markdown("##### 🔄 CVR (D1-3)")
+                                st.markdown("##### 🔄 CVR (D1-3, clicks기준)")
                                 fig = bar_with_headroom(
                                     top_10_bubble, x="subject_label", y="cvr_sum_1to3",
                                     text="cvr_sum_1to3", theme=theme, height=chart_height,
