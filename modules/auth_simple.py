@@ -4,18 +4,33 @@
 
 import hashlib
 import os
+import uuid
 from datetime import datetime
 
 import streamlit as st
 from google.cloud import bigquery
 
 
+def debug_log(event, **kwargs):
+    ts = datetime.utcnow().isoformat()
+    run_id = st.session_state.setdefault("_run_id", str(uuid.uuid4())[:8])
+
+    payload = {
+        "ts": ts,
+        "run_id": run_id,
+        "event": event,
+        **kwargs,
+    }
+
+    print(f"[SC-AUTH] {payload}")
+
+    st.session_state.setdefault("_debug_logs", []).append(payload)
+    if len(st.session_state["_debug_logs"]) > 300:
+        st.session_state["_debug_logs"] = st.session_state["_debug_logs"][-300:]
+
+
 # ========== Google OAuth 헬퍼 함수 ==========
 def get_google_oauth_flow():
-    """
-    필요 시 확장용으로 유지.
-    현재 구현은 direct token exchange를 사용하므로 실제 로그인 흐름에서는 직접 안 씀.
-    """
     from google_auth_oauthlib.flow import Flow
 
     redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
@@ -41,12 +56,15 @@ def get_google_oauth_flow():
 
 
 def get_google_login_url():
-    """PKCE 없이 OAuth URL 생성 (Streamlit Cloud 호환)"""
     import urllib.parse
 
     redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
-    print(f"[OAUTH] STREAMLIT_ENV={os.getenv('STREAMLIT_ENV')}")
-    print(f"[OAUTH] redirect_uri={redirect_uri}")
+
+    debug_log(
+        "oauth_login_url_build",
+        streamlit_env=os.getenv("STREAMLIT_ENV"),
+        redirect_uri=redirect_uri,
+    )
 
     params = {
         "response_type": "code",
@@ -60,12 +78,12 @@ def get_google_login_url():
 
 
 def handle_google_callback():
-    """PKCE 없이 토큰 교환 (세션 유실에 안전)"""
     import requests as req
 
     query_params = st.query_params
 
     if "code" not in query_params:
+        debug_log("oauth_callback_no_code")
         return None
 
     code = query_params.get("code")
@@ -73,9 +91,12 @@ def handle_google_callback():
         code = code[0]
 
     if st.session_state.get("oauth_code_used") == code:
+        debug_log("oauth_callback_code_already_used")
         return None
 
     try:
+        debug_log("oauth_token_exchange_start")
+
         token_resp = req.post(
             "https://oauth2.googleapis.com/token",
             data={
@@ -88,6 +109,8 @@ def handle_google_callback():
             timeout=20,
         )
         token_data = token_resp.json()
+
+        debug_log("oauth_token_exchange_response", token_keys=list(token_data.keys()))
 
         if "error" in token_data:
             raise Exception(f"{token_data['error']}: {token_data.get('error_description', '')}")
@@ -102,9 +125,12 @@ def handle_google_callback():
             requests.Request(),
             st.secrets["google_oauth"]["client_id"],
         )
-        return idinfo.get("email")
+        email = idinfo.get("email")
+        debug_log("oauth_callback_verified", email=email)
+        return email
 
     except Exception as e:
+        debug_log("oauth_callback_error", error=repr(e))
         if "invalid_grant" in str(e):
             st.query_params.clear()
             st.rerun()
@@ -113,7 +139,6 @@ def handle_google_callback():
         return None
 
 
-# ========== 유저 목록 ==========
 @st.cache_data(ttl=300)
 def load_users():
     def h(pw: str) -> str:
@@ -142,9 +167,7 @@ def load_users():
     }
 
 
-# ========== 로그 기록 ==========
 def log_action(user_email, login_method, action):
-    """BigQuery에 로그 저장 (현재는 print만 사용)"""
     print(f"[LOG] {user_email} - {login_method} - {action}")
     return
 
@@ -167,7 +190,6 @@ def log_action(user_email, login_method, action):
         print(f"Log error: {e}")
 
 
-# ========== Cookie Helpers ==========
 COOKIE_KEYS = ["sc_email", "sc_name", "sc_role", "sc_method"]
 
 
@@ -177,20 +199,27 @@ def _is_cookie_ready():
 
 def _queue_cookie_op(op, *args):
     st.session_state.setdefault("_pending_cookie_ops", []).append((op, args))
+    debug_log(
+        "queue_cookie_op",
+        op=op,
+        args_repr=repr(args),
+        queue_size=len(st.session_state["_pending_cookie_ops"]),
+    )
 
 
 def _flush_cookie_ops():
-    """
-    readiness 이후에 대기 중인 cookie 작업들을 반영.
-    """
     if not _is_cookie_ready():
+        debug_log("flush_cookie_ops_skipped_not_ready")
         return
 
     controller = st.session_state.get("_cookie_ctrl")
     if controller is None:
+        debug_log("flush_cookie_ops_skipped_no_controller")
         return
 
     pending = st.session_state.get("_pending_cookie_ops", [])
+    debug_log("flush_cookie_ops_start", pending_count=len(pending))
+
     if not pending:
         return
 
@@ -198,26 +227,36 @@ def _flush_cookie_ops():
     for op, args in pending:
         try:
             getattr(controller, op)(*args)
-        except Exception:
+            debug_log("flush_cookie_op_success", op=op, args_repr=repr(args))
+        except Exception as e:
             remain.append((op, args))
+            debug_log("flush_cookie_op_error", op=op, args_repr=repr(args), error=repr(e))
 
     st.session_state["_pending_cookie_ops"] = remain
+    debug_log("flush_cookie_ops_done", remain_count=len(remain))
 
 
 def _save_session_cookie(user_email, user_name, user_role, login_method):
-    """
-    cookie가 아직 준비 안 됐으면 queue에 넣고,
-    준비됐으면 즉시 set.
-    """
     controller = st.session_state.get("_cookie_ctrl")
     if controller is None:
+        debug_log("save_cookie_no_controller")
         return False
+
+    debug_log(
+        "save_cookie_start",
+        cookie_ready=_is_cookie_ready(),
+        user_email=user_email,
+        user_name=user_name,
+        user_role=user_role,
+        login_method=login_method,
+    )
 
     if not _is_cookie_ready():
         _queue_cookie_op("set", "sc_email", user_email)
         _queue_cookie_op("set", "sc_name", user_name)
         _queue_cookie_op("set", "sc_role", user_role)
         _queue_cookie_op("set", "sc_method", login_method)
+        debug_log("save_cookie_queued_not_ready")
         return False
 
     try:
@@ -225,91 +264,115 @@ def _save_session_cookie(user_email, user_name, user_role, login_method):
         controller.set("sc_name", user_name)
         controller.set("sc_role", user_role)
         controller.set("sc_method", login_method)
+        debug_log("save_cookie_success")
         return True
-    except Exception:
+    except Exception as e:
         _queue_cookie_op("set", "sc_email", user_email)
         _queue_cookie_op("set", "sc_name", user_name)
         _queue_cookie_op("set", "sc_role", user_role)
         _queue_cookie_op("set", "sc_method", login_method)
+        debug_log("save_cookie_error_queued", error=repr(e))
         return False
 
 
 def _clear_session_cookie():
     controller = st.session_state.get("_cookie_ctrl")
     if controller is None:
+        debug_log("clear_cookie_no_controller")
         return False
 
     if not _is_cookie_ready():
         for key in COOKIE_KEYS:
             _queue_cookie_op("remove", key)
+        debug_log("clear_cookie_queued_not_ready")
         return False
 
     ok = True
     for key in COOKIE_KEYS:
         try:
             controller.remove(key)
-        except Exception:
+            debug_log("clear_cookie_removed", key=key)
+        except Exception as e:
             _queue_cookie_op("remove", key)
+            debug_log("clear_cookie_remove_error", key=key, error=repr(e))
             ok = False
     return ok
 
 
-# ========== 인증 상태 확인 ==========
 def check_authentication():
-    """
-    우선순위:
-    1. 현재 st.session_state에 이미 인증됨
-    2. 준비 완료된 쿠키에서 복원
-    """
+    debug_log(
+        "check_auth_start",
+        authenticated=st.session_state.get("authenticated"),
+        cookie_ready=_is_cookie_ready(),
+    )
+
     if st.session_state.get("authenticated", False):
+        debug_log("check_auth_session_already_authenticated")
         _flush_cookie_ops()
         return True
 
     controller = st.session_state.get("_cookie_ctrl")
     if controller is None:
+        debug_log("check_auth_no_controller")
         return False
 
     if not _is_cookie_ready():
+        debug_log("check_auth_cookie_not_ready")
         return False
 
     _flush_cookie_ops()
 
     try:
         email = controller.get("sc_email")
-        if not email:
-            return False
-
         name = controller.get("sc_name")
         role = controller.get("sc_role")
         login_method = controller.get("sc_method")
+
+        debug_log(
+            "check_auth_cookie_values",
+            email=repr(email),
+            name=repr(name),
+            role=repr(role),
+            login_method=repr(login_method),
+        )
+
+        if not email:
+            debug_log("check_auth_no_email_in_cookie")
+            return False
 
         st.session_state["authenticated"] = True
         st.session_state["user_email"] = email
         st.session_state["user_name"] = name or ""
         st.session_state["user_role"] = role or "user"
         st.session_state["login_method"] = login_method or "password"
+
+        debug_log("check_auth_restored_from_cookie", user_email=email)
         return True
 
-    except Exception:
+    except Exception as e:
+        debug_log("check_auth_exception", error=repr(e))
         return False
 
 
-# ========== 로그인 ==========
 def login_with_password(username, password):
-    """ID/PW 로그인"""
     users = load_users()
 
+    debug_log("login_with_password_attempt", username=username)
+
     if username not in users:
+        debug_log("login_with_password_user_not_found", username=username)
         return False, "사용자를 찾을 수 없습니다"
 
     user = users[username]
 
     if user["password_hash"] is None:
+        debug_log("login_with_password_google_only", username=username)
         return False, "이 계정은 Google 로그인만 가능합니다"
 
     password_hash = hashlib.sha256(password.encode()).hexdigest()
 
     if password_hash != user["password_hash"]:
+        debug_log("login_with_password_wrong_password", username=username)
         return False, "비밀번호가 일치하지 않습니다"
 
     st.session_state["authenticated"] = True
@@ -320,16 +383,19 @@ def login_with_password(username, password):
 
     _save_session_cookie(username, user["name"], user["role"], "password")
     log_action(username, "password", "login")
+    debug_log("login_with_password_success", username=username)
 
     return True, "로그인 성공"
 
 
 def login_with_google(email):
-    """Google 로그인 - Supercent 도메인이면 자동 허용"""
     allowed_domains = ["@supercent.io"]
     allowed_emails = ["rumble@supercent.vn"]
 
+    debug_log("login_with_google_attempt", email=email)
+
     if not any(email.endswith(domain) for domain in allowed_domains) and email not in allowed_emails:
+        debug_log("login_with_google_rejected", email=email)
         return False, "🚫 Supercent 계정만 사용 가능합니다"
 
     name = email.split("@")[0].capitalize()
@@ -344,11 +410,18 @@ def login_with_google(email):
 
     _save_session_cookie(email, name, role, "google")
     log_action(email, "google", "login")
+    debug_log("login_with_google_success", email=email, role=role)
 
     return True, f"✅ 환영합니다, {name}님!"
 
 
 def logout():
+    debug_log(
+        "logout_start",
+        user_email=st.session_state.get("user_email"),
+        login_method=st.session_state.get("login_method"),
+    )
+
     _clear_session_cookie()
 
     for key in [
@@ -361,10 +434,10 @@ def logout():
         if key in st.session_state:
             del st.session_state[key]
 
+    debug_log("logout_done")
 
-# ========== 로그인 UI ==========
+
 def show_login_page():
-    """통합 로그인 페이지"""
     st.markdown("""
     <div class="super-crema-header">
         <h1 class="super-crema-title">🎬 SUPER CREMA</h1>

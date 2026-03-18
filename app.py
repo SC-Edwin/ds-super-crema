@@ -3,10 +3,36 @@ Super Crema - Creative Intelligence Platform
 """
 
 import random
-import streamlit as st
+import uuid
+from datetime import datetime
 
+import streamlit as st
 from streamlit_cookies_controller import CookieController
-from modules.auth_simple import check_authentication, show_login_page, logout, log_action
+
+from modules.auth_simple import (
+    check_authentication,
+    show_login_page,
+    logout,
+    log_action,
+)
+
+
+def debug_log(event, **kwargs):
+    ts = datetime.utcnow().isoformat()
+    run_id = st.session_state.setdefault("_run_id", str(uuid.uuid4())[:8])
+
+    payload = {
+        "ts": ts,
+        "run_id": run_id,
+        "event": event,
+        **kwargs,
+    }
+
+    print(f"[SC-DEBUG] {payload}")
+
+    st.session_state.setdefault("_debug_logs", []).append(payload)
+    if len(st.session_state["_debug_logs"]) > 300:
+        st.session_state["_debug_logs"] = st.session_state["_debug_logs"][-300:]
 
 
 def init_cookie_controller():
@@ -19,37 +45,43 @@ def init_cookie_controller():
         st.session_state["_cookie_ready"] = False
         st.session_state["_cookie_bootstrap_tried"] = False
         st.session_state["_pending_cookie_ops"] = []
+        debug_log("cookie_controller_created")
 
     controller = st.session_state["_cookie_ctrl"]
 
-    # 이미 준비 완료면 그대로 사용
     if st.session_state.get("_cookie_ready", False):
+        debug_log("cookie_controller_already_ready")
         return controller
 
-    # readiness 확인
     try:
         cookies = controller.getAll()
-    except Exception:
+        debug_log(
+            "cookie_getAll_called",
+            cookies_is_none=(cookies is None),
+            cookies_repr=repr(cookies)[:500],
+        )
+    except Exception as e:
         cookies = None
+        debug_log("cookie_getAll_error", error=repr(e))
 
     if cookies is not None:
         st.session_state["_cookie_ready"] = True
+        debug_log("cookie_ready_confirmed")
         return controller
 
-    # 첫 bootstrap 시도에서는 rerun 1회
     if not st.session_state.get("_cookie_bootstrap_tried", False):
         st.session_state["_cookie_bootstrap_tried"] = True
+        debug_log("cookie_bootstrap_rerun")
         st.rerun()
 
-    # 아직도 준비 안 됐으면 현재 run은 더 진행하지 않음
+    debug_log("cookie_not_ready_stop")
     st.stop()
 
 
-# 쿠키 컨트롤러 초기화는 가능한 한 최상단에서 수행
+# 쿠키 컨트롤러 초기화는 최상단에서
 init_cookie_controller()
 
 
-# 랜덤 이모지를 생성하는 함수
 def get_random_animal_emoji():
     animal_emojis = [
         "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯",
@@ -70,20 +102,12 @@ st.set_page_config(
 def apply_theme():
     st.markdown("""
     <style>
-    /* Streamlit 상단 툴바 숨기기 */
     header[data-testid="stHeader"] {
         display: none;
     }
 
-    /* 상단 여백 제거 */
-    .main > div {
-        padding-top: 0rem !important;
-    }
-
-    .main {
-        padding-top: 0rem !important;
-    }
-
+    .main > div,
+    .main,
     .block-container {
         padding-top: 0rem !important;
     }
@@ -102,12 +126,10 @@ def apply_theme():
         text-align: center;
         margin-bottom: 1rem;
         margin-top: 0;
-
         box-shadow:
             0 4px 16px rgba(255, 0, 110, 0.25),
             0 8px 25px rgba(255, 0, 110, 0.15),
             inset 0 2px 10px rgba(255, 255, 255, 0.1);
-
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-bottom: 2px solid rgba(0, 0, 0, 0.2);
     }
@@ -264,12 +286,10 @@ def apply_theme():
         backdrop-filter: blur(15px) !important;
         padding: 3rem 2.5rem !important;
         border-radius: 20px !important;
-
         border: 2px solid rgba(255, 0, 110, 0.4) !important;
         box-shadow:
             0 0 100px rgba(255, 0, 110, 0.5) !important,
             0 0 0 5px rgba(255, 255, 255, 0.05) !important;
-
         transform: perspective(1px) translateZ(0) !important;
         transition: all 0.5s ease-out !important;
     }
@@ -293,18 +313,64 @@ def render_header():
     """, unsafe_allow_html=True)
 
 
+def render_debug_panel():
+    with st.expander("🪵 Debug Logs", expanded=False):
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            if st.button("로그 비우기", use_container_width=True):
+                st.session_state["_debug_logs"] = []
+                st.rerun()
+
+        with col2:
+            show_state = st.checkbox("session_state 보기", value=False)
+
+        logs = st.session_state.get("_debug_logs", [])
+        st.caption(f"최근 로그 {len(logs)}개")
+
+        if logs:
+            st.code("\n".join([str(x) for x in logs[-80:]]), language="python")
+        else:
+            st.info("아직 로그가 없습니다.")
+
+        if show_state:
+            safe_state = {
+                k: v for k, v in st.session_state.items()
+                if k not in {"_cookie_ctrl"}
+            }
+            st.json(safe_state)
+
+
 def main():
+    debug_log(
+        "main_start",
+        authenticated=st.session_state.get("authenticated"),
+        cookie_ready=st.session_state.get("_cookie_ready"),
+        query_params=dict(st.query_params),
+    )
+
     apply_theme()
 
-    if not check_authentication():
+    auth_ok = check_authentication()
+    debug_log(
+        "check_authentication_done",
+        auth_ok=auth_ok,
+        user_email=st.session_state.get("user_email"),
+        login_method=st.session_state.get("login_method"),
+    )
+
+    if not auth_ok:
         if "logout" in st.query_params:
+            debug_log("logout_param_found_on_login_page")
             st.query_params.clear()
         show_login_page()
+        render_debug_panel()
         return
 
     render_header()
 
     if "logout" in st.query_params:
+        debug_log("logout_param_detected_authenticated")
         logout()
         st.query_params.clear()
         st.rerun()
@@ -334,6 +400,8 @@ def main():
         """, unsafe_allow_html=True)
 
     st.markdown("---")
+
+    render_debug_panel()
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊 Performance M/L",
