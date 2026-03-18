@@ -284,16 +284,23 @@ def check_authentication():
     if st.session_state.get('authenticated', False):
         return True
 
-    # 쿠키에서 복원
-
     email = _get_cookie().get('sc_email')
-    if email:
-        st.session_state.user_name = _get_cookie().get('sc_name')
-        st.session_state.user_role = _get_cookie().get('sc_role')
-        st.session_state.login_method = _get_cookie().get('sc_method')
-        return True
 
-    return False
+    # 쿠키 로드 타이밍 이슈: 첫 렌더에서 None일 수 있음 → 1회 rerun
+    if email is None:
+        if not st.session_state.get('_cookie_load_attempted', False):
+            st.session_state._cookie_load_attempted = True
+            st.rerun()  # 브라우저 쿠키 로드 대기 후 재시도
+        return False  # 2번째도 None이면 진짜 비로그인
+
+    # 쿠키 복원 성공
+    st.session_state._cookie_load_attempted = False
+    st.session_state.authenticated = True
+    st.session_state.user_email = email
+    st.session_state.user_name = _get_cookie().get('sc_name')
+    st.session_state.user_role = _get_cookie().get('sc_role')
+    st.session_state.login_method = _get_cookie().get('sc_method')
+    return True
 
 
 
