@@ -35,6 +35,8 @@ def debug_log(event, **kwargs):
         st.session_state["_debug_logs"] = st.session_state["_debug_logs"][-300:]
 
 
+
+
 def init_cookie_controller():
     """
     CookieController는 세션당 1회만 생성.
@@ -64,22 +66,26 @@ def init_cookie_controller():
         cookies = None
         debug_log("cookie_getAll_error", error=repr(e))
 
+    if not st.session_state.get("_cookie_bootstrap_tried", False):
+        st.session_state["_cookie_bootstrap_tried"] = True
+        debug_log("cookie_bootstrap_rerun_forced")
+        st.rerun()
+
     if cookies is not None:
         st.session_state["_cookie_ready"] = True
         debug_log("cookie_ready_confirmed")
         return controller
 
-    if not st.session_state.get("_cookie_bootstrap_tried", False):
-        st.session_state["_cookie_bootstrap_tried"] = True
-        debug_log("cookie_bootstrap_rerun")
-        st.rerun()
-
     debug_log("cookie_not_ready_stop")
     st.stop()
 
 
+
+
 # 쿠키 컨트롤러 초기화는 최상단에서
 init_cookie_controller()
+
+
 
 
 def get_random_animal_emoji():
@@ -97,6 +103,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+
+
+
+
 
 
 def apply_theme():
@@ -302,6 +312,9 @@ def apply_theme():
     }
     </style>
     """, unsafe_allow_html=True)
+
+
+
 
 
 def render_header():
