@@ -202,6 +202,7 @@ def show_login_page():
                     st.success(message)
                     st.query_params.clear()
                     st.session_state['_cookie_just_set'] = True
+                    st.rerun()
                 else:
                     st.error(message)
                     st.query_params.clear()
@@ -226,10 +227,11 @@ def show_login_page():
                 username = st.text_input("Username", key="local_username_2", placeholder="아이디 입력")
                 password = st.text_input("Password", type="password", key="local_password_2", placeholder="비밀번호 입력")
                 submitted = st.form_submit_button("Login", use_container_width=True)
-                # 수정
                 if submitted:
                     success, message = login_with_password(username, password)
                     if success:
+                        st.success(message)
+                        st.session_state['_cookie_just_set'] = True
                         st.rerun()
                     else:
                         st.error(message)
