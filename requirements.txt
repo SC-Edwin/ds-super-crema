@@ -23,8 +23,8 @@ opencv-python-headless
 
 # 5. 외부 모듈 및 기타
 facebook-business
-extra-streamlit-components
-
+streamlit-cookies-controller
+extra-streamlit-components==0.1.60
 
 # 6. Google Ads API
 google-ads==29.2.0
