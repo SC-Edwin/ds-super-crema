@@ -117,8 +117,7 @@ def render_header():
 def main():
     apply_theme()
 
-    if st.session_state.pop('_cookie_just_set', False):
-        st.rerun()
+
 
     if not check_authentication():
         if 'logout' in st.query_params:
