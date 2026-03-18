@@ -8,9 +8,12 @@ import extra_streamlit_components as stx
 from modules.auth_simple import check_authentication, show_login_page, logout, log_action
 
 
-if '_cookie_ctrl' not in st.session_state:
-    st.session_state._cookie_ctrl = stx.CookieManager()
+# 수정 (@st.cache_resource로 감싸기 - 공식 권장 패턴)
+@st.cache_resource
+def get_cookie_manager():
+    return stx.CookieManager()
 
+st.session_state._cookie_ctrl = get_cookie_manager()
 
 # 세션당 1회 생성, bootstrap rerun으로 브라우저 쿠키 로딩 보장
 

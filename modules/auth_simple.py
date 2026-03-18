@@ -6,6 +6,7 @@ import hashlib
 import secrets
 import streamlit as st
 from datetime import datetime, timedelta
+import time
 
 # ========== 서버 메모리 세션 저장소 ==========
 active_sessions = {}  # {token: {email, name, role, method, expires}}
@@ -43,13 +44,18 @@ def _delete_session(token):
 def _get_ctrl():
     return st.session_state.get('_cookie_ctrl')
 
-# 수정
+
+
+
+# 수정 (set 후 짧은 대기 추가)
 def _save_token_cookie(token):
     ctrl = _get_ctrl()
     if ctrl is None:
         return
     try:
-        ctrl.set('sc_session', token)
+        import time
+        ctrl.set('sc_session', token, key='set_session')
+        time.sleep(0.1)  # 브라우저 쿠키 write 완료 대기
     except Exception:
         pass
 
