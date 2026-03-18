@@ -276,14 +276,22 @@ def _save_session_cookie(user_email, user_name, user_role, login_method):
     controller.set('sc_role', user_role)
     controller.set('sc_method', login_method)
 
+
 def check_authentication():
     if st.session_state.get('authenticated', False):
         return True
+
     controller = CookieController()
+
     if not st.session_state.get('_cookie_initialized', False):
         st.session_state._cookie_initialized = True
         st.rerun()
-    email = controller.get('sc_email')
+
+    try:
+        email = controller.get('sc_email')
+    except Exception:
+        return False
+
     if email:
         st.session_state.authenticated = True
         st.session_state.user_email = email
@@ -291,6 +299,7 @@ def check_authentication():
         st.session_state.user_role = controller.get('sc_role')
         st.session_state.login_method = controller.get('sc_method')
         return True
+
     return False
 
 
