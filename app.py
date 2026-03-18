@@ -8,7 +8,10 @@ from streamlit_cookies_controller import CookieController
 from modules.auth_simple import check_authentication, show_login_page, logout, log_action
 import random
 
+# 수정
+# 수정 (매 렌더마다 새 인스턴스로 갱신 + pending 패턴으로 TypeError 방지)
 st.session_state._cookie_ctrl = CookieController()
+
 
 
 # 랜덤 이모지를 생성하는 함수
