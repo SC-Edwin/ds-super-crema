@@ -504,11 +504,12 @@ def show_login_page():
 
                 submitted = st.form_submit_button("Login", use_container_width=True)
 
+
+
                 if submitted:
                     success, message = login_with_password(username, password)
-
                     if success:
                         st.success(message)
-                        st.rerun()
+                        st.session_state['_cookie_just_set'] = True  # rerun 지연 플래그
                     else:
                         st.error(message)

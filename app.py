@@ -350,8 +350,12 @@ def main():
     )
 
     apply_theme()
-
+    # 쿠키 write 완료 후 rerun (한 사이클 뒤)
+    if st.session_state.pop('_cookie_just_set', False):
+        st.rerun()
     auth_ok = check_authentication()
+
+
     debug_log(
         "check_authentication_done",
         auth_ok=auth_ok,
@@ -490,4 +494,3 @@ if __name__ == "__main__":
     main()
 
 
-    
