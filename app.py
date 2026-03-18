@@ -4,10 +4,12 @@ Super Crema - Creative Intelligence Platform
 
 import streamlit as st
 
+from streamlit_cookies_controller import CookieController
 from modules.auth_simple import check_authentication, show_login_page, logout, log_action
 import random
 
-
+if '_cookie_ctrl' not in st.session_state:
+    st.session_state._cookie_ctrl = CookieController()
 
 # 랜덤 이모지를 생성하는 함수
 def get_random_animal_emoji():
@@ -265,6 +267,7 @@ def apply_theme():
 
 
 
+
 def render_header():
     st.markdown("""
     <div class="super-crema-header">
@@ -272,6 +275,7 @@ def render_header():
         <p class="super-crema-subtitle">Creative Intelligence Automation Platform</p>
     </div>
     """, unsafe_allow_html=True)
+
 
 
 
@@ -427,6 +431,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 
 
 

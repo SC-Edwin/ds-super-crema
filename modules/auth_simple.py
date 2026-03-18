@@ -268,30 +268,31 @@ def log_action(user_email, login_method, action):
         # 로그 실패해도 앱은 계속 실행
         print(f"Log error: {e}")
 
-
 def _save_session_cookie(user_email, user_name, user_role, login_method):
-    controller = CookieController()
+    controller = st.session_state.get('_cookie_ctrl')
+    if controller is None:
+        return
     controller.set('sc_email', user_email)
     controller.set('sc_name', user_name)
     controller.set('sc_role', user_role)
     controller.set('sc_method', login_method)
 
 
+
+
 def check_authentication():
     if st.session_state.get('authenticated', False):
         return True
-
-    controller = CookieController()
-
+    controller = st.session_state.get('_cookie_ctrl')
+    if controller is None:
+        return False
     if not st.session_state.get('_cookie_initialized', False):
         st.session_state._cookie_initialized = True
         st.rerun()
-
     try:
         email = controller.get('sc_email')
     except Exception:
         return False
-
     if email:
         st.session_state.authenticated = True
         st.session_state.user_email = email
@@ -299,7 +300,6 @@ def check_authentication():
         st.session_state.user_role = controller.get('sc_role')
         st.session_state.login_method = controller.get('sc_method')
         return True
-
     return False
 
 
@@ -369,13 +369,13 @@ def login_with_google(email):
 
 
 def logout():
-    controller = CookieController()
-    for key in ['sc_email', 'sc_name', 'sc_role', 'sc_method']:
-        controller.set(key, '')
+    controller = st.session_state.get('_cookie_ctrl')
+    if controller:
+        for key in ['sc_email', 'sc_name', 'sc_role', 'sc_method']:
+            controller.set(key, '')
     for key in ['authenticated', 'user_email', 'user_name', 'user_role', 'login_method']:
         if key in st.session_state:
             del st.session_state[key]
-
 
 
 
