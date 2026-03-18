@@ -13,13 +13,16 @@ import os
 import json
 from datetime import timedelta
 from streamlit_cookies_controller import CookieController
-cookie = CookieController()
 
 
 
 # ========== Config ==========
 
-
+def _get_cookie():
+    """세션별 독립 CookieController 반환"""
+    if '_cookie_ctrl' not in st.session_state:
+        st.session_state._cookie_ctrl = CookieController()
+    return st.session_state._cookie_ctrl
 
 
 # ========== Google OAuth 헬퍼 함수 ==========
@@ -270,11 +273,10 @@ def log_action(user_email, login_method, action):
 
 
 def _save_session_cookie(user_email, user_name, user_role, login_method):
-    cookie.set('sc_email', user_email)
-    cookie.set('sc_name', user_name)
-    cookie.set('sc_role', user_role)
-    cookie.set('sc_method', login_method)
-
+    _get_cookie().set('sc_email', user_email)
+    _get_cookie().set('sc_name', user_name)
+    _get_cookie().set('sc_role', user_role)
+    _get_cookie().set('sc_method', login_method)
 
 
 # ========== 인증 함수 ==========
@@ -283,13 +285,12 @@ def check_authentication():
         return True
 
     # 쿠키에서 복원
-    email = cookie.get('sc_email')
+
+    email = _get_cookie().get('sc_email')
     if email:
-        st.session_state.authenticated = True
-        st.session_state.user_email = email
-        st.session_state.user_name = cookie.get('sc_name')
-        st.session_state.user_role = cookie.get('sc_role')
-        st.session_state.login_method = cookie.get('sc_method')
+        st.session_state.user_name = _get_cookie().get('sc_name')
+        st.session_state.user_role = _get_cookie().get('sc_role')
+        st.session_state.login_method = _get_cookie().get('sc_method')
         return True
 
     return False
@@ -363,10 +364,13 @@ def login_with_google(email):
 
 def logout():
     for key in ['sc_email', 'sc_name', 'sc_role', 'sc_method']:
-        cookie.set(key, '')
+        _get_cookie().set(key, '')        
     for key in ['authenticated', 'user_email', 'user_name', 'user_role', 'login_method']:
         if key in st.session_state:
             del st.session_state[key]
+
+
+
 
 
 # ========== 로그인 UI ==========
