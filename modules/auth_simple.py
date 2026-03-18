@@ -21,11 +21,6 @@ from streamlit_cookies_controller import CookieController
 
 
 
-def _get_cookie():
-    return st.session_state._cookie_ctrl
-
-
-
 
 # ========== Google OAuth 헬퍼 함수 ==========
 def get_google_oauth_flow():
@@ -274,33 +269,28 @@ def log_action(user_email, login_method, action):
         print(f"Log error: {e}")
 
 
-
 def _save_session_cookie(user_email, user_name, user_role, login_method):
-    _get_cookie().set('sc_email', user_email)
-    _get_cookie().set('sc_name', user_name)
-    _get_cookie().set('sc_role', user_role)
-    _get_cookie().set('sc_method', login_method)
+    controller = CookieController()
+    controller.set('sc_email', user_email)
+    controller.set('sc_name', user_name)
+    controller.set('sc_role', user_role)
+    controller.set('sc_method', login_method)
 
-
-# ========== 인증 함수 ==========
 def check_authentication():
     if st.session_state.get('authenticated', False):
         return True
-
-    # 첫 렌더: CookieController가 브라우저 쿠키 아직 못 읽음 → 1회 rerun
+    controller = CookieController()
     if not st.session_state.get('_cookie_initialized', False):
         st.session_state._cookie_initialized = True
         st.rerun()
-
-    email = _get_cookie().get('sc_email')
+    email = controller.get('sc_email')
     if email:
         st.session_state.authenticated = True
         st.session_state.user_email = email
-        st.session_state.user_name = _get_cookie().get('sc_name')
-        st.session_state.user_role = _get_cookie().get('sc_role')
-        st.session_state.login_method = _get_cookie().get('sc_method')
+        st.session_state.user_name = controller.get('sc_name')
+        st.session_state.user_role = controller.get('sc_role')
+        st.session_state.login_method = controller.get('sc_method')
         return True
-
     return False
 
 
@@ -369,14 +359,13 @@ def login_with_google(email):
 
 
 
-
 def logout():
+    controller = CookieController()
     for key in ['sc_email', 'sc_name', 'sc_role', 'sc_method']:
-        _get_cookie().set(key, '')   
+        controller.set(key, '')
     for key in ['authenticated', 'user_email', 'user_name', 'user_role', 'login_method']:
         if key in st.session_state:
             del st.session_state[key]
-
 
 
 
