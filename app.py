@@ -305,7 +305,9 @@ def main():
     col1, col2 = st.columns([8.5, 1.5]) 
         
     emoji = get_random_animal_emoji()
-    method_emoji = "🔑" if st.session_state.login_method == 'password' else "🌐"
+    
+    method_emoji = "🔑" if st.session_state.get('login_method') == 'password' else "🌐"
+
     
     with col1:
         pass # 여백 유지
