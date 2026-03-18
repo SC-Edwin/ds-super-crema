@@ -237,42 +237,16 @@ def _flush_cookie_ops():
 
 
 def _save_session_cookie(user_email, user_name, user_role, login_method):
-    controller = st.session_state.get("_cookie_ctrl")
+    controller = st.session_state.get('_cookie_ctrl')
     if controller is None:
-        debug_log("save_cookie_no_controller")
-        return False
-
-    debug_log(
-        "save_cookie_start",
-        cookie_ready=_is_cookie_ready(),
-        user_email=user_email,
-        user_name=user_name,
-        user_role=user_role,
-        login_method=login_method,
-    )
-
-    if not _is_cookie_ready():
-        _queue_cookie_op("set", "sc_email", user_email)
-        _queue_cookie_op("set", "sc_name", user_name)
-        _queue_cookie_op("set", "sc_role", user_role)
-        _queue_cookie_op("set", "sc_method", login_method)
-        debug_log("save_cookie_queued_not_ready")
-        return False
-
+        return
     try:
-        controller.set("sc_email", user_email)
-        controller.set("sc_name", user_name)
-        controller.set("sc_role", user_role)
-        controller.set("sc_method", login_method)
-        debug_log("save_cookie_success")
-        return True
-    except Exception as e:
-        _queue_cookie_op("set", "sc_email", user_email)
-        _queue_cookie_op("set", "sc_name", user_name)
-        _queue_cookie_op("set", "sc_role", user_role)
-        _queue_cookie_op("set", "sc_method", login_method)
-        debug_log("save_cookie_error_queued", error=repr(e))
-        return False
+        controller.set('sc_email', user_email)
+        controller.set('sc_name', user_name)
+        controller.set('sc_role', user_role)
+        controller.set('sc_method', login_method)
+    except Exception:
+        pass
 
 
 def _clear_session_cookie():
@@ -300,58 +274,23 @@ def _clear_session_cookie():
 
 
 def check_authentication():
-    debug_log(
-        "check_auth_start",
-        authenticated=st.session_state.get("authenticated"),
-        cookie_ready=_is_cookie_ready(),
-    )
-
-    if st.session_state.get("authenticated", False):
-        debug_log("check_auth_session_already_authenticated")
-        _flush_cookie_ops()
+    if st.session_state.get('authenticated', False):
         return True
-
-    controller = st.session_state.get("_cookie_ctrl")
+    controller = st.session_state.get('_cookie_ctrl')
     if controller is None:
-        debug_log("check_auth_no_controller")
         return False
-
-    if not _is_cookie_ready():
-        debug_log("check_auth_cookie_not_ready")
-        return False
-
-    _flush_cookie_ops()
-
     try:
-        email = controller.get("sc_email")
-        name = controller.get("sc_name")
-        role = controller.get("sc_role")
-        login_method = controller.get("sc_method")
-
-        debug_log(
-            "check_auth_cookie_values",
-            email=repr(email),
-            name=repr(name),
-            role=repr(role),
-            login_method=repr(login_method),
-        )
-
-        if not email:
-            debug_log("check_auth_no_email_in_cookie")
-            return False
-
-        st.session_state["authenticated"] = True
-        st.session_state["user_email"] = email
-        st.session_state["user_name"] = name or ""
-        st.session_state["user_role"] = role or "user"
-        st.session_state["login_method"] = login_method or "password"
-
-        debug_log("check_auth_restored_from_cookie", user_email=email)
-        return True
-
-    except Exception as e:
-        debug_log("check_auth_exception", error=repr(e))
-        return False
+        email = controller.get('sc_email')
+        if email:
+            st.session_state.authenticated = True
+            st.session_state.user_email = email
+            st.session_state.user_name = controller.get('sc_name') or ''
+            st.session_state.user_role = controller.get('sc_role') or 'user'
+            st.session_state.login_method = controller.get('sc_method') or 'password'
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def login_with_password(username, password):
@@ -416,25 +355,16 @@ def login_with_google(email):
 
 
 def logout():
-    debug_log(
-        "logout_start",
-        user_email=st.session_state.get("user_email"),
-        login_method=st.session_state.get("login_method"),
-    )
-
-    _clear_session_cookie()
-
-    for key in [
-        "authenticated",
-        "user_email",
-        "user_name",
-        "user_role",
-        "login_method",
-    ]:
+    controller = st.session_state.get('_cookie_ctrl')
+    if controller:
+        try:
+            for key in ['sc_email', 'sc_name', 'sc_role', 'sc_method']:
+                controller.remove(key)
+        except Exception:
+            pass
+    for key in ['authenticated', 'user_email', 'user_name', 'user_role', 'login_method']:
         if key in st.session_state:
             del st.session_state[key]
-
-    debug_log("logout_done")
 
 
 def show_login_page():
