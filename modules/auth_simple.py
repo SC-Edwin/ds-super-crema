@@ -292,6 +292,11 @@ def check_authentication():
     if st.session_state.get('authenticated', False):
         return True
 
+    # 첫 렌더: CookieController가 브라우저 쿠키 아직 못 읽음 → 1회 rerun
+    if not st.session_state.get('_cookie_initialized', False):
+        st.session_state._cookie_initialized = True
+        st.rerun()
+
     email = _get_cookie().get('sc_email')
     if email:
         st.session_state.authenticated = True
