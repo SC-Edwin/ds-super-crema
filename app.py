@@ -9,9 +9,6 @@ import random
 
 
 
-
-
-
 # 랜덤 이모지를 생성하는 함수
 def get_random_animal_emoji():
     animal_emojis = [
@@ -20,8 +17,6 @@ def get_random_animal_emoji():
         "🐘", "🦒", "🦓", "🦔", "🐕", "🐈", "🐇", "🐿️", "🦝", "🦛"
     ]
     return random.choice(animal_emojis)
-
-
 
 
 
@@ -280,6 +275,7 @@ def render_header():
 
 
 
+
 def main():
     apply_theme()
     
@@ -317,13 +313,13 @@ def main():
         # Logout 버튼을 쿼리 파라미터를 사용하는 HTML 링크로 대체합니다.
         # '?logout=true' 파라미터를 URL에 추가하여 로그아웃 감지
         st.markdown(f"""
-            <div style="text-align: right; line-height: 1.3; margin-top: 5px;">
-                <p style="font-size: 0.8rem; margin: 0; color: #fff;">
-                    {emoji} {st.session_state.user_name} ({st.session_state.user_role})
-                </p>
-                <p style="font-size: 0.7rem; margin: 0; color: #ccc; opacity: 0.9;">
-                    {method_emoji} {st.session_state.login_method} 
-                    <a href="?logout=true" style="color: #ff006e; margin-left: 5px; text-decoration: none; font-weight: 600;">
+    <div style="text-align: right; line-height: 1.3; margin-top: 5px;">
+        <p style="font-size: 0.8rem; margin: 0; color: #fff;">
+            {emoji} {st.session_state.get('user_name', '')} ({st.session_state.get('user_role', '')})
+        </p>
+        <p style="font-size: 0.7rem; margin: 0; color: #ccc; opacity: 0.9;">
+            {method_emoji} {st.session_state.get('login_method', '')} 
+            <a href="?logout=true" style="color: #ff006e; margin-left: 5px; text-decoration: none; font-weight: 600;">
                         🚪 Logout
                     </a>
                 </p>
@@ -353,7 +349,7 @@ def main():
 
 
     with tab1:
-        log_action(st.session_state.user_email, st.session_state.login_method, 'access_performance_ml')  
+        log_action(st.session_state.get('user_email', ''), st.session_state.get('login_method', ''), 'access_performance_ml')
         st.markdown('<div id="viz-root">', unsafe_allow_html=True)
         from modules.visualization import main as viz_main
         viz_main.run()
@@ -410,7 +406,7 @@ def main():
         st.markdown('</div>', unsafe_allow_html=True)
 
     with tab7:
-        log_action(st.session_state.user_email, st.session_state.login_method, 'access_performance_ml_vn')
+        log_action(st.session_state.get('user_email', ''), st.session_state.get('login_method', ''), 'access_performance_ml_vn')
         st.markdown('<div id="viz-vn-root">', unsafe_allow_html=True)
         try:
             from modules.visualization import main as viz_main
@@ -431,15 +427,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
 
 
 
