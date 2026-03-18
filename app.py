@@ -3,12 +3,14 @@ Super Crema - Creative Intelligence Platform
 """
 
 import streamlit as st
-from modules.auth_simple import check_authentication, show_login_page, logout, log_action, _get_cookie
-
-
-_get_cookie()  # ← 스크립트 최상단에서 CookieController 렌더링 보장
-
+from modules.auth_simple import check_authentication, show_login_page, logout, log_action
 import random
+
+
+
+
+
+
 
 # 랜덤 이모지를 생성하는 함수
 def get_random_animal_emoji():

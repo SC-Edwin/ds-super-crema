@@ -18,11 +18,14 @@ from streamlit_cookies_controller import CookieController
 
 # ========== Config ==========
 
-def _get_cookie():
-    """세션별 독립 CookieController 반환"""
-    if '_cookie_ctrl' not in st.session_state:
-        st.session_state._cookie_ctrl = CookieController()
-    return st.session_state._cookie_ctrl
+# def _get_cookie():
+#     """세션별 독립 CookieController 반환"""
+#     if '_cookie_ctrl' not in st.session_state:
+#         st.session_state._cookie_ctrl = CookieController()
+#     return st.session_state._cookie_ctrl
+
+
+cookie = CookieController()
 
 
 # ========== Google OAuth 헬퍼 함수 ==========
@@ -273,10 +276,10 @@ def log_action(user_email, login_method, action):
 
 
 def _save_session_cookie(user_email, user_name, user_role, login_method):
-    _get_cookie().set('sc_email', user_email)
-    _get_cookie().set('sc_name', user_name)
-    _get_cookie().set('sc_role', user_role)
-    _get_cookie().set('sc_method', login_method)
+    cookie.set('sc_email', user_email)
+    cookie.set('sc_name', user_name)
+    cookie.set('sc_role', user_role)
+    cookie.set('sc_method', login_method)
 
 
 # ========== 인증 함수 ==========
@@ -284,14 +287,13 @@ def check_authentication():
     if st.session_state.get('authenticated', False):
         return True
 
-    email = _get_cookie().get('sc_email')
-
-    # 쿠키 로드 타이밍 이슈: 첫 렌더에서 None일 수 있음 → 1회 rerun
-    if email is None:
-        if not st.session_state.get('_cookie_load_attempted', False):
-            st.session_state._cookie_load_attempted = True
-            st.rerun()  # 브라우저 쿠키 로드 대기 후 재시도
-        return False  # 2번째도 None이면 진짜 비로그인
+    email = cookie.get('sc_email')
+    if email:
+        st.session_state.authenticated = True
+        st.session_state.user_email = email
+        st.session_state.user_name = cookie.get('sc_name')
+        st.session_state.user_role = cookie.get('sc_role')
+        st.session_state.login_method = cookie.get('sc_method')
 
     # 쿠키 복원 성공
     st.session_state._cookie_load_attempted = False
@@ -371,7 +373,7 @@ def login_with_google(email):
 
 def logout():
     for key in ['sc_email', 'sc_name', 'sc_role', 'sc_method']:
-        _get_cookie().set(key, '')        
+        cookie.set(key, '')   
     for key in ['authenticated', 'user_email', 'user_name', 'user_role', 'login_method']:
         if key in st.session_state:
             del st.session_state[key]
