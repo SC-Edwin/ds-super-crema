@@ -4,17 +4,15 @@ Super Crema - Creative Intelligence Platform
 
 import random
 import streamlit as st
-from streamlit_cookies_controller import CookieController
+import extra_streamlit_components as stx
 from modules.auth_simple import check_authentication, show_login_page, logout, log_action
 
-# 세션당 1회 생성, bootstrap rerun으로 브라우저 쿠키 로딩 보장
-if '_cookie_ctrl' not in st.session_state:
-    st.session_state._cookie_ctrl = CookieController()
-    st.session_state._cookie_bootstrapped = False
 
-if not st.session_state.get('_cookie_bootstrapped', False):
-    st.session_state._cookie_bootstrapped = True
-    st.rerun()
+if '_cookie_ctrl' not in st.session_state:
+    st.session_state._cookie_ctrl = stx.CookieManager()
+
+
+# 세션당 1회 생성, bootstrap rerun으로 브라우저 쿠키 로딩 보장
 
 
 def get_random_animal_emoji():
@@ -221,5 +219,11 @@ def main():
     st.caption("© 2025 Super Crema - Supercent Marketing Intelligence Team")
 
 
+
+
+
 if __name__ == "__main__":
     main()
+
+
+

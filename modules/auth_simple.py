@@ -1,11 +1,77 @@
 """
 통합 인증 모듈 (Google + ID/PW)
+서버 세션 토큰 방식: 쿠키엔 토큰 1개, 유저 정보는 서버 메모리
 """
 import hashlib
-import os
+import secrets
 import streamlit as st
-from datetime import datetime
-from streamlit_cookies_controller import CookieController
+from datetime import datetime, timedelta
+
+# ========== 서버 메모리 세션 저장소 ==========
+active_sessions = {}  # {token: {email, name, role, method, expires}}
+SESSION_EXPIRE_HOURS = 24 * 7  # 7일
+
+
+def _create_session(email, name, role, method):
+    token = secrets.token_urlsafe(32)
+    active_sessions[token] = {
+        "email": email,
+        "name": name,
+        "role": role,
+        "method": method,
+        "expires": datetime.now() + timedelta(hours=SESSION_EXPIRE_HOURS),
+    }
+    return token
+
+
+def _validate_session(token):
+    if not token or token not in active_sessions:
+        return None
+    session = active_sessions[token]
+    if datetime.now() > session["expires"]:
+        del active_sessions[token]
+        return None
+    return session
+
+
+def _delete_session(token):
+    if token and token in active_sessions:
+        del active_sessions[token]
+
+
+# ========== 쿠키 헬퍼 ==========
+def _get_ctrl():
+    return st.session_state.get('_cookie_ctrl')
+
+
+def _save_token_cookie(token):
+    ctrl = _get_ctrl()
+    if ctrl is None:
+        return
+    try:
+        ctrl.set('sc_session', token, expires_at=datetime(2030, 1, 1))
+    except Exception:
+        pass
+
+
+def _get_token_cookie():
+    ctrl = _get_ctrl()
+    if ctrl is None:
+        return None
+    try:
+        return ctrl.get(cookie='sc_session')
+    except Exception:
+        return None
+
+
+def _delete_token_cookie():
+    ctrl = _get_ctrl()
+    if ctrl is None:
+        return
+    try:
+        ctrl.delete('sc_session')
+    except Exception:
+        pass
 
 
 # ========== Google OAuth ==========
@@ -93,42 +159,35 @@ def log_action(user_email, login_method, action):
     print(f"[LOG] {user_email} - {login_method} - {action}")
 
 
-# ========== 쿠키 헬퍼 ==========
-def _get_ctrl():
-    return st.session_state.get('_cookie_ctrl')
-
-def _save_session_cookie(user_email, user_name, user_role, login_method):
-    ctrl = _get_ctrl()
-    if ctrl is None:
-        return
-    try:
-        ctrl.set('sc_email', user_email)
-        ctrl.set('sc_name', user_name)
-        ctrl.set('sc_role', user_role)
-        ctrl.set('sc_method', login_method)
-    except Exception:
-        pass
-
-
 # ========== 인증 함수 ==========
 def check_authentication():
     if st.session_state.get('authenticated', False):
         return True
-    ctrl = _get_ctrl()
-    if ctrl is None:
+    token = _get_token_cookie()
+    if not token:
         return False
-    try:
-        email = ctrl.get('sc_email')
-        if email:
-            st.session_state.authenticated = True
-            st.session_state.user_email = email
-            st.session_state.user_name = ctrl.get('sc_name') or ''
-            st.session_state.user_role = ctrl.get('sc_role') or 'user'
-            st.session_state.login_method = ctrl.get('sc_method') or 'password'
-            return True
-    except Exception:
-        pass
-    return False
+    session = _validate_session(token)
+    if not session:
+        _delete_token_cookie()
+        return False
+    st.session_state.authenticated = True
+    st.session_state.user_email = session["email"]
+    st.session_state.user_name = session["name"]
+    st.session_state.user_role = session["role"]
+    st.session_state.login_method = session["method"]
+    st.session_state._session_token = token
+    return True
+
+
+def _set_session(email, name, role, method):
+    token = _create_session(email, name, role, method)
+    st.session_state.authenticated = True
+    st.session_state.user_email = email
+    st.session_state.user_name = name
+    st.session_state.user_role = role
+    st.session_state.login_method = method
+    st.session_state._session_token = token
+    _save_token_cookie(token)
 
 
 def login_with_password(username, password):
@@ -140,12 +199,7 @@ def login_with_password(username, password):
         return False, "이 계정은 Google 로그인만 가능합니다"
     if hashlib.sha256(password.encode()).hexdigest() != user["password_hash"]:
         return False, "비밀번호가 일치하지 않습니다"
-    st.session_state.authenticated = True
-    st.session_state.user_email = username
-    st.session_state.user_name = user["name"]
-    st.session_state.user_role = user["role"]
-    st.session_state.login_method = "password"
-    _save_session_cookie(username, user["name"], user["role"], "password")
+    _set_session(username, user["name"], user["role"], "password")
     log_action(username, "password", "login")
     return True, "로그인 성공"
 
@@ -157,25 +211,16 @@ def login_with_google(email):
         return False, "🚫 Supercent 계정만 사용 가능합니다"
     name = email.split("@")[0].capitalize()
     role = "admin" if email in ["edwin@supercent.io"] else "user"
-    st.session_state.authenticated = True
-    st.session_state.user_email = email
-    st.session_state.user_name = name
-    st.session_state.user_role = role
-    st.session_state.login_method = "google"
-    _save_session_cookie(email, name, role, "google")
+    _set_session(email, name, role, "google")
     log_action(email, "google", "login")
     return True, f"✅ 환영합니다, {name}님!"
 
 
 def logout():
-    ctrl = _get_ctrl()
-    if ctrl:
-        try:
-            for key in ['sc_email', 'sc_name', 'sc_role', 'sc_method']:
-                ctrl.remove(key)
-        except Exception:
-            pass
-    for key in ['authenticated', 'user_email', 'user_name', 'user_role', 'login_method']:
+    token = st.session_state.get('_session_token')
+    _delete_session(token)
+    _delete_token_cookie()
+    for key in ['authenticated', 'user_email', 'user_name', 'user_role', 'login_method', '_session_token']:
         st.session_state.pop(key, None)
 
 
@@ -199,9 +244,7 @@ def show_login_page():
             if email:
                 success, message = login_with_google(email)
                 if success:
-                    st.success(message)
                     st.query_params.clear()
-                    st.session_state['_cookie_just_set'] = True
                     st.rerun()
                 else:
                     st.error(message)
@@ -230,8 +273,6 @@ def show_login_page():
                 if submitted:
                     success, message = login_with_password(username, password)
                     if success:
-                        st.success(message)
-                        st.session_state['_cookie_just_set'] = True
                         st.rerun()
                     else:
                         st.error(message)
