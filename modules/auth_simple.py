@@ -43,13 +43,13 @@ def _delete_session(token):
 def _get_ctrl():
     return st.session_state.get('_cookie_ctrl')
 
-
+# 수정
 def _save_token_cookie(token):
     ctrl = _get_ctrl()
     if ctrl is None:
         return
     try:
-        ctrl.set('sc_session', token, expires_at=datetime(2030, 1, 1))
+        ctrl.set('sc_session', token)
     except Exception:
         pass
 
