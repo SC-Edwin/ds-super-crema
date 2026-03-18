@@ -8,8 +8,8 @@ from streamlit_cookies_controller import CookieController
 from modules.auth_simple import check_authentication, show_login_page, logout, log_action
 import random
 
-if '_cookie_ctrl' not in st.session_state:
-    st.session_state._cookie_ctrl = CookieController()
+st.session_state._cookie_ctrl = CookieController()
+
 
 # 랜덤 이모지를 생성하는 함수
 def get_random_animal_emoji():
