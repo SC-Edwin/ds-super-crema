@@ -237,58 +237,131 @@ def _upload_creative_set(game: str, idx: int, status: str = "PAUSED"):
         video_ids = settings.get("video_ids", [])
         playable_ids = settings.get("playable_ids", [])
         creative_name = settings.get("generated_name", "")
+        batch_mode = settings.get("batch_mode", False)
+        batch_name_prefix = settings.get("batch_name_prefix", "")
         # Targeting — None means omit from payload (= no customize targeting)
         targeting_languages = settings.get("languages") if settings.get("customize_targeting") else None
         targeting_countries = settings.get("countries") if settings.get("customize_targeting") else None
-        
+
         if not video_ids and not playable_ids:
             st.error("⚠️ Video 또는 Playable을 선택해주세요.")
             return
-        
-        if not creative_name:
-            st.error("⚠️ Creative Set 이름이 필요합니다.")
-            return
-        
-        try:  # ← 여기서 시작
-            with st.status(f"🚀 {len(campaign_ids)}개 캠페인에 업로드 중...", expanded=True) as upload_status:
-                success_count = 0
-                errors = []
-                
-                for cid in campaign_ids:
-                    campaign_label = f"Campaign {cid}"
-                    upload_status.write(f"⏳ {campaign_label} 처리 중...")
-                    
-                    try:
-                        result = _create_creative_set_api(
-                            campaign_id=cid,
-                            name=creative_name,
-                            video_ids=video_ids,
-                            playable_ids=playable_ids,
-                            status=status,
-                            languages=targeting_languages,
-                            countries=targeting_countries,
+
+        if batch_mode:
+            # ── 일괄 생성 모드 ──────────────────────────
+            if not video_ids or not playable_ids:
+                st.error("⚠️ 일괄 모드에서는 Video와 Playable 모두 선택해야 합니다.")
+                return
+
+            # assets 로드 (이름 생성에 필요)
+            assets_key = f"applovin_assets_{game}"
+            assets = st.session_state.get(assets_key, {"videos": [], "playables": []})
+
+            total_sets = len(video_ids) * len(campaign_ids)
+
+            try:
+                with st.status(
+                    f"🚀 일괄 생성 중... ({len(video_ids)}개 비디오 × {len(campaign_ids)}개 캠페인 = {total_sets}개)",
+                    expanded=True,
+                ) as upload_status:
+                    success_count = 0
+                    errors = []
+                    current = 0
+
+                    for v_idx, vid in enumerate(video_ids, 1):
+                        # 비디오별 Creative Set 이름 생성
+                        cs_name = _generate_creative_name([vid], playable_ids, assets)
+                        if batch_name_prefix:
+                            cs_name = f"{batch_name_prefix}_{cs_name}"
+
+                        for c_idx, cid in enumerate(campaign_ids, 1):
+                            current += 1
+                            label = f"[{current}/{total_sets}] {cs_name} → Campaign {cid}"
+                            upload_status.write(f"⏳ {label}")
+
+                            try:
+                                result = _create_creative_set_api(
+                                    campaign_id=cid,
+                                    name=cs_name,
+                                    video_ids=[vid],
+                                    playable_ids=playable_ids,
+                                    status=status,
+                                    languages=targeting_languages,
+                                    countries=targeting_countries,
+                                )
+
+                                if result.get("success"):
+                                    upload_status.write(f"✅ {label}: ID {result.get('id')}")
+                                    success_count += 1
+                                else:
+                                    upload_status.write(f"❌ {label}: {result.get('error')}")
+                                    errors.append(f"{label}: {result.get('error')}")
+                            except Exception as e:
+                                upload_status.write(f"❌ {label}: {str(e)}")
+                                errors.append(f"{label}: {str(e)}")
+
+                    if success_count == total_sets:
+                        upload_status.update(
+                            label=f"✅ 일괄 생성 완료! ({success_count}개 Creative Set)",
+                            state="complete",
                         )
-                        
-                        if result.get("success"):
-                            upload_status.write(f"✅ {campaign_label}: ID {result.get('id')}")
-                            success_count += 1
-                        else:
-                            upload_status.write(f"❌ {campaign_label}: {result.get('error')}")
-                            errors.append(f"{campaign_label}: {result.get('error')}")
-                    except Exception as e:
-                        upload_status.write(f"❌ {campaign_label}: {str(e)}")
-                        errors.append(f"{campaign_label}: {str(e)}")
-                
-                if success_count == len(campaign_ids):
-                    upload_status.update(label=f"✅ 모든 캠페인 업로드 완료! ({success_count}개)", state="complete")
-                elif success_count > 0:
-                    upload_status.update(label=f"⚠️ 일부 완료: {success_count}/{len(campaign_ids)}", state="complete")
-                else:
-                    upload_status.update(label="❌ 업로드 실패", state="error")
-                    
-        except Exception as e:  # ← 외부 예외 처리 (유지!)
-            logger.error(f"Failed to upload creative set: {e}", exc_info=True)
-            st.error(f"❌ Upload error: {e}")
+                    elif success_count > 0:
+                        upload_status.update(
+                            label=f"⚠️ 일부 완료: {success_count}/{total_sets}",
+                            state="complete",
+                        )
+                    else:
+                        upload_status.update(label="❌ 일괄 생성 실패", state="error")
+
+            except Exception as e:
+                logger.error(f"Failed to batch create creative sets: {e}", exc_info=True)
+                st.error(f"❌ Batch upload error: {e}")
+        else:
+            # ── 기존 단일 생성 모드 ──────────────────────────
+            if not creative_name:
+                st.error("⚠️ Creative Set 이름이 필요합니다.")
+                return
+
+            try:
+                with st.status(f"🚀 {len(campaign_ids)}개 캠페인에 업로드 중...", expanded=True) as upload_status:
+                    success_count = 0
+                    errors = []
+
+                    for cid in campaign_ids:
+                        campaign_label = f"Campaign {cid}"
+                        upload_status.write(f"⏳ {campaign_label} 처리 중...")
+
+                        try:
+                            result = _create_creative_set_api(
+                                campaign_id=cid,
+                                name=creative_name,
+                                video_ids=video_ids,
+                                playable_ids=playable_ids,
+                                status=status,
+                                languages=targeting_languages,
+                                countries=targeting_countries,
+                            )
+
+                            if result.get("success"):
+                                upload_status.write(f"✅ {campaign_label}: ID {result.get('id')}")
+                                success_count += 1
+                            else:
+                                upload_status.write(f"❌ {campaign_label}: {result.get('error')}")
+                                errors.append(f"{campaign_label}: {result.get('error')}")
+                        except Exception as e:
+                            upload_status.write(f"❌ {campaign_label}: {str(e)}")
+                            errors.append(f"{campaign_label}: {str(e)}")
+
+                    if success_count == len(campaign_ids):
+                        upload_status.update(label=f"✅ 모든 캠페인 업로드 완료! ({success_count}개)", state="complete")
+                    elif success_count > 0:
+                        upload_status.update(label=f"⚠️ 일부 완료: {success_count}/{len(campaign_ids)}", state="complete")
+                    else:
+                        upload_status.update(label="❌ 업로드 실패", state="error")
+
+            except Exception as e:
+                logger.error(f"Failed to upload creative set: {e}", exc_info=True)
+                st.error(f"❌ Upload error: {e}")
 
 
 def _create_creative_set_api(
@@ -1131,13 +1204,29 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
         
         if creative_action == "Create":
             assets = st.session_state.get(assets_key, {"videos": [], "playables": []})
-            
+
             # 현재 선택된 항목 (session_state에서 가져오기)
             current_videos = cur.get("video_ids", [])
             current_playables = cur.get("playable_ids", [])
-            
+
+            # ── 일괄 생성 모드 토글 ──────────────────────────
+            st.markdown("##### ⚡ 일괄 생성 모드")
+            batch_mode = st.toggle(
+                "비디오 1개당 Creative Set 1개 자동 생성",
+                value=cur.get("batch_mode", False),
+                key=f"applovin_batch_mode_{idx}",
+                help="ON = 선택한 비디오 각각에 대해 동일한 Playable을 묶어 Creative Set을 자동 생성합니다. "
+                     "예: 비디오 20개 + Playable 10개 → Creative Set 20개 생성",
+            )
+
+            if batch_mode:
+                st.info("📦 일괄 모드: 선택한 비디오 **각각**에 대해 동일한 Playable 세트를 묶어 Creative Set이 생성됩니다.")
+
+            st.markdown("---")
+
             # Videos 섹션
-            st.markdown("##### 📹 Videos (최대 10개)")
+            max_videos = 30 if batch_mode else 10
+            st.markdown(f"##### 📹 Videos (최대 {max_videos}개)")
             
             if assets["videos"]:
                 # 캠페인 이름 가져오기
@@ -1167,10 +1256,10 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
                 ]
                 
                 selected_video_labels = st.multiselect(
-                    "Video 선택 (최대 10개)",
+                    f"Video 선택 (최대 {max_videos}개)",
                     options=list(video_options.keys()),
                     default=default_video_labels,
-                    max_selections=10,
+                    max_selections=max_videos,
                     key=f"applovin_videos_{idx}",
                 )
                 
@@ -1278,34 +1367,75 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
             st.markdown("---")
 
             # Creative Name 설정
-            st.markdown("##### 📝 Creative Set Name")
-            
-            # 자동 생성된 이름 먼저 계산
-            auto_generated_name = _generate_creative_name(
-                selected_video_ids, 
-                selected_playable_ids,
-                assets
-            )
-            
-            # 텍스트 입력 (placeholder에 자동 생성 이름 표시)
-            custom_name = st.text_input(
-                "Creative Set Name (비워두면 자동 생성)",
-                value=cur.get("custom_name", ""),
-                placeholder=auto_generated_name if auto_generated_name else "예: video123_playable456",
-                key=f"applovin_custom_name_{idx}",
-                help="입력하지 않으면 자동으로 이름이 생성됩니다"
-            )
-            
-            # 최종 이름 결정
-            if custom_name.strip():
-                creative_name = custom_name.strip()
-                st.success(f"✅ 사용할 이름: `{creative_name}`")
-            else:
-                creative_name = auto_generated_name
-                if creative_name:
-                    st.info(f"ℹ️ 자동 생성 이름: `{creative_name}`")
+            if batch_mode:
+                # ── 일괄 모드: 미리보기 ──────────────────────────
+                st.markdown("##### 📝 Creative Set Name (일괄 생성)")
+
+                batch_name_prefix = st.text_input(
+                    "이름 접두사 (선택, 비워두면 자동)",
+                    value=cur.get("batch_name_prefix", ""),
+                    placeholder="예: test_0320",
+                    key=f"applovin_batch_prefix_{idx}",
+                    help="입력하면 각 Creative Set 이름 앞에 붙습니다. 예: test_0320_video101_playabletop10"
+                )
+
+                # 미리보기 생성
+                if selected_video_ids and selected_playable_ids:
+                    preview_names = []
+                    for vid in selected_video_ids:
+                        name = _generate_creative_name([vid], selected_playable_ids, assets)
+                        if batch_name_prefix.strip():
+                            name = f"{batch_name_prefix.strip()}_{name}"
+                        preview_names.append(name)
+
+                    st.success(f"✅ **총 {len(preview_names)}개** Creative Set 생성 예정")
+                    # 처음 5개 + 마지막 1개만 표시
+                    if len(preview_names) <= 6:
+                        for pn in preview_names:
+                            st.caption(f"  • `{pn}`")
+                    else:
+                        for pn in preview_names[:5]:
+                            st.caption(f"  • `{pn}`")
+                        st.caption(f"  • ... ({len(preview_names) - 6}개 생략)")
+                        st.caption(f"  • `{preview_names[-1]}`")
+
+                    creative_name = "__batch__"  # 실행 시 개별 생성
                 else:
                     creative_name = ""
+                    if selected_video_ids and not selected_playable_ids:
+                        st.warning("⚠️ Playable을 선택해주세요.")
+                    elif not selected_video_ids and selected_playable_ids:
+                        st.warning("⚠️ Video를 선택해주세요.")
+            else:
+                # ── 기존 단일 모드 ──────────────────────────
+                st.markdown("##### 📝 Creative Set Name")
+
+                # 자동 생성된 이름 먼저 계산
+                auto_generated_name = _generate_creative_name(
+                    selected_video_ids,
+                    selected_playable_ids,
+                    assets
+                )
+
+                # 텍스트 입력 (placeholder에 자동 생성 이름 표시)
+                custom_name = st.text_input(
+                    "Creative Set Name (비워두면 자동 생성)",
+                    value=cur.get("custom_name", ""),
+                    placeholder=auto_generated_name if auto_generated_name else "예: video123_playable456",
+                    key=f"applovin_custom_name_{idx}",
+                    help="입력하지 않으면 자동으로 이름이 생성됩니다"
+                )
+
+                # 최종 이름 결정
+                if custom_name.strip():
+                    creative_name = custom_name.strip()
+                    st.success(f"✅ 사용할 이름: `{creative_name}`")
+                else:
+                    creative_name = auto_generated_name
+                    if creative_name:
+                        st.info(f"ℹ️ 자동 생성 이름: `{creative_name}`")
+                    else:
+                        creative_name = ""
         
         #Save Seettings
         if creative_action == "Import":
@@ -1317,16 +1447,21 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
                 "selected_creative_set_ids": selected_cs_ids if 'selected_cs_ids' in locals() else [],
             }
         else:  # Create
-            st.session_state.applovin_settings[game] = {
+            save_dict = {
                 "campaign_ids": [str(cid) for cid in campaign_ids],
                 "campaign_id": str(campaign_ids[0]) if campaign_ids else "",  # 하위 호환
                 "creative_action": "Create",
                 "video_ids": selected_video_ids,
                 "playable_ids": selected_playable_ids,
-                "custom_name": custom_name.strip() if custom_name else "",
                 "generated_name": creative_name,
                 "customize_targeting": customize_targeting,
                 "languages": selected_languages,
                 "countries": selected_countries,
+                "batch_mode": batch_mode,
             }
+            if batch_mode:
+                save_dict["batch_name_prefix"] = batch_name_prefix.strip() if batch_name_prefix else ""
+            else:
+                save_dict["custom_name"] = custom_name.strip() if custom_name else ""
+            st.session_state.applovin_settings[game] = save_dict
     
