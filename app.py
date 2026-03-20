@@ -3,7 +3,7 @@ Super Crema - Creative Intelligence Platform
 """
 
 import streamlit as st
-from modules.auth_simple import check_authentication, show_login_page, logout, log_action  # ← 이 줄 추가
+from modules.auth_simple import log_action  # auth disabled for local dev
 
 import random
 
@@ -278,21 +278,30 @@ def render_header():
 def main():
     apply_theme()
     
-    if not check_authentication():
-        if 'logout' in st.query_params:
-            st.query_params.clear()
-        show_login_page()
-        return
+    # # AUTH DISABLED FOR LOCAL DEV
+    # if not check_authentication():
+    #     if 'logout' in st.query_params:
+    #         st.query_params.clear()
+    #     show_login_page()
+    #     return
+    #
+    # # URL에 'logout' 파라미터가 감지되면 로그아웃 처리
+    # if 'logout' in st.query_params:
+    #     logout()
+    #     st.query_params.clear()
+    #     st.rerun()
+    #     return
 
-        
+    # Stub session state for dev (auth disabled)
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = True
+        st.session_state.user_email = "dev@local"
+        st.session_state.user_name = "Dev User"
+        st.session_state.login_method = "password"
+        st.session_state.is_admin = True
+        st.session_state.user_role = "admin"
+
     render_header()
-    
-    # URL에 'logout' 파라미터가 감지되면 로그아웃 처리
-    if 'logout' in st.query_params:
-        logout()
-        st.query_params.clear() # 파라미터 제거
-        st.rerun() # 재실행하여 로그인 페이지로 이동
-        return
 
     # ========== 사용자 정보 + 로그아웃 (옵션 1: 텍스트 링크로 대체) ==========
     
