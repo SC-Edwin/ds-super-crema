@@ -201,6 +201,18 @@ def render_google_settings_panel(
         if ad_groups:
             _render_ad_groups_table(ad_groups)
 
+            # ── 광고그룹 선택 ──
+            ag_select_key = f"{kp}gads_selected_ags_{game}_{idx}"
+            ag_options = [ag["name"] for ag in ad_groups]
+            selected_ag_names = st.multiselect(
+                "배치할 광고그룹 선택",
+                options=ag_options,
+                default=st.session_state.get(ag_select_key, ag_options),
+                key=ag_select_key,
+                help="배치할 광고그룹을 선택하세요. 기본값: 전체 선택",
+            )
+            ad_groups = [ag for ag in ad_groups if ag["name"] in selected_ag_names]
+
             # ── Clone option ──
             from datetime import datetime as _dt
             top_ag = ad_groups[0]
@@ -385,10 +397,19 @@ def _render_category_tabs(
                         + (f" ... +{len(filtered_ags) - 5}" if len(filtered_ags) > 5 else "")
                     )
                 else:
-                    st.caption("해당 카테고리에 맞는 광고그룹이 없습니다.")
+                    st.caption(f"⚠️ 카테고리 매칭 광고그룹 없음 → 전체 광고그룹({len(ad_groups)}개) 사용")
+                    ag_names = [ag["name"] for ag in ad_groups[:5]]
+                    st.markdown(
+                        " / ".join(f"`{n}`" for n in ag_names)
+                        + (f" ... +{len(ad_groups) - 5}" if len(ad_groups) > 5 else "")
+                    )
 
-            # ── GA Library videos ──
-            lib_vids = cat_lib_videos.get(cat_id, [])
+            # ── GA Library videos (업로드 시점 내림차순 정렬) ──
+            lib_vids = sorted(
+                cat_lib_videos.get(cat_id, []),
+                key=lambda v: v.get("creation_time", ""),
+                reverse=True,
+            )
 
             # Build unique display labels for library videos
             # 우선순위: youtube_video_title (원본 파일명) > name > yt_id > resource_name
@@ -486,6 +507,9 @@ def _render_category_tabs(
                     label_visibility="collapsed",
                 )
 
+                if selected_raw:
+                    st.caption(f"✅ {len(selected_raw)}개 선택됨")
+
                 # Auto-select orientation variants button
                 auto_key = f"{kp}gads_auto_orient_{cat_id}_{game}_{idx}"
                 if selected_raw and st.button(
@@ -507,8 +531,29 @@ def _render_category_tabs(
             lib_play_names = [p["name"] for p in lib_plays]
             lib_play_rn_map = {p["name"]: p["resource_name"] for p in lib_plays}
 
+            # 로컬라이징/AI/인플루언서 탭: 다른 카테고리 플레이어블도 추가
+            if cat_id != "normal":
+                included_play_names = set(lib_play_rn_map.keys())
+                for other_cat_id, _ in CATEGORIES:
+                    if other_cat_id == cat_id:
+                        continue
+                    for p in cat_lib_playables.get(other_cat_id, []):
+                        if p["name"] not in included_play_names:
+                            included_play_names.add(p["name"])
+                            lib_play_names.append(p["name"])
+                            lib_play_rn_map[p["name"]] = p["resource_name"]
+
             # ── Local (new) playables ──
-            local_plays = cat_local_playables.get(cat_id, [])
+            local_plays = list(cat_local_playables.get(cat_id, []))
+            if cat_id != "normal":
+                seen_local_plays = set(local_plays)
+                for other_cat_id, _ in CATEGORIES:
+                    if other_cat_id == cat_id:
+                        continue
+                    for fn in cat_local_playables.get(other_cat_id, []):
+                        if fn not in seen_local_plays:
+                            seen_local_plays.add(fn)
+                            local_plays.append(fn)
 
             all_play_names = lib_play_names + [n for n in local_plays if n not in lib_play_names]
 
@@ -771,8 +816,12 @@ def distribute_by_category(
         filtered_ags = gads.filter_ad_groups_by_category(ad_groups, cat_id)
         logger.info(f"[distribute] cat={cat_id}: filtered_ags={len(filtered_ags)}")
         if not filtered_ags:
-            all_errors.append(f"[{cat_label}] 해당 카테고리에 맞는 광고그룹이 없습니다.")
-            continue
+            # 매칭 광고그룹 없으면 전체 광고그룹으로 fallback
+            filtered_ags = ad_groups
+            logger.info(f"[distribute] cat={cat_id}: fallback to all ad_groups ({len(filtered_ags)})")
+            if not filtered_ags:
+                all_errors.append(f"[{cat_label}] 광고그룹이 없습니다.")
+                continue
 
         # ── Video distribution for this category ──
         if selected_videos:

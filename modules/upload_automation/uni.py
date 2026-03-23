@@ -33,6 +33,7 @@ from unity_ads import (
     _check_existing_creative,
     _check_existing_pack,
     _clean_playable_name_for_pack,  # 추가
+    _switch_to_next_key,
     get_unity_settings as _get_unity_settings,
     _ensure_unity_settings_state,
     preview_unity_upload as _preview_unity_upload,
@@ -165,24 +166,44 @@ def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List
                 # 모든 pack이 이미 assign됨
                 return result
             
-            # 3. 새 pack들만 assign
+            # 3. 새 pack들만 assign (rate limit 대응: exponential backoff)
             for pack_id in packs_to_assign:
-                try:
-                    time.sleep(0.5)  # rate limit 방지
-                    _unity_assign_creative_pack(
-                        org_id=org_id,
-                        title_id=title_id,
-                        campaign_id=cid,
-                        creative_pack_id=str(pack_id)
-                    )
-                    result["assigned_packs"].append(pack_id)
-                except Exception as e:
-                    error_str = str(e).lower()
-                    if any(keyword in error_str for keyword in ["limit", "maximum", "exceeded", "full", "capacity", "quota"]):
-                        result["errors"].append("Creative pack 개수가 최대입니다.")
-                        break  # 더 이상 시도하지 않음
-                    else:
-                        result["errors"].append(f"Pack {pack_id}: {str(e)}")
+                max_retries = 8
+                for attempt in range(max_retries):
+                    try:
+                        time.sleep(2)  # 기본 딜레이
+                        _unity_assign_creative_pack(
+                            org_id=org_id,
+                            title_id=title_id,
+                            campaign_id=cid,
+                            creative_pack_id=str(pack_id)
+                        )
+                        result["assigned_packs"].append(pack_id)
+                        break  # 성공 시 다음 pack으로
+                    except Exception as e:
+                        error_str = str(e)
+                        error_lower = error_str.lower()
+                        is_capacity = any(kw in error_lower for kw in ["최대", "capacity", "full", "maximum"])
+                        is_rate_limit = "429" in error_str or "quota" in error_lower
+
+                        if is_capacity:
+                            result["errors"].append("Creative pack 개수가 최대입니다.")
+                            break
+                        elif is_rate_limit and "quota" in error_lower:
+                            # Quota 초과: 다음 키로 전환 시도
+                            if _switch_to_next_key():
+                                logger.warning(f"Unity Quota Exceeded on assign → switching to next key")
+                                continue
+                            result["errors"].append(f"⚠️ Rate limit (Quota Exceeded, all keys exhausted): {error_str[:200]}")
+                            return result
+                        elif is_rate_limit and attempt < max_retries - 1:
+                            sleep_sec = 2 ** (attempt + 1)
+                            logger.warning(f"Unity 429 Rate Limit (assign pack {pack_id}, attempt {attempt+1}/{max_retries}). Sleeping {sleep_sec}s...")
+                            time.sleep(sleep_sec)
+                            continue
+                        else:
+                            result["errors"].append(f"Pack {pack_id}: {error_str}")
+                            break
             
         except Exception as e:
             result["errors"].append(str(e))
@@ -416,14 +437,14 @@ def _upload_playable_only_packs(*, game: str, videos: List[Dict], settings: Dict
         for pf in playables:
             pf_name = pf.get("name", "")
             pf_path = pf.get("path", "")
-            
+
             # Pack 이름 생성 (파일명에서 확장자 제거)
             pack_name = _clean_playable_name_for_pack(pf_name)
-            
+
             try:
                 # 1. Playable creative 생성 (또는 기존 것 사용)
                 creative_id = _check_existing_creative(org_id, title_id, pf_name)
-                
+
                 if not creative_id:
                     creative_id = _unity_create_playable_creative(
                         org_id=org_id,
@@ -432,11 +453,11 @@ def _upload_playable_only_packs(*, game: str, videos: List[Dict], settings: Dict
                         name=pf_name,
                         language=lang
                     )
-                    time.sleep(0.5)
-                
+                    time.sleep(2)  # rate limit 방지 (0.5 → 2)
+
                 # 2. Pack 생성 (또는 기존 것 사용)
                 pack_id = _check_existing_pack(org_id, title_id, pack_name)
-                
+
                 if not pack_id:
                     pack_id = _unity_create_creative_pack(
                         org_id=org_id,
@@ -445,12 +466,20 @@ def _upload_playable_only_packs(*, game: str, videos: List[Dict], settings: Dict
                         creative_ids=[creative_id],
                         pack_type="playable"
                     )
-                    time.sleep(0.5)
-                
+                    time.sleep(2)  # rate limit 방지 (0.5 → 2)
+
                 result["creative_ids"].append(pack_id)
-                
+
             except Exception as e:
-                result["errors"].append(f"{pf_name}: {str(e)}")
+                error_str = str(e)
+                is_rate_limit = "429" in error_str or "quota" in error_str.lower()
+                if is_rate_limit and "quota" in error_str.lower():
+                    if "all keys exhausted" not in error_str:
+                        # _unity_post/_unity_get already tried switching — this means all keys are done
+                        pass
+                    result["errors"].append(f"⚠️ Rate limit (Quota Exceeded): {error_str[:200]}")
+                    break  # Quota 초과: 더 이상 시도하지 않음
+                result["errors"].append(f"{pf_name}: {error_str}")
         
         return result
     

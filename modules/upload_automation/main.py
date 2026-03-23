@@ -23,6 +23,7 @@ if root_dir not in sys.path:
 import streamlit as st
 from streamlit.components.v1 import html as components_html 
 from modules.upload_automation import devtools
+from modules.upload_automation.upload_logger import log_event
 
 # --- FIX: ADD CURRENT DIRECTORY TO PATH ---
 # This allows importing sibling files (drive_import, facebook_ads) 
@@ -230,6 +231,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
     _ucp = _key(prefix, "unity_created_packs")
     _tab = _key(prefix, "tab")
     kp = f"{prefix}_" if prefix else ""  # widget key prefix
+    mode_str = "Marketer" if is_marketer else "Test"
 
     st.title(title)
     
@@ -357,8 +359,12 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                     st.success(f"Imported {new_count} videos. ({duplicate_count} duplicates removed)")
                                 else:
                                     st.success(f"Imported {new_count} videos.")
+                                log_event("drive_import", mode=mode_str, game=game, platform=platform,
+                                          upload_method="google_drive", file_count=new_count)
                             except Exception as e:
                                 st.error(f"Import failed: {e}")
+                                log_event("drive_import", mode=mode_str, game=game, platform=platform,
+                                          upload_method="google_drive", error_message=str(e))
                     
                     else:  # 로컬 파일
                         st.markdown("**로컬 컴퓨터에서 Creative Videos를 업로드합니다**")
@@ -429,13 +435,17 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                         st.success(f"✅ {new_count}개 파일 추가됨 ({duplicate_count}개 중복 제거됨)")
                                     else:
                                         st.success(f"✅ {new_count}개 파일 추가됨")
-                                    
+                                    log_event("local_upload", mode=mode_str, game=game, platform=platform,
+                                              upload_method="local", file_count=new_count)
+
                                     # 파일 업로더 초기화 (선택사항)
                                     st.rerun()
-                                    
+
                                 except Exception as e:
                                     st.error(f"파일 추가 실패: {e}")
                                     devtools.record_exception("Local file upload failed", e)
+                                    log_event("local_upload", mode=mode_str, game=game, platform=platform,
+                                              upload_method="local", error_message=str(e))
                         
                         # ✅ 선택된 비디오 초기화 버튼 (file_uploader만 초기화)
                         if uploaded_files or st.session_state.get(f"{kp}local_upload_{game}"):
@@ -514,9 +524,15 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                             with st.expander("⚠️ Upload Errors", expanded=False):
                                                 for err in result["errors"]:
                                                     st.write(f"- {err}")
+                                        log_event("applovin_media_library", mode=mode_str, game=game, platform="Applovin",
+                                                  file_count=len(remote_list), success_count=uploaded_count,
+                                                  error_count=failed_count,
+                                                  error_message="; ".join(result["errors"]) if result["errors"] else None)
                                 except Exception as e:
                                     st.error(f"❌ Media Library 업로드 실패: {e}")
                                     devtools.record_exception("Applovin media library upload failed", e)
+                                    log_event("applovin_media_library", mode=mode_str, game=game, platform="Applovin",
+                                              file_count=len(remote_list), error_message=str(e))
 
                     # --- Action Buttons ---
                     if platform == "Facebook":
@@ -603,12 +619,19 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                         with st.expander("⚠️ Errors"):
                                             for err in errors:
                                                 st.error(err)
-                                    
+
+                                    log_event("mintegral_library", mode=mode_str, game=game, platform="Mintegral",
+                                              file_count=len(remote_list), success_count=success_count,
+                                              error_count=failed_count,
+                                              error_message="; ".join(errors) if errors else None)
+
                                     st.cache_data.clear()
-                                    
+
                                 except Exception as e:
                                     st.error(f"Upload failed: {e}")
                                     devtools.record_exception("Mintegral library upload failed", e)
+                                    log_event("mintegral_library", mode=mode_str, game=game, platform="Mintegral",
+                                              file_count=len(remote_list), error_message=str(e))
 
                         st.write("")  # Spacing
                         cont_mintegral = st.button("Mintegral Creative Set 업로드하기", key=f"{kp}mintegral_upload_{game}", width="stretch")
@@ -773,10 +796,16 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                 with st.expander("⚠️ Upload Errors", expanded=False):
                                     for err in result["errors"]:
                                         st.write(f"- {err}")
+                            log_event("fb_media_library", mode=mode_str, game=game, platform="Facebook",
+                                      file_count=len(remote_list), success_count=uploaded_count,
+                                      error_count=failed_count,
+                                      error_message="; ".join(result["errors"]) if result["errors"] else None)
                     except Exception as e:
                         # 유저에게는 핵심 메시지만 보여주고, traceback은 UI에 노출하지 않음
                         st.error(str(e) if str(e) else "❌ Media Library Upload Error")
-                        
+                        log_event("fb_media_library", mode=mode_str, game=game, platform="Facebook",
+                                  file_count=len(remote_list), error_message=str(e))
+
             # ✅ FACEBOOK DRY RUN 섹션 전체 제거 (449-540줄 정도)
             # --- FACEBOOK DRY RUN ---
             # if platform == "Facebook" and is_marketer and "dry_run_fb" in locals() and dry_run_fb:
@@ -980,9 +1009,19 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                 ok_msg_placeholder.error(errors[0] if errors else "❌ Upload failed.")
                         else:
                             ok_msg_placeholder.error("❌ Upload failed or no Ad Set ID returned.")
+
+                        log_event("fb_upload", mode=mode_str, game=game, platform="Facebook",
+                                  file_count=len(remote_list),
+                                  success_count=plan.get("ads_created") if isinstance(plan, dict) else None,
+                                  error_count=len(plan.get("errors", [])) if isinstance(plan, dict) else None,
+                                  error_message="; ".join(plan.get("errors", [])) if isinstance(plan, dict) and plan.get("errors") else None,
+                                  settings=st.session_state[_st].get(game, {}),
+                                  result={"adset_id": plan.get("adset_id"), "ads_created": plan.get("ads_created")} if isinstance(plan, dict) else None)
                     except Exception as e:
                         # 유저에게는 핵심 메시지만 보여주고, traceback은 UI에 노출하지 않음
                         st.error(str(e) if str(e) else "❌ Upload Error")
+                        log_event("fb_upload", mode=mode_str, game=game, platform="Facebook",
+                                  file_count=len(remote_list), error_message=str(e))
                     finally:
                         # Ensure tab is preserved even after upload
                         st.query_params[_tab] = game
@@ -1117,10 +1156,21 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             
                             if summary.get("errors"):
                                 st.error("\n".join(summary["errors"]))
-                            
+
+                            _total_packs = (sum(len(r.get("creative_ids", [])) for r in summary.get("results_per_platform", {}).values())
+                                            if summary.get("results_per_platform") else len(summary.get("creative_ids", [])))
+                            _all_errors = summary.get("errors", [])
+                            log_event("unity_create", mode=mode_str, game=game, platform="Unity Ads",
+                                      file_count=len(remote_list), success_count=_total_packs,
+                                      error_count=len(_all_errors),
+                                      error_message="; ".join(_all_errors) or None,
+                                      settings=unity_settings)
+
                         except Exception as e:
                             st.error(str(e) if str(e) else "Unity upload failed")
                             devtools.record_exception("Unity upload failed", e)
+                            log_event("unity_create", mode=mode_str, game=game, platform="Unity Ads",
+                                      file_count=len(remote_list), error_message=str(e))
                         finally:
                             # Ensure tab is preserved even after upload
                             st.query_params[_tab] = game
@@ -1175,9 +1225,20 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             if res.get("errors"):
                                 st.error("\n".join(res["errors"]))
 
+                            _apply_success = (total_assigned if res.get("results_per_campaign")
+                                              else len(res.get("assigned_packs", [])))
+                            _apply_errors = res.get("errors", [])
+                            log_event("unity_apply", mode=mode_str, game=game, platform="Unity Ads",
+                                      success_count=_apply_success,
+                                      error_count=len(_apply_errors),
+                                      error_message="; ".join(_apply_errors) or None,
+                                      settings=unity_settings)
+
                         except Exception as e:
                             st.error(str(e) if str(e) else "Unity apply failed")
                             devtools.record_exception("Unity apply failed", e)
+                            log_event("unity_apply", mode=mode_str, game=game, platform="Unity Ads",
+                                      error_message=str(e))
                         finally:
                             # Ensure tab is preserved even after apply
                             st.query_params[_tab] = game
@@ -1233,7 +1294,13 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                     
                                     # ✅ 로그 파일 확인 안내
                                     st.info("💡 더 자세한 로그는 Streamlit Cloud → Logs 탭에서 확인하세요")
-                        
+
+                                log_event("mintegral_upload", mode=mode_str, game=game, platform="Mintegral",
+                                          success_count=1 if result.get("success") else 0,
+                                          error_count=len(result.get("errors", [])),
+                                          error_message=result.get("error") or ("; ".join(result.get("errors", [])) or None),
+                                          settings=mintegral_settings)
+
                         elif mode == "copy":
                             # Copy mode validation
                             if not mintegral_settings.get("selected_creative_sets"):
@@ -1260,6 +1327,12 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                                 st.error(f"• {err}")
                                     
                                     st.info("💡 더 자세한 로그는 Streamlit Cloud → Logs 탭에서 확인하세요")
+
+                                log_event("mintegral_upload", mode=mode_str, game=game, platform="Mintegral",
+                                          success_count=1 if result.get("success") else 0,
+                                          error_count=len(result.get("errors", [])),
+                                          error_message=result.get("error") or ("; ".join(result.get("errors", [])) or None),
+                                          settings=mintegral_settings)
 
                         elif mode == "delete":
                             # Delete mode validation
@@ -1291,9 +1364,17 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
 
                                     st.info("💡 더 자세한 로그는 Streamlit Cloud → Logs 탭에서 확인하세요")
 
+                                log_event("mintegral_upload", mode=mode_str, game=game, platform="Mintegral",
+                                          success_count=1 if result.get("success") else 0,
+                                          error_count=len(result.get("errors", [])),
+                                          error_message=result.get("error") or ("; ".join(result.get("errors", [])) or None),
+                                          settings=mintegral_settings)
+
                     except Exception as e:
                         st.error(str(e) if str(e) else "Mintegral upload failed")
                         devtools.record_exception("Mintegral upload failed", e)
+                        log_event("mintegral_upload", mode=mode_str, game=game, platform="Mintegral",
+                                  error_message=str(e))
                     finally:
                         st.query_params[_tab] = game
                 
@@ -1314,17 +1395,21 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     
                     if applovin_settings:
                         applovin_module._upload_creative_set(game, i, status="PAUSED")
+                        log_event("applovin_upload", mode=mode_str, game=game, platform="Applovin",
+                                  settings=applovin_settings, result={"status": "PAUSED"})
                     else:
                         applovin_ok_placeholder.warning(f"⚠️ {game}의 Applovin 설정을 먼저 완료해주세요.")
-                
+
                 # Live 버튼 클릭 시
                 if "cont_applovin_live" in locals() and cont_applovin_live:
                     st.query_params[_tab] = game
-                    
+
                     applovin_settings = applovin_module.get_applovin_settings(game)
-                    
+
                     if applovin_settings:
                         applovin_module._upload_creative_set(game, i, status="LIVE")
+                        log_event("applovin_upload", mode=mode_str, game=game, platform="Applovin",
+                                  settings=applovin_settings, result={"status": "LIVE"})
                     else:
                         applovin_ok_placeholder.warning(f"⚠️ {game}의 Applovin 설정을 먼저 완료해주세요.")
                 
@@ -1373,9 +1458,15 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                 with st.expander("에셋 업로드 에러", expanded=False):
                                     for err in result["errors"]:
                                         st.error(f"• {err}")
+                            log_event("google_asset_upload", mode=mode_str, game=game, platform="Google Ads",
+                                      file_count=len(remote_list), success_count=result["success"],
+                                      error_count=result["failed"],
+                                      error_message="; ".join(result["errors"]) if result["errors"] else None)
                         except Exception as e:
                             google_ok_placeholder.error(f"에셋 업로드 실패: {e}")
                             devtools.record_exception("Google Ads asset upload failed", e)
+                            log_event("google_asset_upload", mode=mode_str, game=game, platform="Google Ads",
+                                      file_count=len(remote_list), error_message=str(e))
 
                 # Preview Distribution Plan
                 if "cont_google_preview" in locals() and cont_google_preview:
@@ -1455,9 +1546,16 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             with st.expander("상세 에러 로그", expanded=True):
                                 for err in result["errors"]:
                                     st.error(f"• {err}")
+                        log_event("google_distribute", mode=mode_str, game=game, platform="Google Ads",
+                                  success_count=result.get("total_success", 0),
+                                  error_count=len(result.get("errors", [])),
+                                  error_message="; ".join(result.get("errors", [])) or None,
+                                  result={"details": result.get("details"), "unplaced": len(result.get("unplaced_video_rns", []))})
                     except Exception as e:
                         google_ok_placeholder.error(f"배치 실패: {e}")
                         devtools.record_exception("Google Ads distribute failed", e)
+                        log_event("google_distribute", mode=mode_str, game=game, platform="Google Ads",
+                                  error_message=str(e))
 
                 if "clr_google" in locals() and clr_google:
                     gsk = _key(prefix, "google_settings")
@@ -1623,11 +1721,13 @@ def run():
     with col_mode1:
         if st.button("Test", width="stretch", key="btn_mode_ops"):
             st.session_state["page"] = "Creative 자동 업로드"
+            log_event("mode_select", mode="Test")
             st.rerun()
-            
+
     with col_mode2:
         if st.button("Marketer", width="stretch", key="btn_mode_mkt"):
             st.session_state["page"] = "Creative 자동 업로드 - 마케터"
+            log_event("mode_select", mode="Marketer")
             st.rerun()
 
     # 현재 모드 확인
