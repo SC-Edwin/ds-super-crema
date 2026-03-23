@@ -33,6 +33,7 @@ from unity_ads import (
     _check_existing_creative,
     _check_existing_pack,
     _clean_playable_name_for_pack,  # 추가
+    _switch_to_next_key,
     get_unity_settings as _get_unity_settings,
     _ensure_unity_settings_state,
     preview_unity_upload as _preview_unity_upload,
@@ -189,8 +190,11 @@ def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List
                             result["errors"].append("Creative pack 개수가 최대입니다.")
                             break
                         elif is_rate_limit and "quota" in error_lower:
-                            # Quota 초과: 즉시 중단 (시간이 지나야 해결됨)
-                            result["errors"].append(f"⚠️ Rate limit (Quota Exceeded): {error_str[:200]}")
+                            # Quota 초과: 다음 키로 전환 시도
+                            if _switch_to_next_key():
+                                logger.warning(f"Unity Quota Exceeded on assign → switching to next key")
+                                continue
+                            result["errors"].append(f"⚠️ Rate limit (Quota Exceeded, all keys exhausted): {error_str[:200]}")
                             return result
                         elif is_rate_limit and attempt < max_retries - 1:
                             sleep_sec = 2 ** (attempt + 1)
@@ -470,6 +474,9 @@ def _upload_playable_only_packs(*, game: str, videos: List[Dict], settings: Dict
                 error_str = str(e)
                 is_rate_limit = "429" in error_str or "quota" in error_str.lower()
                 if is_rate_limit and "quota" in error_str.lower():
+                    if "all keys exhausted" not in error_str:
+                        # _unity_post/_unity_get already tried switching — this means all keys are done
+                        pass
                     result["errors"].append(f"⚠️ Rate limit (Quota Exceeded): {error_str[:200]}")
                     break  # Quota 초과: 더 이상 시도하지 않음
                 result["errors"].append(f"{pf_name}: {error_str}")

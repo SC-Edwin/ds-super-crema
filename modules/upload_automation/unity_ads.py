@@ -34,6 +34,29 @@ UNITY_CLIENT_ID_DEFAULT = unity_cfg.get("client_id", "")
 UNITY_CLIENT_SECRET_DEFAULT = unity_cfg.get("client_secret", "")
 UNITY_AUTH_HEADER_DEFAULT = unity_cfg.get("authorization_header", "")
 
+# --- API Key Failover (quota 소진 시 다음 키로 전환) ---
+_UNITY_AUTH_HEADERS: list[str] = [UNITY_AUTH_HEADER_DEFAULT]
+_auth_header_2 = unity_cfg.get("authorization_header_2", "")
+if _auth_header_2:
+    _UNITY_AUTH_HEADERS.append(_auth_header_2)
+    logger.info(f"Unity API key failover enabled: {len(_UNITY_AUTH_HEADERS)} keys loaded")
+
+_unity_current_key_idx = 0  # 현재 사용 중인 키 인덱스
+
+def _get_unity_auth_header() -> str:
+    """현재 활성 API key 반환."""
+    return _UNITY_AUTH_HEADERS[_unity_current_key_idx]
+
+def _switch_to_next_key() -> bool:
+    """Quota 소진 시 다음 키로 전환. 성공하면 True, 더 이상 키가 없으면 False."""
+    global _unity_current_key_idx
+    next_idx = _unity_current_key_idx + 1
+    if next_idx < len(_UNITY_AUTH_HEADERS):
+        _unity_current_key_idx = next_idx
+        logger.warning(f"Unity quota exceeded → switched to key #{next_idx + 1}/{len(_UNITY_AUTH_HEADERS)}")
+        return True
+    return False
+
 # Raw sections from secrets.toml
 _raw_game_ids      = unity_cfg.get("game_ids", {}) or {}       # per-game app ids + maybe campaign-sets (XP HERO)
 _raw_campaign_sets = unity_cfg.get("campaign_sets", {}) or {}  # per-game campaign-set IDs (Dino, Snake, Pizza…)
@@ -766,7 +789,7 @@ def _clean_playable_name_for_pack(playable_name_or_label: str) -> str:
 def _unity_headers() -> dict:
     if not UNITY_AUTH_HEADER_DEFAULT:
         raise RuntimeError("unity.authorization_header is missing in secrets.toml")
-    return {"Authorization": UNITY_AUTH_HEADER_DEFAULT, "Content-Type": "application/json"}
+    return {"Authorization": _get_unity_auth_header(), "Content-Type": "application/json"}
 
 def _unity_post(path: str, json_body: dict) -> dict:
     url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
@@ -786,7 +809,10 @@ def _unity_post(path: str, json_body: dict) -> dict:
                     f"response_body={detail} | rate_headers={rate_headers}"
                 )
                 if "quota" in detail.lower():
-                    raise RuntimeError(f"Unity Quota Exceeded (STOPPING): {detail}")
+                    if _switch_to_next_key():
+                        logger.warning(f"Unity Quota Exceeded on key → switching to next key and retrying")
+                        continue  # 다음 키로 재시도
+                    raise RuntimeError(f"Unity Quota Exceeded (all keys exhausted): {detail}")
 
                 sleep_sec = 2 ** (attempt + 1)
                 logger.warning(f"Unity 429 Rate Limit (attempt {attempt+1}/8). Sleeping {sleep_sec}s...")
@@ -837,6 +863,9 @@ def _unity_get(path: str, params: dict | None = None) -> dict:
                 f"[Unity 429] GET {path} | attempt={attempt+1}/5 | "
                 f"response_body={detail} | rate_headers={rate_headers}"
             )
+            if "quota" in detail.lower() and _switch_to_next_key():
+                logger.warning(f"Unity Quota Exceeded on GET → switching to next key")
+                continue
             sleep_sec = 2 ** (attempt + 1)
             time.sleep(sleep_sec)
             continue
@@ -943,11 +972,11 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
     }
 
     url = f"{UNITY_BASE_URL.rstrip('/')}/organizations/{org_id}/apps/{title_id}/creatives"
-    headers = {"Authorization": UNITY_AUTH_HEADER_DEFAULT}
     last_429_detail: str = ""
 
     for attempt in range(8):
         try:
+            headers = {"Authorization": _get_unity_auth_header()}
             with open(video_path, "rb") as f:
                 files = {
                     "creativeInfo": (None, json.dumps(creative_info), "application/json"),
@@ -964,7 +993,10 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
                     f"response_body={detail} | rate_headers={rate_headers}"
                 )
                 if "quota" in detail.lower():
-                    raise RuntimeError(f"Unity Quota Exceeded (STOPPING): {detail}")
+                    if _switch_to_next_key():
+                        logger.warning(f"Unity Quota Exceeded on CREATE CREATIVE → switching to next key")
+                        continue
+                    raise RuntimeError(f"Unity Quota Exceeded (all keys exhausted): {detail}")
                 sleep_sec = 5 * (attempt + 1)
                 time.sleep(sleep_sec)
                 continue
@@ -1013,8 +1045,7 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
 
     logger.info(f"Unity playable creativeInfo: {json.dumps(creative_info)}")
     url = f"{UNITY_BASE_URL.rstrip('/')}/organizations/{org_id}/apps/{title_id}/creatives"
-    headers = {"Authorization": UNITY_AUTH_HEADER_DEFAULT}
-    
+
     # MIME type 결정 (zip vs html)
     if file_name.lower().endswith(".zip"):
         mime_type = "application/zip"
@@ -1025,6 +1056,7 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
 
     for attempt in range(8):
         try:
+            headers = {"Authorization": _get_unity_auth_header()}
             with open(playable_path, "rb") as f:
                 files = {
                     "creativeInfo": (None, json.dumps(creative_info), "application/json"),
@@ -1040,6 +1072,9 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
                     f"[Unity 429] CREATE PLAYABLE | file={file_name} | attempt={attempt+1}/8 | "
                     f"response_body={detail} | rate_headers={rate_headers}"
                 )
+                if "quota" in detail.lower() and _switch_to_next_key():
+                    logger.warning(f"Unity Quota Exceeded on CREATE PLAYABLE → switching to next key")
+                    continue
                 time.sleep(3 * (attempt + 1))
                 continue
 
