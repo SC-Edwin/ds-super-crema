@@ -618,11 +618,11 @@ def list_video_assets(game_codename: str = None) -> List[Dict]:
     query = """
         SELECT
             asset.resource_name,
+            asset.id,
             asset.name,
             asset.youtube_video_asset.youtube_video_id,
             asset.youtube_video_asset.youtube_video_title,
-            asset.type,
-            asset.creation_time
+            asset.type
         FROM asset
         WHERE asset.type = 'YOUTUBE_VIDEO'
     """
@@ -637,16 +637,16 @@ def list_video_assets(game_codename: str = None) -> List[Dict]:
                 ) or ""
                 # youtube_video_title에 원본 파일명이 들어있으면 우선 사용
                 display_name = yt_title if yt_title else name
-                creation_time = getattr(row.asset, "creation_time", "") or ""
+                asset_id = row.asset.id  # higher ID = newer asset
                 results.append({
                     "resource_name": row.asset.resource_name,
+                    "asset_id": asset_id,
                     "name": display_name,
                     "youtube_video_id": getattr(
                         row.asset.youtube_video_asset, "youtube_video_id", ""
                     ),
                     "youtube_video_title": yt_title,
                     "category": _auto_detect_category(display_name),
-                    "creation_time": creation_time,
                 })
     except Exception as e:
         logger.error(f"Failed to list video assets: {e}")
