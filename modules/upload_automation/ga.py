@@ -798,6 +798,8 @@ def distribute_by_category(
         )
     logger.info(f"[distribute] ad_groups count={len(ad_groups)}, names={[ag['name'] for ag in ad_groups[:5]]}")
 
+    distributed_playable_rns = set()  # 이미 전체 광고그룹에 배치된 playable 추적
+
     for cat_id, cat_label in CATEGORIES:
         sel = category_selections.get(cat_id, {})
         selected_videos = sel.get("selected_videos", [])
@@ -858,32 +860,43 @@ def distribute_by_category(
                     "ad_groups_modified": result["success"],
                 })
 
-        # ── Playable distribution for this category ──
+        # ── Playable distribution: 전체 광고그룹에 배치 (카테고리 무관) ──
         if selected_playables:
             for pname in selected_playables:
                 rn = playable_rns.get(pname)
                 if not rn:
                     all_errors.append(f"[{cat_label}] {pname}: resource name을 찾을 수 없습니다.")
                     continue
+                if rn in distributed_playable_rns:
+                    continue  # 다른 카테고리에서 이미 배치됨
+                distributed_playable_rns.add(rn)
 
                 p_success = 0
                 p_failed = 0
-                for ag in filtered_ags:
-                    try:
-                        app_ad = gads.get_app_ad_resource(campaign_id, ag["id"])
-                        if not app_ad:
-                            all_errors.append(f"[{cat_label}] {ag['name']}: AppAd 없음")
+                for ag in ad_groups:  # 전체 광고그룹
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            app_ad = gads.get_app_ad_resource(campaign_id, ag["id"])
+                            if not app_ad:
+                                all_errors.append(f"[{cat_label}] {ag['name']}: AppAd 없음")
+                                p_failed += 1
+                                break
+                            gads.add_playable_to_app_ad(
+                                app_ad["ad_resource_name"],
+                                app_ad["html5_assets"],
+                                rn,
+                            )
+                            p_success += 1
+                            break
+                        except Exception as e:
+                            if "CONCURRENT_MODIFICATION" in str(e) and attempt < max_retries - 1:
+                                import time
+                                time.sleep(2 * (attempt + 1))
+                                continue
+                            all_errors.append(f"[{cat_label}] {ag['name']}: {e}")
                             p_failed += 1
-                            continue
-                        gads.add_playable_to_app_ad(
-                            app_ad["ad_resource_name"],
-                            app_ad["html5_assets"],
-                            rn,
-                        )
-                        p_success += 1
-                    except Exception as e:
-                        all_errors.append(f"[{cat_label}] {ag['name']}: {e}")
-                        p_failed += 1
+                            break
 
                 total_success += p_success
                 total_failed += p_failed
