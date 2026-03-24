@@ -407,7 +407,7 @@ def _render_category_tabs(
             # ── GA Library videos (업로드 시점 내림차순 정렬) ──
             lib_vids = sorted(
                 cat_lib_videos.get(cat_id, []),
-                key=lambda v: v.get("creation_time", ""),
+                key=lambda v: v.get("asset_id", 0),
                 reverse=True,
             )
 
