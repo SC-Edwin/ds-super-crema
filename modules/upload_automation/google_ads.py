@@ -921,7 +921,11 @@ def add_playable_to_app_ad(
     Add an HTML5 (playable) asset to an AppAd.
     Preserves existing playables.
     """
-    all_html5 = list(current_html5_assets) + [new_html5_asset]
+    # Deduplicate: don't add if already present
+    seen = set(current_html5_assets)
+    all_html5 = list(current_html5_assets)
+    if new_html5_asset not in seen:
+        all_html5.append(new_html5_asset)
 
     client = _get_client()
     ad_service = client.get_service("AdService")
