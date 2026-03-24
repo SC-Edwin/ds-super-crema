@@ -386,24 +386,6 @@ def _render_category_tabs(
 
     for tab_idx, (cat_id, cat_label) in enumerate(CATEGORIES):
         with tabs[tab_idx]:
-            # Show filtered ad groups for this category
-            if ad_groups:
-                filtered_ags = gads.filter_ad_groups_by_category(ad_groups, cat_id)
-                if filtered_ags:
-                    st.caption(f"대상 광고그룹: {len(filtered_ags)}개")
-                    ag_names = [ag["name"] for ag in filtered_ags[:5]]
-                    st.markdown(
-                        " / ".join(f"`{n}`" for n in ag_names)
-                        + (f" ... +{len(filtered_ags) - 5}" if len(filtered_ags) > 5 else "")
-                    )
-                else:
-                    st.caption(f"⚠️ 카테고리 매칭 광고그룹 없음 → 전체 광고그룹({len(ad_groups)}개) 사용")
-                    ag_names = [ag["name"] for ag in ad_groups[:5]]
-                    st.markdown(
-                        " / ".join(f"`{n}`" for n in ag_names)
-                        + (f" ... +{len(ad_groups) - 5}" if len(ad_groups) > 5 else "")
-                    )
-
             # ── GA Library videos (업로드 시점 내림차순 정렬) ──
             lib_vids = sorted(
                 cat_lib_videos.get(cat_id, []),
