@@ -63,17 +63,17 @@ def _strip_yt_suffix(label: str) -> str:
 
 
 def _orientation_sort_key(label: str) -> int:
-    """Sort key for orientation: 정방(square)=0, 가로(landscape)=1, 세로(portrait)=2."""
+    """Sort key for orientation: 세로(portrait)=0, 가로(landscape)=1, 정방(square)=2."""
     m = _RES_PATTERN.search(label)
     if not m:
         return 3
     w, h = int(m.group(1)), int(m.group(2))
-    if w == h:
-        return 0  # 정방
+    if w < h:
+        return 0  # 세로
     elif w > h:
         return 1  # 가로
     else:
-        return 2  # 세로
+        return 2  # 정방
 
 
 def _find_orientation_variants(selected_label: str, all_options: List[str]) -> List[str]:
@@ -497,7 +497,7 @@ def _render_category_tabs(
                 # Auto-select orientation variants button
                 auto_key = f"{kp}gads_auto_orient_{cat_id}_{game}_{idx}"
                 if selected_raw and st.button(
-                    "방향별 자동선택 (정방→가로→세로)",
+                    "방향별 자동선택 (세로→가로→정방)",
                     key=auto_key,
                 ):
                     st.session_state[auto_pending_key] = True
