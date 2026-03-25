@@ -212,6 +212,8 @@ def render_google_settings_panel(
                 help="배치할 광고그룹을 선택하세요. 기본값: 전체 선택",
             )
             ad_groups = [ag for ag in ad_groups if ag["name"] in selected_ag_names]
+            # 선택된 광고그룹 이름을 저장 → distribute_by_category에서 필터링에 사용
+            st.session_state[f"{kp}gads_selected_ag_names_{game}"] = set(selected_ag_names)
 
             # ── Clone option ──
             from datetime import datetime as _dt
@@ -699,10 +701,13 @@ def preview_google_upload(game: str, prefix: str = "") -> Dict:
     if not has_any:
         return {"error": "배치할 소재가 없습니다."}
 
-    # Build preview per category
+    # Build preview per category (유저가 선택한 광고그룹만)
     kp = f"{prefix}_" if prefix else ""
     ag_cache_key = f"{kp}gads_adgroups_{campaign_id}"
     ad_groups = st.session_state.get(ag_cache_key, [])
+    selected_ag_names = st.session_state.get(f"{kp}gads_selected_ag_names_{game}")
+    if selected_ag_names is not None:
+        ad_groups = [ag for ag in ad_groups if ag["name"] in selected_ag_names]
 
     preview_categories = {}
     for cat_id, cat_label in CATEGORIES:
@@ -749,11 +754,16 @@ def distribute_by_category(
     category_selections = settings.get("category_selections", {})
     kp = f"{prefix}_" if prefix else ""
 
-    # Get ad groups
+    # Get ad groups (유저가 선택한 광고그룹만 사용)
     ag_cache_key = f"{kp}gads_adgroups_{campaign_id}"
     ad_groups = st.session_state.get(ag_cache_key, [])
     if not ad_groups:
         return {"success": False, "error": "먼저 광고그룹을 불러와주세요."}
+    selected_ag_names = st.session_state.get(f"{kp}gads_selected_ag_names_{game}")
+    if selected_ag_names is not None:
+        ad_groups = [ag for ag in ad_groups if ag["name"] in selected_ag_names]
+    if not ad_groups:
+        return {"success": False, "error": "배치할 광고그룹을 선택해주세요."}
 
     # Check if any selections exist
     has_any = False
