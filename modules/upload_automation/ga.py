@@ -87,8 +87,8 @@ def _find_orientation_variants(selected_label: str, all_options: List[str]) -> L
     m = _RES_PATTERN.search(name)
     if not m:
         return []
-    # 해상도 앞부분만 비교 (뒤는 방향별로 다를 수 있음)
-    prefix = name[:m.start()]
+    # 해상도+초(s) 앞부분 비교: video588_pizzaidle_en 까지만
+    prefix = re.sub(r"_\d+s_?$", "", name[:m.start()])
     variants = []
     for opt in all_options:
         if opt == selected_label:
@@ -97,7 +97,7 @@ def _find_orientation_variants(selected_label: str, all_options: List[str]) -> L
         m2 = _RES_PATTERN.search(opt_name)
         if not m2:
             continue
-        opt_prefix = opt_name[:m2.start()]
+        opt_prefix = re.sub(r"_\d+s_?$", "", opt_name[:m2.start()])
         if opt_prefix == prefix:
             variants.append(opt)
     variants.sort(key=_orientation_sort_key)
@@ -413,7 +413,7 @@ def _render_category_tabs(
             for label in current:
                 base_key = _strip_yt_suffix(label)
                 m = _RES_PATTERN.search(base_key)
-                bk = base_key[:m.start()] if m else base_key
+                bk = re.sub(r"_\d+s_?$", "", base_key[:m.start()]) if m else base_key
                 if bk in seen:
                     continue
                 seen.add(bk)
