@@ -53,6 +53,8 @@ def _get_game_codename(game: str) -> str:
 
 
 _RES_PATTERN = re.compile(r"(\d{3,4})x(\d{3,4})")
+# Strip resolution + optional duration suffix like "1080x1920_33s" → "{RES}"
+_RES_AND_DURATION = re.compile(r"(\d{3,4})x(\d{3,4})(?:_\d+s)?")
 # Strip trailing YouTube ID suffix like " (abc123)" from display labels
 _YT_SUFFIX = re.compile(r"\s*\([^)]+\)\s*$")
 
@@ -84,7 +86,7 @@ def _find_orientation_variants(selected_label: str, all_options: List[str]) -> L
     Returns list sorted by: 정방 → 가로 → 세로, NOT including the original.
     """
     name = _strip_yt_suffix(selected_label)
-    m = _RES_PATTERN.search(name)
+    m = _RES_AND_DURATION.search(name)
     if not m:
         return []
     base = name[:m.start()] + "{RES}" + name[m.end():]
@@ -93,7 +95,7 @@ def _find_orientation_variants(selected_label: str, all_options: List[str]) -> L
         if opt == selected_label:
             continue
         opt_name = _strip_yt_suffix(opt)
-        m2 = _RES_PATTERN.search(opt_name)
+        m2 = _RES_AND_DURATION.search(opt_name)
         if not m2:
             continue
         opt_base = opt_name[:m2.start()] + "{RES}" + opt_name[m2.end():]
@@ -411,7 +413,7 @@ def _render_category_tabs(
             grouped = []
             for label in current:
                 base_key = _strip_yt_suffix(label)
-                m = _RES_PATTERN.search(base_key)
+                m = _RES_AND_DURATION.search(base_key)
                 bk = base_key[:m.start()] + "{RES}" + base_key[m.end():] if m else base_key
                 if bk in seen:
                     continue
