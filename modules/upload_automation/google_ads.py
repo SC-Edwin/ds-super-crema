@@ -888,8 +888,12 @@ def mutate_app_ad_videos(
     ad = ad_operation.update
     ad.resource_name = ad_resource_name
 
-    # Clear and re-set videos
+    # Clear and re-set videos (deduplicate)
+    seen_videos = set()
     for asset_rn in new_video_assets:
+        if asset_rn in seen_videos:
+            continue
+        seen_videos.add(asset_rn)
         ad_info = client.get_type("AdVideoAsset")
         ad_info.asset = asset_rn
         ad.app_ad.youtube_videos.append(ad_info)
@@ -1071,14 +1075,22 @@ def create_app_ad(
         img.asset = asset_rn
         ad.app_ad.images.append(img)
 
-    # Videos
+    # Videos (deduplicate)
+    seen_vids = set()
     for asset_rn in video_assets:
+        if asset_rn in seen_vids:
+            continue
+        seen_vids.add(asset_rn)
         vid = client.get_type("AdVideoAsset")
         vid.asset = asset_rn
         ad.app_ad.youtube_videos.append(vid)
 
-    # HTML5 / Playables
+    # HTML5 / Playables (deduplicate)
+    seen_html5 = set()
     for asset_rn in html5_assets:
+        if asset_rn in seen_html5:
+            continue
+        seen_html5.add(asset_rn)
         bundle = client.get_type("AdMediaBundleAsset")
         bundle.asset = asset_rn
         ad.app_ad.html5_media_bundles.append(bundle)
