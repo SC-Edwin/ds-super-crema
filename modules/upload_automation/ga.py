@@ -274,8 +274,8 @@ def _render_category_tabs(
     game: str, idx: int, kp: str, sk: str,
     campaign: Dict, ad_groups: List[Dict], prefix: str,
 ) -> None:
-    """Render the 4 category tabs with per-category video/playable selection."""
-    st.markdown("**카테고리별 소재 배치**")
+    """Render unified asset selection (videos + playables) with search."""
+    st.markdown("**소재 선택**")
 
     # ── Fetch GA library assets (cached per game) ──
     lib_video_key = f"{kp}gads_lib_videos_{game}"
@@ -291,17 +291,14 @@ def _render_category_tabs(
                 codename = _get_game_codename(game)
                 campaign_id = campaign.get("id", "")
 
-                # Fetch playables from asset library (works fine)
                 all_playables = gads.list_playable_assets(game_codename=None)
                 if codename:
                     lib_playables = [a for a in all_playables if codename in a["name"].lower()]
                 else:
                     lib_playables = all_playables
 
-                # Fetch videos: try standalone asset library first
                 lib_videos = gads.list_video_assets(game_codename=codename)
 
-                # If standalone query returns 0, try campaign-linked assets
                 if len(lib_videos) == 0 and campaign_id:
                     lib_videos = gads.list_campaign_video_assets(
                         campaign_id=str(campaign_id)
@@ -348,241 +345,167 @@ def _render_category_tabs(
     [data-baseweb="tag"] span { max-width: none !important; }
     </style>""", unsafe_allow_html=True)
 
-    # ── Categorize GA library assets ──
-    # AI 영상은 일반 탭에도 표시
-    cat_lib_videos: Dict[str, List[Dict]] = {cat_id: [] for cat_id, _ in CATEGORIES}
-    for asset in lib_videos:
-        cat = asset.get("category", gads._auto_detect_category(asset["name"]))
-        cat_lib_videos[cat].append(asset)
-        if cat == "AI":
-            cat_lib_videos["normal"].append(asset)
+    # ── Build unified video list (newest first, deduplicated) ──
+    all_lib_vids = sorted(lib_videos, key=lambda v: v.get("asset_id", 0), reverse=True)
 
-    cat_lib_playables: Dict[str, List[Dict]] = {cat_id: [] for cat_id, _ in CATEGORIES}
-    for asset in lib_playables:
-        cat = asset.get("category", gads._auto_detect_category(asset["name"]))
-        cat_lib_playables[cat].append(asset)
+    lib_vid_options = []
+    lib_label_to_rn = {}
 
-    # ── Categorize local files ──
+    def _build_label(v):
+        name = v.get("name", "") or ""
+        yt_title = v.get("youtube_video_title", "") or ""
+        yt_id = v.get("youtube_video_id", "") or ""
+        rn = v["resource_name"]
+        display = yt_title or name
+        if display and yt_id:
+            label = f"{display} ({yt_id})"
+        elif display:
+            label = display
+        elif yt_id:
+            label = yt_id
+        else:
+            label = rn.split("/")[-1]
+        if label in lib_label_to_rn:
+            label = f"{label} [{rn.split('/')[-1]}]"
+        return label, rn
+
+    for v in all_lib_vids:
+        label, rn = _build_label(v)
+        lib_vid_options.append(label)
+        lib_label_to_rn[label] = rn
+
+    # ── Local (new) files ──
     video_exts = {".mp4", ".mov", ".mpeg4"}
     playable_exts = {".html", ".zip"}
 
     def _get_ext(name: str) -> str:
         return "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
 
-    cat_local_videos: Dict[str, List[str]] = {cat_id: [] for cat_id, _ in CATEGORIES}
-    cat_local_playables: Dict[str, List[str]] = {cat_id: [] for cat_id, _ in CATEGORIES}
+    local_vids = []
+    local_plays = []
     for fname in local_file_names:
-        cat = gads._auto_detect_category(fname)
         ext = _get_ext(fname)
         if ext in video_exts:
-            cat_local_videos[cat].append(fname)
-            if cat == "AI":
-                cat_local_videos["normal"].append(fname)
+            local_vids.append(fname)
         elif ext in playable_exts:
-            cat_local_playables[cat].append(fname)
+            local_plays.append(fname)
 
-    # ── Create tabs ──
-    tab_labels = [label for _, label in CATEGORIES]
-    tabs = st.tabs(tab_labels)
-    category_selections: Dict[str, Dict] = {}
+    # Combined video options: library + local new
+    all_vid_options = lib_vid_options + [
+        f"[신규] {n}" for n in local_vids if n not in lib_label_to_rn
+    ]
 
-    for tab_idx, (cat_id, cat_label) in enumerate(CATEGORIES):
-        with tabs[tab_idx]:
-            # ── GA Library videos (업로드 시점 내림차순 정렬) ──
-            lib_vids = sorted(
-                cat_lib_videos.get(cat_id, []),
-                key=lambda v: v.get("asset_id", 0),
-                reverse=True,
-            )
+    # ── Video multiselect ──
+    selected_videos = []
+    selected_video_rns = {}
 
-            # Build unique display labels for library videos
-            # 우선순위: youtube_video_title (원본 파일명) > name > yt_id > resource_name
-            lib_vid_options = []  # display labels
-            lib_label_to_rn = {}  # display label → resource_name
+    if all_vid_options:
+        st.markdown(f"**영상 ({len(all_vid_options)}개)**")
+        ms_key = f"{kp}gads_all_videos_{game}_{idx}"
+        auto_pending_key = f"{ms_key}_auto_orient_pending"
 
-            def _build_label(v):
-                name = v.get("name", "") or ""
-                yt_title = v.get("youtube_video_title", "") or ""
-                yt_id = v.get("youtube_video_id", "") or ""
-                rn = v["resource_name"]
-                display = yt_title or name
-                if display and yt_id:
-                    label = f"{display} ({yt_id})"
-                elif display:
-                    label = display
-                elif yt_id:
-                    label = yt_id
-                else:
-                    label = rn.split("/")[-1]
-                if label in lib_label_to_rn:
-                    label = f"{label} [{rn.split('/')[-1]}]"
-                return label, rn
+        # Apply pending auto-select BEFORE widget renders
+        if st.session_state.pop(auto_pending_key, False):
+            current = st.session_state.get(ms_key, [])
+            seen = set()
+            grouped = []
+            for label in current:
+                base_key = _strip_yt_suffix(label)
+                m = _RES_PATTERN.search(base_key)
+                bk = base_key[:m.start()] + "{RES}" + base_key[m.end():] if m else base_key
+                if bk in seen:
+                    continue
+                seen.add(bk)
+                group = [label]
+                for variant in _find_orientation_variants(label, all_vid_options):
+                    if variant not in group:
+                        group.append(variant)
+                group.sort(key=_orientation_sort_key)
+                grouped.append(group)
+            new_selections = [lbl for grp in grouped for lbl in grp]
+            st.session_state[ms_key] = new_selections
 
-            for v in lib_vids:
-                label, rn = _build_label(v)
-                lib_vid_options.append(label)
-                lib_label_to_rn[label] = rn
+        selected_raw = st.multiselect(
+            "배치할 영상 선택 (검색 가능, 선택 순서 = 우선순위)",
+            all_vid_options,
+            key=ms_key,
+            label_visibility="collapsed",
+        )
 
-            # 로컬라이징/AI/인플루언서 탭: 다른 카테고리 영상도 추가 (해당 카테고리가 상단)
-            if cat_id != "normal":
-                included_rns = set(lib_label_to_rn.values())
-                for other_cat_id, _ in CATEGORIES:
-                    if other_cat_id == cat_id:
-                        continue
-                    for v in cat_lib_videos.get(other_cat_id, []):
-                        if v["resource_name"] in included_rns:
-                            continue
-                        included_rns.add(v["resource_name"])
-                        label, rn = _build_label(v)
-                        lib_vid_options.append(label)
-                        lib_label_to_rn[label] = rn
+        if selected_raw:
+            st.caption(f"✅ {len(selected_raw)}개 선택됨")
 
-            # ── Local (new) videos ──
-            local_vids = list(cat_local_videos.get(cat_id, []))
-            if cat_id != "normal":
-                seen_local = set(local_vids)
-                for other_cat_id, _ in CATEGORIES:
-                    if other_cat_id == cat_id:
-                        continue
-                    for fn in cat_local_videos.get(other_cat_id, []):
-                        if fn not in seen_local:
-                            seen_local.add(fn)
-                            local_vids.append(fn)
+        # Auto-select orientation variants button
+        auto_key = f"{kp}gads_auto_orient_{game}_{idx}"
+        if selected_raw and st.button(
+            "방향별 자동선택 (세로→가로→정방)",
+            key=auto_key,
+        ):
+            st.session_state[auto_pending_key] = True
+            st.rerun()
 
-            # Combined: library labels + local new files
-            all_vid_options = lib_vid_options + [
-                f"[신규] {n}" for n in local_vids if n not in lib_label_to_rn
-            ]
+        for sr in selected_raw:
+            selected_videos.append(sr)
+            if sr in lib_label_to_rn:
+                selected_video_rns[sr] = lib_label_to_rn[sr]
+    else:
+        st.caption("영상이 없습니다. 라이브러리를 불러오거나 파일을 업로드하세요.")
 
-            selected_videos = []
-            selected_video_rns = {}  # display_label → resource_name
+    # ── Build unified playable list ──
+    lib_play_names = [p["name"] for p in lib_playables]
+    lib_play_rn_map = {p["name"]: p["resource_name"] for p in lib_playables}
 
-            if all_vid_options:
-                st.markdown(f"**영상 ({len(all_vid_options)}개)**")
-                ms_key = f"{kp}gads_cat_videos_{cat_id}_{game}_{idx}"
-                auto_pending_key = f"{ms_key}_auto_orient_pending"
+    all_play_names = lib_play_names + [n for n in local_plays if n not in lib_play_names]
 
-                # Apply pending auto-select BEFORE widget renders
-                if st.session_state.pop(auto_pending_key, False):
-                    current = st.session_state.get(ms_key, [])
-                    # Group: for each originally selected video, collect it + its variants
-                    seen = set()
-                    grouped = []  # list of groups, each group = [label, ...]
-                    for label in current:
-                        base_key = _strip_yt_suffix(label)
-                        m = _RES_PATTERN.search(base_key)
-                        bk = base_key[:m.start()] + "{RES}" + base_key[m.end():] if m else base_key
-                        if bk in seen:
-                            continue
-                        seen.add(bk)
-                        group = [label]
-                        for variant in _find_orientation_variants(label, all_vid_options):
-                            if variant not in group:
-                                group.append(variant)
-                        group.sort(key=_orientation_sort_key)
-                        grouped.append(group)
-                    new_selections = [lbl for grp in grouped for lbl in grp]
-                    st.session_state[ms_key] = new_selections
+    selected_playables = []
+    selected_playable_rns = {}
 
-                selected_raw = st.multiselect(
-                    "배치할 영상 선택 (선택 순서 = 우선순위)",
-                    all_vid_options,
-                    key=ms_key,
-                    label_visibility="collapsed",
-                )
-
-                if selected_raw:
-                    st.caption(f"✅ {len(selected_raw)}개 선택됨")
-
-                # Auto-select orientation variants button
-                auto_key = f"{kp}gads_auto_orient_{cat_id}_{game}_{idx}"
-                if selected_raw and st.button(
-                    "방향별 자동선택 (세로→가로→정방)",
-                    key=auto_key,
-                ):
-                    st.session_state[auto_pending_key] = True
-                    st.rerun()
-
-                for sr in selected_raw:
-                    selected_videos.append(sr)
-                    if sr in lib_label_to_rn:
-                        selected_video_rns[sr] = lib_label_to_rn[sr]
+    if all_play_names:
+        play_options = []
+        for pn in all_play_names:
+            if pn in lib_play_rn_map:
+                play_options.append(pn)
             else:
-                st.caption("해당 카테고리의 영상이 없습니다.")
+                play_options.append(f"[신규] {pn}")
 
-            # ── GA Library playables ──
-            lib_plays = cat_lib_playables.get(cat_id, [])
-            lib_play_names = [p["name"] for p in lib_plays]
-            lib_play_rn_map = {p["name"]: p["resource_name"] for p in lib_plays}
+        st.markdown(f"**플레이어블 ({len(all_play_names)}개)**")
+        selected_play_raw = st.multiselect(
+            "배치할 플레이어블 선택 (검색 가능)",
+            play_options,
+            default=[],
+            key=f"{kp}gads_all_playables_{game}_{idx}",
+            label_visibility="collapsed",
+        )
+        for sr in selected_play_raw:
+            actual_name = sr.replace("[신규] ", "")
+            selected_playables.append(actual_name)
+            if actual_name in lib_play_rn_map:
+                selected_playable_rns[actual_name] = lib_play_rn_map[actual_name]
 
-            # 로컬라이징/AI/인플루언서 탭: 다른 카테고리 플레이어블도 추가
-            if cat_id != "normal":
-                included_play_names = set(lib_play_rn_map.keys())
-                for other_cat_id, _ in CATEGORIES:
-                    if other_cat_id == cat_id:
-                        continue
-                    for p in cat_lib_playables.get(other_cat_id, []):
-                        if p["name"] not in included_play_names:
-                            included_play_names.add(p["name"])
-                            lib_play_names.append(p["name"])
-                            lib_play_rn_map[p["name"]] = p["resource_name"]
+    # Show status for new files
+    new_in_selection = [v for v in selected_videos if v not in lib_label_to_rn]
+    if new_in_selection:
+        uploaded_count = sum(1 for v in new_in_selection if v.replace("[신규] ", "") in uploaded_assets)
+        not_uploaded_count = len(new_in_selection) - uploaded_count
+        if not_uploaded_count > 0:
+            st.warning(f"신규 영상 {not_uploaded_count}개 — 먼저 '에셋 업로드' 실행 필요")
 
-            # ── Local (new) playables ──
-            local_plays = list(cat_local_playables.get(cat_id, []))
-            if cat_id != "normal":
-                seen_local_plays = set(local_plays)
-                for other_cat_id, _ in CATEGORIES:
-                    if other_cat_id == cat_id:
-                        continue
-                    for fn in cat_local_playables.get(other_cat_id, []):
-                        if fn not in seen_local_plays:
-                            seen_local_plays.add(fn)
-                            local_plays.append(fn)
-
-            all_play_names = lib_play_names + [n for n in local_plays if n not in lib_play_names]
-
-            selected_playables = []
-            selected_playable_rns = {}
-
-            if all_play_names:
-                play_options = []
-                for pn in all_play_names:
-                    if pn in lib_play_rn_map:
-                        play_options.append(pn)
-                    else:
-                        play_options.append(f"[신규] {pn}")
-
-                st.markdown(f"**플레이어블 ({len(all_play_names)}개)**")
-                selected_play_raw = st.multiselect(
-                    "배치할 플레이어블 선택",
-                    play_options,
-                    default=[],
-                    key=f"{kp}gads_cat_playables_{cat_id}_{game}_{idx}",
-                    label_visibility="collapsed",
-                )
-                for sr in selected_play_raw:
-                    actual_name = sr.replace("[신규] ", "")
-                    selected_playables.append(actual_name)
-                    if actual_name in lib_play_rn_map:
-                        selected_playable_rns[actual_name] = lib_play_rn_map[actual_name]
-
-            # Show status for new files
-            new_in_selection = [v for v in selected_videos if v not in lib_label_to_rn]
-            if new_in_selection:
-                uploaded_count = sum(1 for v in new_in_selection if v.replace("[신규] ", "") in uploaded_assets)
-                not_uploaded_count = len(new_in_selection) - uploaded_count
-                if not_uploaded_count > 0:
-                    st.warning(f"신규 영상 {not_uploaded_count}개 — 먼저 '에셋 업로드' 실행 필요")
-
-            category_selections[cat_id] = {
-                "selected_videos": selected_videos,
-                "selected_playables": selected_playables,
-                "video_rns": {
-                    **selected_video_rns,
-                    **{n: uploaded_assets.get(n.replace("[신규] ", ""), "") for n in selected_videos if n.replace("[신규] ", "") in uploaded_assets},
-                },
-                "playable_rns": {**selected_playable_rns, **{n: uploaded_assets[n] for n in selected_playables if n in uploaded_assets}},
-            }
+    # Store under "normal" key for backward compat with distribute_by_category
+    empty_sel = {"selected_videos": [], "selected_playables": [], "video_rns": {}, "playable_rns": {}}
+    category_selections = {
+        "normal": {
+            "selected_videos": selected_videos,
+            "selected_playables": selected_playables,
+            "video_rns": {
+                **selected_video_rns,
+                **{n: uploaded_assets.get(n.replace("[신규] ", ""), "") for n in selected_videos if n.replace("[신규] ", "") in uploaded_assets},
+            },
+            "playable_rns": {**selected_playable_rns, **{n: uploaded_assets[n] for n in selected_playables if n in uploaded_assets}},
+        },
+        "localized": empty_sel,
+        "AI": empty_sel,
+        "influencer": empty_sel,
+    }
 
     # Clone option state
     clone_cb_key = f"{kp}gads_clone_enabled_{game}_{idx}"
