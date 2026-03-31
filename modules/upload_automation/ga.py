@@ -790,115 +790,98 @@ def distribute_by_category(
         )
     logger.info(f"[distribute] ad_groups count={len(ad_groups)}, names={[ag['name'] for ag in ad_groups[:5]]}")
 
-    distributed_playable_rns = set()  # 이미 전체 광고그룹에 배치된 playable 추적
+    # ── 모든 카테고리의 비디오/플레이어블을 순서대로 합침 (일반→로컬→AI→인플루언서) ──
+    all_video_rns = []
+    all_playable_rns = []
+    seen_video_rns = set()
+    seen_playable_rns = set()
 
     for cat_id, cat_label in CATEGORIES:
         sel = category_selections.get(cat_id, {})
-        selected_videos = sel.get("selected_videos", [])
-        selected_playables = sel.get("selected_playables", [])
-        video_rns = sel.get("video_rns", {})      # name → resource_name
-        playable_rns = sel.get("playable_rns", {})  # name → resource_name
+        video_rns = sel.get("video_rns", {})
+        playable_rns = sel.get("playable_rns", {})
 
-        logger.info(
-            f"[distribute] Processing cat={cat_id}: "
-            f"videos={len(selected_videos)}, playables={len(selected_playables)}"
-        )
-
-        if not selected_videos and not selected_playables:
-            continue
-
-        filtered_ags = gads.filter_ad_groups_by_category(ad_groups, cat_id)
-        logger.info(f"[distribute] cat={cat_id}: filtered_ags={len(filtered_ags)}")
-        if not filtered_ags:
-            # 매칭 광고그룹 없으면 전체 광고그룹으로 fallback
-            filtered_ags = ad_groups
-            logger.info(f"[distribute] cat={cat_id}: fallback to all ad_groups ({len(filtered_ags)})")
-            if not filtered_ags:
-                all_errors.append(f"[{cat_label}] 광고그룹이 없습니다.")
+        for vname in sel.get("selected_videos", []):
+            rn = video_rns.get(vname)
+            if not rn:
+                all_errors.append(f"[{cat_label}] {vname}: resource name을 찾을 수 없습니다.")
                 continue
+            if rn not in seen_video_rns:
+                seen_video_rns.add(rn)
+                all_video_rns.append(rn)
 
-        # ── Video distribution for this category ──
-        if selected_videos:
-            # Get asset resource names in selection order (= priority)
-            ordered_asset_rns = []
-            for vname in selected_videos:
-                rn = video_rns.get(vname)
-                if rn:
-                    ordered_asset_rns.append(rn)
-                else:
-                    all_errors.append(f"[{cat_label}] {vname}: resource name을 찾을 수 없습니다.")
+        for pname in sel.get("selected_playables", []):
+            rn = playable_rns.get(pname)
+            if not rn:
+                all_errors.append(f"[{cat_label}] {pname}: resource name을 찾을 수 없습니다.")
+                continue
+            if rn not in seen_playable_rns:
+                seen_playable_rns.add(rn)
+                all_playable_rns.append(rn)
 
-            if ordered_asset_rns:
-                # Distribute: replace LOW-performing videos
-                plan = gads.distribute_videos(
-                    campaign_id,
-                    ordered_asset_rns,
-                    exception_map={},  # no exception routing — already categorized
-                    ad_groups=filtered_ags,
-                )
-                result = gads.execute_distribution(campaign_id, plan)
-                total_success += result["success"]
-                total_failed += result["failed"]
-                if result["errors"]:
-                    all_errors.extend(f"[{cat_label}] {e}" for e in result["errors"])
+    logger.info(f"[distribute] merged: {len(all_video_rns)} videos, {len(all_playable_rns)} playables → {len(ad_groups)} ad groups")
 
-                unplaced_rns = plan.get("unplaced", [])
-                all_unplaced_rns.extend(unplaced_rns)
-                details.append({
-                    "category": cat_label,
-                    "type": "video",
-                    "placed": len(ordered_asset_rns) - len(unplaced_rns),
-                    "unplaced": len(unplaced_rns),
-                    "ad_groups_modified": result["success"],
-                })
+    # ── Video distribution: 전체 광고그룹에 순서대로 배치 ──
+    if all_video_rns:
+        plan = gads.distribute_videos(
+            campaign_id,
+            all_video_rns,
+            exception_map={},
+            ad_groups=ad_groups,
+        )
+        result = gads.execute_distribution(campaign_id, plan)
+        total_success += result["success"]
+        total_failed += result["failed"]
+        if result["errors"]:
+            all_errors.extend(result["errors"])
 
-        # ── Playable distribution: 전체 광고그룹에 배치 (카테고리 무관) ──
-        if selected_playables:
-            for pname in selected_playables:
-                rn = playable_rns.get(pname)
-                if not rn:
-                    all_errors.append(f"[{cat_label}] {pname}: resource name을 찾을 수 없습니다.")
-                    continue
-                if rn in distributed_playable_rns:
-                    continue  # 다른 카테고리에서 이미 배치됨
-                distributed_playable_rns.add(rn)
+        unplaced_rns = plan.get("unplaced", [])
+        all_unplaced_rns.extend(unplaced_rns)
+        details.append({
+            "category": "전체",
+            "type": "video",
+            "placed": len(all_video_rns) - len(unplaced_rns),
+            "unplaced": len(unplaced_rns),
+            "ad_groups_modified": result["success"],
+        })
 
-                p_success = 0
-                p_failed = 0
-                for ag in ad_groups:  # 전체 광고그룹
-                    max_retries = 3
-                    for attempt in range(max_retries):
-                        try:
-                            app_ad = gads.get_app_ad_resource(campaign_id, ag["id"])
-                            if not app_ad:
-                                all_errors.append(f"[{cat_label}] {ag['name']}: AppAd 없음")
-                                p_failed += 1
-                                break
-                            gads.add_playable_to_app_ad(
-                                app_ad["ad_resource_name"],
-                                app_ad["html5_assets"],
-                                rn,
-                            )
-                            p_success += 1
-                            break
-                        except Exception as e:
-                            if "CONCURRENT_MODIFICATION" in str(e) and attempt < max_retries - 1:
-                                import time
-                                time.sleep(2 * (attempt + 1))
-                                continue
-                            all_errors.append(f"[{cat_label}] {ag['name']}: {e}")
-                            p_failed += 1
-                            break
+    # ── Playable distribution: 전체 광고그룹에 배치 ──
+    for rn in all_playable_rns:
+        p_success = 0
+        p_failed = 0
+        for ag in ad_groups:
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    app_ad = gads.get_app_ad_resource(campaign_id, ag["id"])
+                    if not app_ad:
+                        all_errors.append(f"{ag['name']}: AppAd 없음")
+                        p_failed += 1
+                        break
+                    gads.add_playable_to_app_ad(
+                        app_ad["ad_resource_name"],
+                        app_ad["html5_assets"],
+                        rn,
+                    )
+                    p_success += 1
+                    break
+                except Exception as e:
+                    if "CONCURRENT_MODIFICATION" in str(e) and attempt < max_retries - 1:
+                        import time
+                        time.sleep(2 * (attempt + 1))
+                        continue
+                    all_errors.append(f"{ag['name']}: {e}")
+                    p_failed += 1
+                    break
 
-                total_success += p_success
-                total_failed += p_failed
-                details.append({
-                    "category": cat_label,
-                    "type": "playable",
-                    "name": pname,
-                    "ad_groups_success": p_success,
-                    "ad_groups_failed": p_failed,
-                })
+        total_success += p_success
+        total_failed += p_failed
+        details.append({
+            "category": "전체",
+            "type": "playable",
+            "ad_groups_success": p_success,
+            "ad_groups_failed": p_failed,
+        })
 
     if total_success == 0 and total_failed == 0 and not all_errors:
         error_msg = "배치 대상이 없습니다. 광고그룹에 매칭되는 카테고리가 없거나 선택한 소재의 resource name을 확인해주세요."
