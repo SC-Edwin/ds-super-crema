@@ -1238,15 +1238,15 @@ def render_applovin_settings_panel(container, game: str, idx: int, is_marketer: 
                 # Video spend 데이터 가져오기
                 video_spend = get_playable_performance(campaign_id, campaign_name)
                 
-                # Spend 기준 내림차순 정렬
+                # 업로드 순 정렬 (ID 내림차순 = 최신순)
                 sorted_videos = sorted(
                     assets["videos"],
-                    key=lambda v: video_spend.get(v['id'], 0),
+                    key=lambda v: int(v['id']) if v['id'].isdigit() else 0,
                     reverse=True
                 )
-                
+
                 video_options = {
-                    f"{v['name']} (ID: {v['id']}) [${video_spend.get(v['id'], 0):.2f}]": v['id']
+                    f"{v['name']} (ID: {v['id']})": v['id']
                     for v in sorted_videos
                 }
                 
