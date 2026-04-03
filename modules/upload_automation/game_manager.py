@@ -8,7 +8,8 @@ CONFIG_FILE = "games_config.json"
 # Base list of games (Operation mode defaults)
 DEFAULT_GAME_NAMES = [
     "Cafe Life", "Dino Universe", "Snake Clash", "Pizza Ready", "XP HERO",
-    "Suzy's Restaurant", "Office Life", "Lumber Chopper", "Burger Please", "Prison Life", "Arrow Flow"
+    "Suzy's Restaurant", "Office Life", "Lumber Chopper", "Burger Please", "Prison Life", "Arrow Flow",
+    "Downhill Racer"
 ]
 
 def load_custom_config() -> dict:

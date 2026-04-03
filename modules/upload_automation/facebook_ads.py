@@ -497,6 +497,10 @@ GAME_DEFAULTS: Dict[str, Dict[str, str]] = {
         "fb_app_id": "957490872253064",
         "store_url": "https://play.google.com/store/apps/details?id=com.Albus.WaterParkBoys",
     },
+    "Downhill Racer": {
+        "fb_app_id": "1332540784297154",
+        "store_url": "https://play.google.com/store/apps/details?id=io.supercent.downhill",
+    },
 }
 
 def init_fb_game_defaults(prefix: str = "") -> None:
@@ -1369,6 +1373,13 @@ FB_GAME_MAPPING: Dict[str, Dict[str, Any]] = {
         "campaign_name": "WaterParkBoys_aos_facebook_us_test",
         "adset_prefix": "WaterParkBoys_aos_facebook_us_test",
         "page_id_key": "page_id_water",
+    },
+    "Downhill Racer": {
+        "account_id": "act_347210305097775",
+        "campaign_id": "",
+        "campaign_name": "",
+        "adset_prefix": "downhill_aos_facebook_us_test",
+        "page_id_key": "page_id_downhill",
     },
 }
 def upload_to_facebook(
