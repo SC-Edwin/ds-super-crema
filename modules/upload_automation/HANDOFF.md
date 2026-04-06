@@ -1027,6 +1027,33 @@ st.session_state
 
 모든 API 키/토큰은 `.streamlit/secrets.toml`에 저장됩니다 (Git에 포함되지 않음).
 
+### secrets.toml 가져오는 방법
+
+로컬에서 직접 만들 필요 없이, **Streamlit Cloud의 Settings에서 복사**하면 됩니다:
+
+1. [Streamlit Cloud](https://share.streamlit.io/) 접속
+2. 해당 앱의 Settings → Secrets 탭
+3. `dev-eader` 또는 `main` 브랜치의 시크릿 내용을 복사
+4. 로컬 `.streamlit/secrets.toml` 파일에 붙여넣기
+
+> `dev-eader`와 `main` 브랜치에 각각 별도의 시크릿이 설정되어 있을 수 있으니, 작업 중인 브랜치에 맞는 시크릿을 사용하세요.
+
+### API 토큰/키 갱신 주의사항
+
+아래 토큰들은 **유효기간이 있거나 갱신이 필요**할 수 있습니다. 업로드 시 인증 에러가 발생하면 해당 토큰 만료를 의심하세요.
+
+| 시크릿 | 갱신 주기/조건 | 갱신 방법 |
+|--------|--------------|----------|
+| `[facebook] access_token` | 만료 시 (보통 60일) | Meta Business Suite에서 새 토큰 발급 후 교체 |
+| `[unity] authorization_header` | 만료 시 | Unity Dashboard에서 새 API 키 발급 |
+| `[unity] authorization_header_2` | 위와 동일 | 보조 키도 같이 갱신 |
+| `[google_ads] refresh_token` | 취소/만료 시 | `python3 modules/upload_automation/generate_refresh_token.py` 실행 |
+| `[mintegral] api_key` | 변경 시 | Mintegral 대시보드에서 확인 |
+| `[applovin] campaign_management_api_key` | 변경 시 | Applovin 대시보드에서 확인 |
+| `[gcp_service_account]` | 키 로테이션 시 | GCP 콘솔에서 새 서비스 계정 키 JSON 발급 |
+
+> 로컬 `secrets.toml`을 갱신했다면, **Streamlit Cloud의 Settings → Secrets도 같이 업데이트**해야 배포 환경에 반영됩니다.
+
 ```toml
 # ── Facebook ──
 [facebook]
