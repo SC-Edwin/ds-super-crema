@@ -57,7 +57,9 @@ def _get_client():
         "refresh_token": cfg["refresh_token"],
         "use_proto_plus": True,
     }
-    # MCC (Manager) account requires login_customer_id header
+    # login_customer_id: 직접 광고 계정만 쓰면 secrets에 넣지 않아도 됨(비워두면 헤더 미전송).
+    # MCC(매니저) 아래 클라이언트 계정에 API로 접근할 때만 Google이 요구하므로, 당장 불필요해도
+    # 에이전시·다계정 구조를 위해 옵션으로 유지한다.
     if cfg.get("login_customer_id"):
         credentials["login_customer_id"] = str(cfg["login_customer_id"]).replace("-", "")
     client = GoogleAdsClient.load_from_dict(credentials, version="v20")
