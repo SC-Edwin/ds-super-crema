@@ -12,6 +12,32 @@ import streamlit as st
 
 logger = logging.getLogger(__name__)
 
+
+def _google_ads_secrets_summary() -> str:
+    """Log-safe summary of [google_ads] (no tokens or secrets)."""
+    try:
+        cfg = st.secrets.get("google_ads", {}) or {}
+    except Exception:
+        return "secrets_unavailable"
+
+    def _nonempty(key: str) -> bool:
+        v = cfg.get(key)
+        return bool(v and str(v).strip())
+
+    cid = str(cfg.get("customer_id") or "").replace("-", "").strip()
+    login = str(cfg.get("login_customer_id") or "").replace("-", "").strip()
+    oauth_cid = str(cfg.get("client_id") or "")
+    tail = oauth_cid[-24:] if len(oauth_cid) > 24 else oauth_cid
+    return (
+        f"customer_id={cid or 'MISSING'} "
+        f"login_customer_id={login or 'none'} "
+        f"oauth_client_id_suffix={tail!r} "
+        f"has_refresh_token={_nonempty('refresh_token')} "
+        f"has_client_secret={_nonempty('client_secret')} "
+        f"has_developer_token={_nonempty('developer_token')}"
+    )
+
+
 # ── Google Ads Client ────────────────────────────────────────────────
 
 def _get_client():
@@ -23,6 +49,7 @@ def _get_client():
     from google.ads.googleads.client import GoogleAdsClient
 
     cfg = st.secrets["google_ads"]
+    logger.debug("GoogleAdsClient.load_from_dict | %s", _google_ads_secrets_summary())
     credentials = {
         "developer_token": cfg["developer_token"],
         "client_id": cfg["client_id"],
@@ -34,6 +61,7 @@ def _get_client():
     if cfg.get("login_customer_id"):
         credentials["login_customer_id"] = str(cfg["login_customer_id"]).replace("-", "")
     client = GoogleAdsClient.load_from_dict(credentials, version="v20")
+    logger.debug("GoogleAdsClient created OK (v20)")
     return client
 
 
@@ -72,9 +100,18 @@ def list_campaigns(game: str = None) -> List[Dict]:
     """
     import time
 
+    logger.info(
+        "list_campaigns: start game=%r | %s",
+        game,
+        _google_ads_secrets_summary(),
+    )
     client = _get_client()
     ga_service = client.get_service("GoogleAdsService")
     customer_id = _customer_id()
+    logger.info(
+        "list_campaigns: calling search_stream customer_id=%s (digits only)",
+        customer_id,
+    )
 
     query = """
         SELECT
@@ -106,7 +143,15 @@ def list_campaigns(game: str = None) -> List[Dict]:
         except Exception as e:
             last_exc = e
             detail = _extract_google_ads_error(e)
-            logger.error(f"Failed to list campaigns (attempt {attempt+1}/{max_retries}): {detail}")
+            logger.error(
+                "list_campaigns: FAILED attempt=%d/%d customer_id=%s game=%r | %s | raw=%s",
+                attempt + 1,
+                max_retries,
+                customer_id,
+                game,
+                detail,
+                str(e)[:600],
+            )
             if "INTERNAL" in str(e).upper() or "500" in str(e):
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)
@@ -120,12 +165,23 @@ def list_campaigns(game: str = None) -> List[Dict]:
     if last_exc is not None:
         raise last_exc
 
+    n_before_game = len(results)
+    codename_log = ""
     # Filter by game codename if mapping exists
     if game:
         mapping = st.secrets.get("google_ads", {}).get("game_mapping", {})
-        codename = mapping.get(game, "").lower()
+        codename_log = str(mapping.get(game, "") or "")
+        codename = codename_log.lower()
         if codename:
             results = [c for c in results if codename in c["name"].lower()]
+
+    logger.info(
+        "list_campaigns: success game=%r rows=%d after_game_codename_filter=%d codename=%r",
+        game,
+        n_before_game,
+        len(results),
+        codename_log,
+    )
 
     return results
 

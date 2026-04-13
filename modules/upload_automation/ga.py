@@ -131,12 +131,40 @@ def render_google_settings_panel(
 
         cache_key = f"{kp}gads_campaigns_{game}"
         if cache_key not in st.session_state:
+            logger.info(
+                "render_google_settings_panel: cache miss, fetching campaigns "
+                "cache_key=%r game=%r idx=%s prefix=%r",
+                cache_key,
+                game,
+                idx,
+                prefix or "",
+            )
             try:
                 st.session_state[cache_key] = gads.list_campaigns(game=game)
+                logger.info(
+                    "render_google_settings_panel: cache filled cache_key=%r n=%d",
+                    cache_key,
+                    len(st.session_state[cache_key]),
+                )
             except Exception as e:
-                logger.error(f"Google Ads 캠페인 로드 실패: {gads._extract_google_ads_error(e)}")
+                logger.error(
+                    "render_google_settings_panel: list_campaigns FAILED "
+                    "cache_key=%r game=%r idx=%s err_type=%s detail=%s raw_head=%s",
+                    cache_key,
+                    game,
+                    idx,
+                    type(e).__name__,
+                    gads._extract_google_ads_error(e),
+                    str(e)[:500],
+                )
                 st.error(f"Google Ads 연결 실패: {str(e)[:200]}")
                 st.session_state[cache_key] = []
+        else:
+            logger.debug(
+                "render_google_settings_panel: cache hit cache_key=%r n=%d",
+                cache_key,
+                len(st.session_state.get(cache_key) or []),
+            )
 
         campaigns = st.session_state[cache_key]
         # ENABLED 캠페인 우선 정렬
