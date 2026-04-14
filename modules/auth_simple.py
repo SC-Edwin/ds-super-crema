@@ -158,6 +158,20 @@ def load_users():
         "crissy": {"password_hash": h("crissy31"), "name": "Crissy", "role": "user"},
         "kira": {"password_hash": h("kira69"), "name": "Kira", "role": "user"},
         "heny": {"password_hash": h("heny88"), "name": "Heny", "role": "user"},
+        "rumble": {"password_hash": h("rumble_vn"), "name": "Rumble", "role": "user"},
+        "bomi": {"password_hash": h("bomi_vn"), "name": "Bomi", "role": "user"},
+        "zoe": {"password_hash": h("zoe_vn"), "name": "Zoe", "role": "user"},
+        "aaron": {"password_hash": h("aaron_vn"), "name": "Aaron", "role": "user"},
+        "miko": {"password_hash": h("miko_vn"), "name": "Miko", "role": "user"},
+        "ruelle": {"password_hash": h("ruelle_vn"), "name": "Ruelle", "role": "user"},
+        "falcon": {"password_hash": h("falcon_vn"), "name": "Falcon", "role": "user"},
+        "henry": {"password_hash": h("henry_vn"), "name": "Henry", "role": "user"},
+        "hozler": {"password_hash": h("hozler_vn"), "name": "Hozler", "role": "user"},
+        "ellie": {"password_hash": h("ellie_vn"), "name": "Ellie", "role": "user"},
+        "kurly": {"password_hash": h("kurly_vn"), "name": "Kurly", "role": "user"},
+        "elliot": {"password_hash": h("elliot_vn"), "name": "Elliot", "role": "user"},
+        "thiago": {"password_hash": h("thiago_vn"), "name": "Thiago", "role": "user"},
+        "pax": {"password_hash": h("pax_vn"), "name": "Pax", "role": "user"},
     }
 
 
