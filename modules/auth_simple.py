@@ -211,13 +211,11 @@ def login_with_password(username, password):
 
 
 def login_with_google(email):
-    allowed_domains = ["@supercent.io"]
-    allowed_vn_user = [
-        'rumble', 'bomi', 'zoe', 'aaron', 'miko', 'ruelle', 'falcon',
-        'henry', 'hozler', 'ellie', 'kurly', 'elliot', 'thiago', 'pax'
-        ]
-    allowed_emails = [u + '@supercent.vn' for u in allowed_vn_user]
-    if not any(email.endswith(d) for d in allowed_domains) and email not in allowed_emails:
+    if not email:
+        return False, "🚫 Supercent 계정만 사용 가능합니다"
+    e = email.lower()
+    allowed_suffixes = ("@supercent.io", "@supercent.vn")
+    if not any(e.endswith(s) for s in allowed_suffixes):
         return False, "🚫 Supercent 계정만 사용 가능합니다"
     name = email.split("@")[0].capitalize()
     role = "admin" if email in ["edwin@supercent.io"] else "user"
@@ -248,7 +246,7 @@ def show_login_page():
         with st.container(border=False):
             st.markdown("### 🔐 로그인")
             st.markdown("##### 🌐 Supercent 계정 로그인 (권장)")
-            st.info("🏢 @supercent.io 계정만 사용 가능합니다.")
+            st.info("🏢 @supercent.io 또는 @supercent.vn 계정만 사용 가능합니다.")
 
             email = handle_google_callback()
             if email:
