@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Callable
+from collections import deque
 from datetime import datetime, timedelta, timezone
+import functools
 import logging
 import pathlib
 import re
 import os
 import json
 import hashlib
+import threading
 
 import time
 import requests
@@ -17,6 +20,110 @@ import streamlit as st
 from modules.upload_automation import devtools
 
 logger = logging.getLogger(__name__)
+
+# --------------------------------------------------------------------
+# Unity HTTP 호출 추적 (프로세스 단위, 스레드 안전)
+# 공식 문서: https://services.docs.unity.com/docs/headers
+#  - RateLimit-Policy 예: "20;w=1, 4000;w=1800" → w는 초 단위 창(1초, 1800초=30분), 앞 숫자는 해당 창당 허용 요청 수.
+#  - 실제 한도는 엔드포인트·계약마다 다를 수 있어 응답 헤더를 봐야 함(고정 상수 없음).
+# --------------------------------------------------------------------
+_UNITY_HTTP_EVENTS: deque[tuple[float, str, str, int]] = deque(maxlen=12000)
+_UNITY_HTTP_LOCK = threading.Lock()
+_LAST_RATELIMIT_POLICY: str | None = None
+_LAST_UNITY_RATELIMIT: str | None = None
+
+
+def _record_unity_http_call(method: str, path: str, resp: requests.Response) -> None:
+    """완료된 HTTP 응답 1건을 기록한다(429 포함). 네트워크 예외로 resp 없으면 호출하지 않는다."""
+    global _LAST_RATELIMIT_POLICY, _LAST_UNITY_RATELIMIT
+    now = time.time()
+    short_path = path if len(path) <= 160 else path[:157] + "..."
+    status = int(resp.status_code)
+    with _UNITY_HTTP_LOCK:
+        _UNITY_HTTP_EVENTS.append((now, method, short_path, status))
+        pol = resp.headers.get("RateLimit-Policy") or resp.headers.get("rate-limit-policy")
+        pol_s = pol.strip() if pol else ""
+        if pol_s:
+            if pol_s != _LAST_RATELIMIT_POLICY:
+                _LAST_RATELIMIT_POLICY = pol_s
+                logger.info(
+                    "[Unity] RateLimit-Policy (서버): %s — w=초 단위 창, 예시 해석 20;w=1 → 1초당 20회, 4000;w=1800 → 30분당 4000회",
+                    _LAST_RATELIMIT_POLICY,
+                )
+        ul = resp.headers.get("Unity-RateLimit") or resp.headers.get("unity-ratelimit")
+        if ul and ul.strip():
+            _LAST_UNITY_RATELIMIT = ul.strip()
+        ev_snapshot = list(_UNITY_HTTP_EVENTS)
+    n10 = sum(1 for t, _, _, _ in ev_snapshot if now - t <= 600)
+    n30 = sum(1 for t, _, _, _ in ev_snapshot if now - t <= 1800)
+    logger.debug(
+        "[Unity HTTP] %s %s status=%s | 본 프로세스 최근 10분=%d회 30분=%d회",
+        method,
+        short_path,
+        status,
+        n10,
+        n30,
+    )
+
+
+def unity_http_window_stats() -> Dict[str, Any]:
+    """이 Streamlit 프로세스에서 기록된 Unity API 호출 수(슬라이딩 윈도)."""
+    now = time.time()
+    with _UNITY_HTTP_LOCK:
+        ev = list(_UNITY_HTTP_EVENTS)
+    n10 = sum(1 for t, _, _, _ in ev if now - t <= 600)
+    n30 = sum(1 for t, _, _, _ in ev if now - t <= 1800)
+    return {
+        "requests_last_10m": n10,
+        "requests_last_30m": n30,
+        "events_in_buffer": len(ev),
+    }
+
+
+def unity_http_call_count_since(since_ts: float) -> int:
+    """since_ts 이후(동일 시각 포함) 기록된 HTTP 응답 수. 단일 작업 구간 추정용."""
+    with _UNITY_HTTP_LOCK:
+        return sum(1 for t, _, _, _ in _UNITY_HTTP_EVENTS if t >= since_ts)
+
+
+def unity_http_last_ratelimit_headers() -> Dict[str, str | None]:
+    return {
+        "RateLimit-Policy": _LAST_RATELIMIT_POLICY,
+        "Unity-RateLimit": _LAST_UNITY_RATELIMIT,
+    }
+
+
+def _unity_http_op_summary_log(op_name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """upload/apply 등 한 번의 작업이 끝날 때 이 구간 동안의 HTTP 횟수와 프로세스 윈도 합계를 로그."""
+
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            t0 = time.time()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                game = kwargs.get("game", "")
+                n = unity_http_call_count_since(t0)
+                w = unity_http_window_stats()
+                hdrs = unity_http_last_ratelimit_headers()
+                logger.info(
+                    "[Unity HTTP summary] op=%s game=%s http_in_this_call=%d "
+                    "process_window_10m=%d process_window_30m=%d "
+                    "RateLimit-Policy=%r Unity-RateLimit=%r",
+                    op_name,
+                    game,
+                    n,
+                    w["requests_last_10m"],
+                    w["requests_last_30m"],
+                    hdrs.get("RateLimit-Policy"),
+                    hdrs.get("Unity-RateLimit"),
+                )
+
+        return wrapper
+
+    return decorator
+
 
 # --------------------------------------------------------------------
 # Unity config from secrets.toml
@@ -799,6 +906,7 @@ def _unity_post(path: str, json_body: dict) -> dict:
     for attempt in range(8):
         try:
             resp = requests.post(url, headers=_unity_headers(), json=json_body, timeout=60)
+            _record_unity_http_call("POST", path, resp)
 
             if resp.status_code == 429:
                 detail = resp.text[:800]
@@ -844,6 +952,7 @@ def _unity_post(path: str, json_body: dict) -> dict:
 def _unity_put(path: str, json_body: dict) -> dict:
     url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
     resp = requests.put(url, headers=_unity_headers(), json=json_body, timeout=60)
+    _record_unity_http_call("PUT", path, resp)
     if not resp.ok:
         raise RuntimeError(f"Unity PUT {path} failed ({resp.status_code}): {resp.text[:400]}")
     return resp.json()
@@ -854,6 +963,7 @@ def _unity_get(path: str, params: dict | None = None) -> dict:
 
     for attempt in range(5):
         resp = requests.get(url, headers=_unity_headers(), params=params or {}, timeout=60)
+        _record_unity_http_call("GET", path, resp)
 
         if resp.status_code == 429:
             detail = resp.text[:800]
@@ -888,6 +998,7 @@ def _unity_get(path: str, params: dict | None = None) -> dict:
 def _unity_delete(path: str) -> None:
     url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
     resp = requests.delete(url, headers=_unity_headers(), timeout=60)
+    _record_unity_http_call("DELETE", path, resp)
     if not resp.ok:
         error_body = resp.text[:800] if resp.text else ""
         logger.error(
@@ -972,6 +1083,7 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
     }
 
     url = f"{UNITY_BASE_URL.rstrip('/')}/organizations/{org_id}/apps/{title_id}/creatives"
+    path = f"organizations/{org_id}/apps/{title_id}/creatives"
     last_429_detail: str = ""
 
     for attempt in range(8):
@@ -983,6 +1095,7 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
                     "videoFile": (display_filename, f, "video/mp4"),
                 }
                 resp = requests.post(url, headers=headers, files=files, timeout=300)
+            _record_unity_http_call("POST", f"{path}#multipart_video", resp)
 
             if resp.status_code == 429:
                 detail = (resp.text or "")[:800]
@@ -1045,6 +1158,7 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
 
     logger.info(f"Unity playable creativeInfo: {json.dumps(creative_info)}")
     url = f"{UNITY_BASE_URL.rstrip('/')}/organizations/{org_id}/apps/{title_id}/creatives"
+    path = f"organizations/{org_id}/apps/{title_id}/creatives"
 
     # MIME type 결정 (zip vs html)
     if file_name.lower().endswith(".zip"):
@@ -1063,6 +1177,7 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
                     "playableFile": (file_name, f, mime_type),
                 }
                 resp = requests.post(url, headers=headers, files=files, timeout=300)
+            _record_unity_http_call("POST", f"{path}#multipart_playable", resp)
 
             if resp.status_code == 429:
                 detail = (resp.text or "")[:800]
@@ -1546,10 +1661,239 @@ def preview_unity_upload(
         }
     }
 
+
+def _unity_filter_video_files_for_pack(videos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Marketer/uni.py와 동일: mp4 비디오만 (playable/html 제외)."""
+    return [
+        v
+        for v in (videos or [])
+        if not (
+            "playable" in (v.get("name") or "").lower()
+            or (v.get("name") or "").lower().endswith(".html")
+        )
+        and (v.get("name") or "").lower().endswith(".mp4")
+    ]
+
+
+def _unity_filter_playable_files_for_pack(videos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        v
+        for v in (videos or [])
+        if "playable" in (v.get("name") or "").lower()
+        or (v.get("name") or "").lower().endswith(".html")
+    ]
+
+
+def _unity_count_valid_video_pairs(videos: List[Dict[str, Any]]) -> int:
+    """세로+가로 쌍이 맞는 주제 수 (upload_unity_creatives_to_campaign과 동일 규칙)."""
+    video_files = _unity_filter_video_files_for_pack(videos)
+    subjects: dict[str, list[dict]] = {}
+    for v in video_files:
+        base = (v.get("name") or "").split("_")[0]
+        subjects.setdefault(base, []).append(v)
+    n = 0
+    for items in subjects.values():
+        portrait = next((x for x in items if "1080x1920" in (x.get("name") or "")), None)
+        landscape = next((x for x in items if "1920x1080" in (x.get("name") or "")), None)
+        if portrait and landscape:
+            n += 1
+    return n
+
+
+def _unity_apply_pack_counts_per_task(
+    settings: Dict[str, Any], creative_pack_ids: Any
+) -> List[int]:
+    """마케터 멀티: (플랫폼, 캠페인) 태스크별 assign할 팩 개수."""
+    platforms = settings.get("platforms") or []
+    packs_per_campaign = settings.get("packs_per_campaign") or {}
+    pack_ids_by_platform = creative_pack_ids if isinstance(creative_pack_ids, dict) else {}
+    flat = creative_pack_ids if isinstance(creative_pack_ids, list) else []
+    counts: List[int] = []
+    for plat in platforms:
+        plat_settings = settings.get(plat) or {}
+        for cid in plat_settings.get("campaign_ids") or []:
+            key = f"{plat}_{cid}"
+            if key in packs_per_campaign:
+                n = len(packs_per_campaign[key].get("pack_ids") or [])
+            else:
+                n = len(pack_ids_by_platform.get(plat) or flat)
+            if n > 0:
+                counts.append(n)
+    return counts
+
+
+def estimate_unity_create_api_calls(
+    videos: List[Dict[str, Any]],
+    *,
+    settings: Dict[str, Any],
+    pack_list_pages_guess: int = 1,
+    is_marketer: bool = False,
+) -> Dict[str, Any]:
+    """
+    '크리에이티브/팩 생성' 1회 클릭 시 Unity Advertise API로 나갈 수 있는
+    HTTP 요청 수의 보수적 상한(대략치)을 추정한다.
+
+    - GET/POST를 모두 1회 요청으로 친다.
+    - 재개(resume)·이미 존재하는 크리에이티브/팩 스킵, 429 재시도는 반영하지 않는다.
+    - 팩 목록은 offset 페이지마다 GET이므로 pack_list_pages_guess로 상한을 키운다.
+    """
+    warnings: List[str] = []
+    P = max(1, int(pack_list_pages_guess))
+
+    video_files = _unity_filter_video_files_for_pack(videos)
+    playable_files = _unity_filter_playable_files_for_pack(videos)
+
+    if video_files:
+        pack_mode = "video_playable"
+    elif playable_files:
+        pack_mode = "playable_only"
+    else:
+        return {
+            "pack_mode": "none",
+            "platform_runs": 0,
+            "get_upper": 0,
+            "post_upper": 0,
+            "total_upper": 0,
+            "warnings": ["업로드할 비디오/Playable 파일이 없습니다."],
+        }
+
+    platforms = list(settings.get("platforms") or [])
+    if platforms:
+        run_plats = [p for p in platforms if settings.get(p, {}).get("campaign_ids")]
+        if not run_plats:
+            warnings.append("선택된 캠페인이 없으면 플랫폼별 업로드가 실행되지 않을 수 있습니다.")
+    else:
+        run_plats = ["__single__"]
+
+    get_upper = 0
+    post_upper = 0
+
+    if pack_mode == "video_playable":
+        n_pairs = _unity_count_valid_video_pairs(video_files)
+        if n_pairs == 0:
+            warnings.append("세로(1080x1920)+가로(1920x1080) 쌍이 없어 비디오 팩이 생성되지 않을 수 있습니다.")
+
+        def video_playable_upper_for_merged(merged: Dict[str, Any]) -> tuple[int, int]:
+            g = 1 + P  # creatives map 1회 + creative-packs 목록 페이지
+            p = 3 * n_pairs  # 비디오 2 + 팩 1 (전부 신규 가정)
+            ex = (merged.get("existing_playable_id") or "").strip()
+            sel = (merged.get("selected_playable") or "").strip()
+            if ex:
+                g += 1  # _unity_get_creative 검증
+            elif sel and any((v.get("name") or "") == sel for v in (videos or [])):
+                g += 2  # _check_existing_creative + 검증 GET
+                p += 1  # 신규 playable POST
+            else:
+                g += 1
+                warnings.append("Playable이 선택되지 않으면 업로드가 중단될 수 있습니다.")
+            return g, p
+
+        if platforms:
+            for plat in run_plats:
+                ps = settings.get(plat) or {}
+                merged = {**settings, **ps, "platform": plat}
+                gi, pi = video_playable_upper_for_merged(merged)
+                get_upper += gi
+                post_upper += pi
+        else:
+            merged = {**settings, "is_marketer_mode": is_marketer}
+            get_upper, post_upper = video_playable_upper_for_merged(merged)
+
+    else:
+        n_play = len(playable_files)
+        # playable_only: 파일당 기존 조회(크리에이티브 1 + 팩 목록 P) + 생성 시 POST 2
+        per_plat_get = n_play * (1 + P)
+        per_plat_post = n_play * 2
+        if platforms:
+            for _plat in run_plats:
+                get_upper += per_plat_get
+                post_upper += per_plat_post
+        else:
+            get_upper = per_plat_get
+            post_upper = per_plat_post
+
+    platform_runs = len(run_plats) if platforms else 1
+    total_upper = get_upper + post_upper
+
+    return {
+        "pack_mode": pack_mode,
+        "platform_runs": platform_runs,
+        "get_upper": get_upper,
+        "post_upper": post_upper,
+        "total_upper": total_upper,
+        "warnings": warnings,
+    }
+
+
+def estimate_unity_apply_api_calls(
+    settings: Dict[str, Any],
+    creative_pack_ids: Any,
+    *,
+    is_marketer: bool,
+    test_unassign_wag: int = 35,
+) -> Dict[str, Any]:
+    """
+    '캠페인에 적용' 1회 클릭 시 나갈 수 있는 요청 수 상한(대략치).
+
+    마케터 멀티: 캠페인마다 할당 목록 1회 GET + 신규 assign마다 1회 POST(상한).
+    테스트 단일: 기존 언어사인 루프는 캠페인 상태에 따라 달라 test_unassign_wag로 잡는다.
+    """
+    warnings: List[str] = []
+    platforms = settings.get("platforms") or []
+
+    if platforms:
+        counts = _unity_apply_pack_counts_per_task(settings, creative_pack_ids)
+        if not counts:
+            return {
+                "get_upper": 0,
+                "post_upper": 0,
+                "total_upper": 0,
+                "warnings": ["적용할 팩이 선택되지 않았을 수 있습니다."],
+            }
+        get_u = len(counts)
+        post_u = sum(counts)
+        return {
+            "get_upper": get_u,
+            "post_upper": post_u,
+            "total_upper": get_u + post_u,
+            "warnings": warnings,
+        }
+
+    if isinstance(creative_pack_ids, dict):
+        flat: List[str] = []
+        for v in creative_pack_ids.values():
+            if isinstance(v, list):
+                flat.extend(str(x) for x in v if x)
+            elif v:
+                flat.append(str(v))
+    else:
+        flat = [str(x) for x in (creative_pack_ids or []) if x] if isinstance(creative_pack_ids, list) else []
+    n_new = len(flat)
+    if is_marketer:
+        return {
+            "get_upper": 1,
+            "post_upper": n_new,
+            "total_upper": 1 + n_new,
+            "warnings": warnings,
+        }
+
+    # Test mode: 목록 조회 + (언어사인 다회) + 신규 assign
+    warnings.append(
+        f"테스트 모드는 기존 할당 해제 횟수에 따라 추가 요청이 클 수 있어, "
+        f"해제 쪽을 대략 +{test_unassign_wag}회로 잡았습니다."
+    )
+    return {
+        "get_upper": 1 + test_unassign_wag,
+        "post_upper": n_new,
+        "total_upper": 1 + test_unassign_wag + n_new,
+        "warnings": warnings,
+    }
+
 # --------------------------------------------------------------------
 # Main Helpers
 # --------------------------------------------------------------------
 
+@_unity_http_op_summary_log("upload_unity_creatives_to_campaign")
 def upload_unity_creatives_to_campaign(
     *, 
     game: str, 
@@ -1978,6 +2322,7 @@ def upload_unity_creatives_to_campaign(
         "total_expected": total_pairs
     }
 
+@_unity_http_op_summary_log("apply_unity_creative_packs_to_campaign")
 def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List[str], settings: Dict[str, Any], is_marketer: bool = False) -> Dict[str, Any]:
     if not creative_pack_ids:
         raise RuntimeError("No creative pack IDs to apply.")

@@ -560,6 +560,52 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     elif platform == "Unity Ads":
                         unity_ok_placeholder = st.empty()
                         st.write("")
+                        _unity_us_est = unity_module.get_unity_settings(game, prefix=prefix)
+                        _unity_remote_est = st.session_state.get(_rv, {}).get(game, [])
+                        _unity_pack_pages = st.number_input(
+                            "Unity 추정용: 팩 목록 조회 페이지 수 (GET, 100개/페이지)",
+                            min_value=1,
+                            max_value=500,
+                            value=1,
+                            key=f"{kp}unity_est_pack_pages_{game}",
+                            help="앱에 Creative Pack이 많을수록 목록 API가 여러 번 호출됩니다. 상한 추정에만 쓰입니다.",
+                        )
+                        _est_create = uni_ops.estimate_unity_create_api_calls(
+                            _unity_remote_est,
+                            settings=_unity_us_est,
+                            pack_list_pages_guess=_unity_pack_pages,
+                            is_marketer=is_marketer,
+                        )
+                        _created_est = st.session_state.get(_ucp, {}).get(game, [])
+                        _est_apply = uni_ops.estimate_unity_apply_api_calls(
+                            _unity_us_est,
+                            _created_est,
+                            is_marketer=is_marketer,
+                        )
+                        with st.expander("Unity 서버 요청 수 (추정 상한)", expanded=False):
+                            st.caption(
+                                "실제는 재개·이미 존재하는 에셋 스킵, 429 재시도 등으로 더 적을 수 있습니다."
+                            )
+                            if _est_create.get("pack_mode") == "none":
+                                st.write("**팩 생성**: 파일이 없어 추정 불가")
+                            else:
+                                st.write(
+                                    f"**팩 생성** (`{_est_create.get('pack_mode')}`, "
+                                    f"플랫폼 실행 {_est_create.get('platform_runs', 0)}회 기준)\n"
+                                    f"- GET 상한: **{_est_create.get('get_upper', 0)}**\n"
+                                    f"- POST 상한: **{_est_create.get('post_upper', 0)}**\n"
+                                    f"- 합계 상한: **{_est_create.get('total_upper', 0)}**"
+                                )
+                            for _w in _est_create.get("warnings") or []:
+                                st.warning(_w)
+                            st.write(
+                                f"**캠페인 적용**\n"
+                                f"- GET 상한: **{_est_apply.get('get_upper', 0)}**\n"
+                                f"- POST 상한: **{_est_apply.get('post_upper', 0)}**\n"
+                                f"- 합계 상한: **{_est_apply.get('total_upper', 0)}**"
+                            )
+                            for _w in _est_apply.get("warnings") or []:
+                                st.caption(_w)
                         cont_unity_create = st.button("크리에이티브/팩 생성", key=f"{kp}unity_create_{game}", width="stretch")
                         cont_unity_apply = st.button("캠페인에 적용", key=f"{kp}unity_apply_{game}", width="stretch")
                         # Store current tab in query params when Unity buttons are clicked
