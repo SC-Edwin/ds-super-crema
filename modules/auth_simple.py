@@ -212,7 +212,11 @@ def login_with_password(username, password):
 
 def login_with_google(email):
     allowed_domains = ["@supercent.io"]
-    allowed_emails = ["rumble@supercent.vn"]
+    allowed_vn_user = [
+        'rumble', 'bomi', 'zoe', 'aaron', 'miko', 'ruelle', 'falcon',
+        'henry', 'hozler', 'ellie', 'kurly', 'elliot', 'thiago', 'pax'
+        ]
+    allowed_emails = [u + '@supercent.vn' for u in allowed_vn_user]
     if not any(email.endswith(d) for d in allowed_domains) and email not in allowed_emails:
         return False, "🚫 Supercent 계정만 사용 가능합니다"
     name = email.split("@")[0].capitalize()

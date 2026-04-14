@@ -361,7 +361,11 @@ def login_with_google(email):
     
     # 1. 도메인 체크 ( supercent.io 둘 다 허용)
     allowed_domains = ['@supercent.io']
-    allowed_emails = ['rumble@supercent.vn']
+    allowed_vn_user = [
+        'rumble', 'bomi', 'zoe', 'aaron', 'miko', 'ruelle', 'falcon',
+        'henry', 'hozler', 'ellie', 'kurly', 'elliot', 'thiago', 'pax'
+        ]
+    allowed_emails = [u + '@supercent.vn' for u in allowed_vn_user]
 
     if not any(email.endswith(domain) for domain in allowed_domains) and email not in allowed_emails:
         return False, "🚫 Supercent 계정만 사용 가능합니다"
