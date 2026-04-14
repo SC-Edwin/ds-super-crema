@@ -17,6 +17,7 @@ from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from datetime import datetime, timedelta, timezone
+from modules.upload_automation.network.http_client import request_with_retry, HttpRequestError
 logger = logging.getLogger(__name__)
 
 
@@ -48,6 +49,40 @@ def _get_api_config():
         "account_id": st.secrets["applovin"]["account_id"],
         "game_mapping": dict(st.secrets["applovin"].get("game_mapping", {}))
     }
+
+
+def _applovin_request(
+    method: str,
+    url: str,
+    *,
+    headers: dict | None = None,
+    params: dict | None = None,
+    json: dict | None = None,
+    files: dict | None = None,
+    timeout: int = 30,
+    max_retries: int = 2,
+) -> requests.Response:
+    try:
+        return request_with_retry(
+            method=method,
+            url=url,
+            headers=headers,
+            params=params,
+            json=json,
+            files=files,
+            timeout=timeout,
+            max_retries=max_retries,
+            backoff_seconds=lambda attempt: float(1 + attempt * 2),
+            on_retry=lambda attempt, resp, err: logger.warning(
+                "Applovin retry method=%s attempt=%s status=%s err=%s",
+                method.upper(),
+                attempt + 1,
+                getattr(resp, "status_code", None),
+                err,
+            ),
+        )
+    except HttpRequestError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 # =========================================================
 # Settings State Management
@@ -410,12 +445,14 @@ def _create_creative_set_api(
         
         logger.info(f"Creating creative set: {name} with {len(video_ids)} videos, {len(playable_ids)} playables")
         
-        response = requests.post(
+        response = _applovin_request(
+            "POST",
             f"{APPLOVIN_BASE_URL}/creative_set/create",
             headers=headers,
             params={"account_id": config["account_id"]},
             json=payload,
-            timeout=30
+            timeout=30,
+            max_retries=2,
         )
         
         response.raise_for_status()
@@ -480,12 +517,14 @@ def _upload_assets_to_media_library(files: List[Dict], max_workers: int = 3) -> 
                     'files': (file_name, f, content_type)
                 }
                 
-                response = requests.post(
+                response = _applovin_request(
+                    "POST",
                     f"{APPLOVIN_BASE_URL}/asset/upload",
                     headers=headers,
                     params={"account_id": account_id},
                     files=files_payload,
-                    timeout=120  # 2분 타임아웃 (큰 파일 대비)
+                    timeout=120,  # 2분 타임아웃 (큰 파일 대비)
+                    max_retries=2,
                 )
                 
                 response.raise_for_status()
@@ -500,14 +539,16 @@ def _upload_assets_to_media_library(files: List[Dict], max_workers: int = 3) -> 
                 for attempt in range(max_attempts):
                     time.sleep(1)
                     
-                    status_response = requests.get(
+                    status_response = _applovin_request(
+                        "GET",
                         f"{APPLOVIN_BASE_URL}/asset/upload_result",
                         headers=headers,
                         params={
                             "account_id": account_id,
                             "upload_id": upload_id
                         },
-                        timeout=30
+                        timeout=30,
+                        max_retries=2,
                     )
                     status_response.raise_for_status()
                     status_data = status_response.json()
@@ -595,12 +636,14 @@ def _clone_creative_sets_api(
                     "status": status
                 }
                 
-                response = requests.post(
+                response = _applovin_request(
+                    "POST",
                     f"{APPLOVIN_BASE_URL}/creative_set/clone",
                     headers=headers,
                     params={"account_id": config["account_id"]},
                     json=payload,
-                    timeout=30
+                    timeout=30,
+                    max_retries=2,
                 )
                 
                 response.raise_for_status()
@@ -646,11 +689,13 @@ def get_campaigns(game: str = None) -> List[Dict]:
         
         # 먼저 첫 페이지로 전체 페이지 수 추정
         params = {"account_id": account_id, "page": 1, "size": 100}
-        response = requests.get(
+        response = _applovin_request(
+            "GET",
             f"{APPLOVIN_BASE_URL}/campaign/list",
             headers=headers,
             params=params,
-            timeout=30
+            timeout=30,
+            max_retries=2,
         )
         response.raise_for_status()
         first_page = response.json()
@@ -665,11 +710,13 @@ def get_campaigns(game: str = None) -> List[Dict]:
             
             def fetch_page(page_num):
                 params = {"account_id": account_id, "page": page_num, "size": 100}
-                resp = requests.get(
+                resp = _applovin_request(
+                    "GET",
                     f"{APPLOVIN_BASE_URL}/campaign/list",
                     headers=headers,
                     params=params,
-                    timeout=30
+                    timeout=30,
+                    max_retries=2,
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -743,11 +790,13 @@ def get_assets(game: str = None) -> Dict[str, List[Dict]]:
         
         # 먼저 첫 페이지로 전체 페이지 수 추정
         params = {"account_id": account_id, "page": 1, "size": 100}
-        response = requests.get(
+        response = _applovin_request(
+            "GET",
             f"{APPLOVIN_BASE_URL}/asset/list",
             headers=headers,
             params=params,
-            timeout=30
+            timeout=30,
+            max_retries=2,
         )
         response.raise_for_status()
         first_page = response.json()
@@ -762,11 +811,13 @@ def get_assets(game: str = None) -> Dict[str, List[Dict]]:
             
             def fetch_page(page_num):
                 params = {"account_id": account_id, "page": page_num, "size": 100}
-                resp = requests.get(
+                resp = _applovin_request(
+                    "GET",
                     f"{APPLOVIN_BASE_URL}/asset/list",
                     headers=headers,
                     params=params,
-                    timeout=30
+                    timeout=30,
+                    max_retries=2,
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -870,11 +921,13 @@ def get_creative_sets_by_campaign(campaign_id: str) -> List[Dict]:
                 "size": 100
             }
             
-            response = requests.get(
+            response = _applovin_request(
+                "GET",
                 f"{APPLOVIN_BASE_URL}/creative_set/list_by_campaign_id",
                 headers=headers,
                 params=params,
-                timeout=30
+                timeout=30,
+                max_retries=2,
             )
             response.raise_for_status()
             data = response.json()
@@ -965,10 +1018,12 @@ def get_playable_performance(campaign_id: str, campaign_name: str = "") -> Dict[
             "format": "json"
         }
         
-        response = requests.get(
+        response = _applovin_request(
+            "GET",
             "https://r.applovin.com/assetReport",
             params=params,
-            timeout=120
+            timeout=120,
+            max_retries=2,
         )
         
         if response.status_code != 200:

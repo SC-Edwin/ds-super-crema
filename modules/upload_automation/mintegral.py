@@ -22,6 +22,7 @@ import time
 import os
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from modules.upload_automation.network.http_client import request_with_retry, HttpRequestError
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,41 @@ def _get_auth_headers():
         "Content-Type": "application/json"
     }
 
+
+def _mt_request(
+    method: str,
+    url: str,
+    *,
+    headers: dict | None = None,
+    params: dict | None = None,
+    json: dict | None = None,
+    files: dict | None = None,
+    timeout: int = 30,
+    max_retries: int = 2,
+) -> requests.Response:
+    """Mintegral API request wrapper with shared retry policy."""
+    try:
+        return request_with_retry(
+            method=method,
+            url=url,
+            headers=headers,
+            params=params,
+            json=json,
+            files=files,
+            timeout=timeout,
+            max_retries=max_retries,
+            backoff_seconds=lambda attempt: float(1 + attempt * 2),
+            on_retry=lambda attempt, resp, err: logger.warning(
+                "Mintegral retry method=%s attempt=%s status=%s err=%s",
+                method.upper(),
+                attempt + 1,
+                getattr(resp, "status_code", None),
+                err,
+            ),
+        )
+    except HttpRequestError as exc:
+        raise RuntimeError(str(exc)) from exc
+
 # =========================================================
 # Settings State Management
 # =========================================================
@@ -134,11 +170,13 @@ def get_creatives(creative_type: Optional[str] = None, game_filter: Optional[Lis
             if creative_type:
                 params["creative_type"] = creative_type
             
-            response = requests.get(
+            response = _mt_request(
+                "GET",
                 f"{MINTEGRAL_BASE_URL}/creatives/source",
                 headers=headers,
                 params=params,
-                timeout=15
+                timeout=15,
+                max_retries=3,
             )
             response.raise_for_status()
             
@@ -207,11 +245,13 @@ def get_offers(game_filter: Optional[List[str]] = None, max_pages: int = 3, only
             if api_filter:
                 params["offer_name"] = api_filter
             
-            response = requests.get(
+            response = _mt_request(
+                "GET",
                 f"{MINTEGRAL_BASE_URL}/offers",
                 headers=headers,
                 params=params,
-                timeout=15
+                timeout=15,
+                max_retries=3,
             )
             response.raise_for_status()
             
@@ -292,11 +332,13 @@ def _fetch_all_creative_sets(game_short: List[str], max_pages: int = 5, only_run
         try:
             headers = _get_auth_headers()
             params = {"offer_id": offer_id, "page": 1, "limit": 50}
-            response = requests.get(
+            response = _mt_request(
+                "GET",
                 f"{MINTEGRAL_BASE_URL}/creative_sets",
                 headers=headers,
                 params=params,
-                timeout=15
+                timeout=15,
+                max_retries=3,
             )
             response.raise_for_status()
             data = response.json()
@@ -587,11 +629,13 @@ def _render_upload_creative_set(game: str, idx: int, cur: Dict) -> None:
                     headers = _get_auth_headers()
                     params = {"offer_id": selected_offer_ids[0], "page": 1, "limit": 10}
                     
-                    response = requests.get(
+                    response = _mt_request(
+                        "GET",
                         f"{MINTEGRAL_BASE_URL}/creative_sets",
                         headers=headers,
                         params=params,
-                        timeout=15
+                        timeout=15,
+                        max_retries=2,
                     )
                     response.raise_for_status()
                     data = response.json()
@@ -901,7 +945,14 @@ def upload_creative_to_library(file_path: str, creative_type: str = "VIDEO", ori
         # Open and upload file
         with open(file_path, 'rb') as f:
             files = {'file': (filename, f)}  # ← 수정: 원본 파일명 사용
-            response = requests.post(url, headers=headers_no_content_type, files=files, timeout=300)
+            response = _mt_request(
+                "POST",
+                url,
+                headers=headers_no_content_type,
+                files=files,
+                timeout=300,
+                max_retries=2,
+            )
         
         response.raise_for_status()
         data = response.json()
@@ -1133,7 +1184,7 @@ def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
     # Step 2: 네트워크 연결 테스트
     try:
         logger.info("🌐 Testing network connection to Mintegral API...")
-        test_response = requests.get("https://ss-api.mintegral.com", timeout=5)
+        test_response = _mt_request("GET", "https://ss-api.mintegral.com", timeout=5, max_retries=1)
         logger.info(f"✅ Network test OK: {test_response.status_code}")
     except Exception as e:
         logger.error(f"❌ Cannot reach Mintegral API: {e}", exc_info=True)
@@ -1143,7 +1194,7 @@ def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
             "errors": [f"Network error: {str(e)}"]
         }
     try:
-        test_response = requests.get("https://ss-api.mintegral.com", timeout=5)
+        test_response = _mt_request("GET", "https://ss-api.mintegral.com", timeout=5, max_retries=1)
         logger.info(f"Network test: {test_response.status_code}")
     except Exception as e:
         logger.error(f"Cannot reach Mintegral API: {e}")
@@ -1292,11 +1343,13 @@ def _upload_creative_set(game: str, videos: List[Dict], settings: Dict) -> Dict:
             logger.info(f"📤 Sending API request to Offer {offer_id}:")
             logger.info(f"   - Payload: {payload}")
             
-            response = requests.post(
+            response = _mt_request(
+                "POST",
                 f"{MINTEGRAL_BASE_URL}/creative_set",
                 headers=headers,
                 json=payload,
-                timeout=30
+                timeout=30,
+                max_retries=2,
             )
             
             logger.info(f"📥 API Response for Offer {offer_id}:")
@@ -1387,11 +1440,13 @@ def _copy_creative_sets(game: str, settings: Dict) -> Dict:
                     "creatives": creatives_payload
                 }
                 
-                response = requests.post(
+                response = _mt_request(
+                    "POST",
                     f"{MINTEGRAL_BASE_URL}/creative_set",
                     headers=headers,
                     json=payload,
-                    timeout=30
+                    timeout=30,
+                    max_retries=2,
                 )
                 
                 response.raise_for_status()
@@ -1537,11 +1592,13 @@ def _delete_creative_sets(game: str, settings: Dict) -> Dict:
 
             logger.info(f"Deleting creative set '{creative_set_name}' from Offer {offer_id}")
 
-            response = requests.delete(
+            response = _mt_request(
+                "DELETE",
                 f"{MINTEGRAL_BASE_URL}/creative_set",
                 headers=headers,
                 json=payload,
-                timeout=30
+                timeout=30,
+                max_retries=2,
             )
 
             response.raise_for_status()

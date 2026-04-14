@@ -18,6 +18,7 @@ import time
 import requests
 import streamlit as st
 from modules.upload_automation import devtools
+from modules.upload_automation.network.http_client import request_with_retry, HttpRequestError
 
 logger = logging.getLogger(__name__)
 
@@ -900,59 +901,87 @@ def _unity_headers() -> dict:
 
 def _unity_post(path: str, json_body: dict) -> dict:
     url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
-    last_error: Exception | None = None
     last_429_detail: str = ""
+    exhausted_quota = False
 
-    for attempt in range(8):
-        try:
-            resp = requests.post(url, headers=_unity_headers(), json=json_body, timeout=60)
-            _record_unity_http_call("POST", path, resp)
+    def _on_retry(attempt: int, resp: requests.Response | None, err: Exception | None) -> None:
+        nonlocal last_429_detail, exhausted_quota
+        if err is not None:
+            logger.warning("Request failed: %s. Retrying...", err)
+            return
+        if resp is None:
+            return
+        if resp.status_code == 429:
+            detail = (resp.text or "")[:800]
+            last_429_detail = detail
+            rate_headers = {k: v for k, v in resp.headers.items() if "rate" in k.lower() or "retry" in k.lower() or "limit" in k.lower()}
+            logger.error(
+                "[Unity 429] POST %s | attempt=%s/8 | response_body=%s | rate_headers=%s",
+                path,
+                attempt + 1,
+                detail,
+                rate_headers,
+            )
+            if "quota" in detail.lower():
+                if _switch_to_next_key():
+                    logger.warning("Unity Quota Exceeded on key -> switching to next key and retrying")
+                    return
+                exhausted_quota = True
+                return
+            sleep_sec = 2 ** (attempt + 1)
+            logger.warning("Unity 429 Rate Limit (attempt %s/8). Sleeping %.1fs...", attempt + 1, sleep_sec)
 
-            if resp.status_code == 429:
-                detail = resp.text[:800]
-                last_429_detail = detail
-                rate_headers = {k: v for k, v in resp.headers.items() if "rate" in k.lower() or "retry" in k.lower() or "limit" in k.lower()}
-                logger.error(
-                    f"[Unity 429] POST {path} | attempt={attempt+1}/8 | "
-                    f"response_body={detail} | rate_headers={rate_headers}"
-                )
-                if "quota" in detail.lower():
-                    if _switch_to_next_key():
-                        logger.warning(f"Unity Quota Exceeded on key → switching to next key and retrying")
-                        continue  # 다음 키로 재시도
-                    raise RuntimeError(f"Unity Quota Exceeded (all keys exhausted): {detail}")
+    def _should_retry(resp: requests.Response) -> bool:
+        if resp.status_code != 429:
+            return False
+        if "quota" in (resp.text or "").lower():
+            return not exhausted_quota
+        return True
 
-                sleep_sec = 2 ** (attempt + 1)
-                logger.warning(f"Unity 429 Rate Limit (attempt {attempt+1}/8). Sleeping {sleep_sec}s...")
-                time.sleep(sleep_sec)
-                continue
-
-            if not resp.ok:
-                error_body = resp.text[:800] if resp.text else ""
-                logger.error(
-                    f"[Unity Error] POST {path} | status={resp.status_code} | "
-                    f"response_body={error_body}"
-                )
-                raise RuntimeError(f"Unity POST {path} failed ({resp.status_code}): {error_body}")
-
-            return resp.json()
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Request failed: {e}. Retrying...")
-            time.sleep(2)
-            last_error = e
-
-    # 429가 반복되어 여기에 도달한 경우, 실제 API 응답을 포함
-    if last_429_detail:
-        raise RuntimeError(
-            f"Unity 429 Rate Limit — POST {path} failed after 8 retries. "
-            f"Last API response: {last_429_detail[:400]}"
+    try:
+        resp = request_with_retry(
+            method="POST",
+            url=url,
+            headers=_unity_headers(),
+            json=json_body,
+            timeout=60,
+            max_retries=7,
+            backoff_seconds=lambda attempt: float(2 ** (attempt + 1)),
+            should_retry=_should_retry,
+            on_response=lambda r: _record_unity_http_call("POST", path, r),
+            on_retry=_on_retry,
         )
-    raise last_error or RuntimeError(f"Unity POST {path} failed after 8 retries.")
+    except HttpRequestError:
+        if exhausted_quota and last_429_detail:
+            raise RuntimeError(f"Unity Quota Exceeded (all keys exhausted): {last_429_detail}")
+        if last_429_detail:
+            raise RuntimeError(
+                f"Unity 429 Rate Limit - POST {path} failed after 8 retries. "
+                f"Last API response: {last_429_detail[:400]}"
+            )
+        raise RuntimeError(f"Unity POST {path} failed after 8 retries.")
+
+    if not resp.ok:
+        error_body = resp.text[:800] if resp.text else ""
+        logger.error(
+            f"[Unity Error] POST {path} | status={resp.status_code} | "
+            f"response_body={error_body}"
+        )
+        raise RuntimeError(f"Unity POST {path} failed ({resp.status_code}): {error_body}")
+    return resp.json()
 
 def _unity_put(path: str, json_body: dict) -> dict:
     url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
-    resp = requests.put(url, headers=_unity_headers(), json=json_body, timeout=60)
-    _record_unity_http_call("PUT", path, resp)
+    resp = request_with_retry(
+        method="PUT",
+        url=url,
+        headers=_unity_headers(),
+        json=json_body,
+        timeout=60,
+        max_retries=2,
+        on_response=lambda r: _record_unity_http_call("PUT", path, r),
+        on_retry=lambda attempt, resp, err: logger.warning("Unity PUT retry attempt=%s path=%s", attempt + 1, path),
+    )
     if not resp.ok:
         raise RuntimeError(f"Unity PUT {path} failed ({resp.status_code}): {resp.text[:400]}")
     return resp.json()
@@ -960,45 +989,77 @@ def _unity_put(path: str, json_body: dict) -> dict:
 def _unity_get(path: str, params: dict | None = None) -> dict:
     url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
     last_429_detail: str = ""
+    exhausted_quota = False
 
-    for attempt in range(5):
-        resp = requests.get(url, headers=_unity_headers(), params=params or {}, timeout=60)
-        _record_unity_http_call("GET", path, resp)
+    def _on_retry(attempt: int, resp: requests.Response | None, err: Exception | None) -> None:
+        nonlocal last_429_detail, exhausted_quota
+        if err is not None:
+            logger.warning("Unity GET request failed: %s", err)
+            return
+        if resp is None or resp.status_code != 429:
+            return
+        detail = (resp.text or "")[:800]
+        last_429_detail = detail
+        rate_headers = {k: v for k, v in resp.headers.items() if "rate" in k.lower() or "retry" in k.lower() or "limit" in k.lower()}
+        logger.error(
+            "[Unity 429] GET %s | attempt=%s/5 | response_body=%s | rate_headers=%s",
+            path,
+            attempt + 1,
+            detail,
+            rate_headers,
+        )
+        if "quota" in detail.lower():
+            if _switch_to_next_key():
+                logger.warning("Unity Quota Exceeded on GET -> switching to next key")
+            else:
+                exhausted_quota = True
 
-        if resp.status_code == 429:
-            detail = resp.text[:800]
-            last_429_detail = detail
-            rate_headers = {k: v for k, v in resp.headers.items() if "rate" in k.lower() or "retry" in k.lower() or "limit" in k.lower()}
-            logger.error(
-                f"[Unity 429] GET {path} | attempt={attempt+1}/5 | "
-                f"response_body={detail} | rate_headers={rate_headers}"
-            )
-            if "quota" in detail.lower() and _switch_to_next_key():
-                logger.warning(f"Unity Quota Exceeded on GET → switching to next key")
-                continue
-            sleep_sec = 2 ** (attempt + 1)
-            time.sleep(sleep_sec)
-            continue
+    def _should_retry(resp: requests.Response) -> bool:
+        if resp.status_code != 429:
+            return False
+        if "quota" in (resp.text or "").lower():
+            return not exhausted_quota
+        return True
 
-        if not resp.ok:
-            error_body = resp.text[:800] if resp.text else ""
-            logger.error(
-                f"[Unity Error] GET {path} | status={resp.status_code} | "
-                f"params={params} | response_body={error_body}"
-            )
-            raise RuntimeError(f"Unity GET {path} failed ({resp.status_code}): {error_body}")
+    try:
+        resp = request_with_retry(
+            method="GET",
+            url=url,
+            headers=_unity_headers(),
+            params=params or {},
+            timeout=60,
+            max_retries=4,
+            backoff_seconds=lambda attempt: float(2 ** (attempt + 1)),
+            should_retry=_should_retry,
+            on_response=lambda r: _record_unity_http_call("GET", path, r),
+            on_retry=_on_retry,
+        )
+    except HttpRequestError:
+        raise RuntimeError(
+            f"Unity 429 Rate Limit - GET {path} failed after 5 retries. "
+            f"Last API response: {last_429_detail[:400]}"
+        )
 
-        return resp.json()
-
-    raise RuntimeError(
-        f"Unity 429 Rate Limit — GET {path} failed after 5 retries. "
-        f"Last API response: {last_429_detail[:400]}"
-    )
+    if not resp.ok:
+        error_body = resp.text[:800] if resp.text else ""
+        logger.error(
+            f"[Unity Error] GET {path} | status={resp.status_code} | "
+            f"params={params} | response_body={error_body}"
+        )
+        raise RuntimeError(f"Unity GET {path} failed ({resp.status_code}): {error_body}")
+    return resp.json()
 
 def _unity_delete(path: str) -> None:
     url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
-    resp = requests.delete(url, headers=_unity_headers(), timeout=60)
-    _record_unity_http_call("DELETE", path, resp)
+    resp = request_with_retry(
+        method="DELETE",
+        url=url,
+        headers=_unity_headers(),
+        timeout=60,
+        max_retries=2,
+        on_response=lambda r: _record_unity_http_call("DELETE", path, r),
+        on_retry=lambda attempt, resp, err: logger.warning("Unity DELETE retry attempt=%s path=%s", attempt + 1, path),
+    )
     if not resp.ok:
         error_body = resp.text[:800] if resp.text else ""
         logger.error(
