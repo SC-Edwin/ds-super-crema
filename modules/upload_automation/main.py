@@ -22,11 +22,11 @@ if root_dir not in sys.path:
 # =========================================================
 import streamlit as st
 from streamlit.components.v1 import html as components_html 
-from modules.upload_automation import devtools
-from modules.upload_automation.upload_logger import log_event
+from modules.upload_automation.utils import devtools
+from modules.upload_automation.utils.upload_logger import log_event
 
 # --- FIX: ADD CURRENT DIRECTORY TO PATH ---
-# This allows importing sibling files (drive_import, facebook_ads) 
+# This allows importing sibling files (facebook_ads, etc.)
 # when running from a different root directory (e.g. via app.py)
 import os
 import sys
@@ -54,10 +54,10 @@ logger = logging.getLogger(__name__)
 # 3. 디버깅 및 모듈 임포트 (수정된 부분)
 # =========================================================
 
-# (1) drive_import.py 파일이 진짜 있는지 눈으로 확인
-target_file = os.path.join(current_dir, "drive_import.py")  # ← 수정: root_dir → current_dir
+# (1) utils/drive_import.py 파일이 있는지 확인
+target_file = os.path.join(current_dir, "utils", "drive_import.py")
 if not os.path.exists(target_file):
-    st.error(f"🚨 [CRITICAL] 'drive_import.py' 파일을 찾을 수 없습니다!")
+    st.error(f"🚨 [CRITICAL] 'utils/drive_import.py' 파일을 찾을 수 없습니다!")
     st.code(f"찾는 위치: {target_file}")
     
     # 현재 폴더에 무슨 파일이 있는지 보여줌
@@ -70,11 +70,11 @@ if not os.path.exists(target_file):
 
 # (2) 파일은 있는데 불러오다가 에러가 나는 경우 체크
 try:
-    from modules.upload_automation.drive_import import import_drive_folder_videos_parallel as import_drive_folder_videos  # ← 수정
+    from modules.upload_automation.utils.drive_import import import_drive_folder_videos_parallel as import_drive_folder_videos  # ← 수정
     _DRIVE_IMPORT_SUPPORTS_PROGRESS = True
 except ImportError as e:
     try:
-        from modules.upload_automation.drive_import import import_drive_folder_videos  # ← 수정
+        from modules.upload_automation.utils.drive_import import import_drive_folder_videos  # ← 수정
         _DRIVE_IMPORT_SUPPORTS_PROGRESS = False
     except ImportError as e2:
         st.error("🚨 모듈을 불러오는 중 에러가 발생했습니다.")
@@ -84,7 +84,7 @@ except ImportError as e:
         st.stop()
 
 # 1. Game Manager (BigQuery Integration)
-from modules.upload_automation import game_manager  # ← 수정
+from modules.upload_automation.config import game_manager  # ← 수정
 
 # 2. Operations Modules (Admin/Full Access)
 # 2. Operations Modules (Admin/Full Access)

@@ -17,8 +17,14 @@ import threading
 import time
 import requests
 import streamlit as st
-from modules.upload_automation import devtools
-from modules.upload_automation.network.http_client import request_with_retry, HttpRequestError
+from modules.upload_automation.utils import devtools
+from modules.upload_automation.network.dto import RequestExecutionContextDTO, RetryPolicyDTO
+from modules.upload_automation.network.http_client import execute_request, HttpRequestError
+from modules.upload_automation.network.retry_policies import build_default_api_policy, build_no_retry_policy
+from modules.upload_automation.service.unity import (
+    UNITY_ADVERTISE_API_BASE,
+    build_unity_request,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +196,7 @@ UNITY_CAMPAIGN_SET_IDS_DEFAULT: Dict[str, str] = {}
 UNITY_CAMPAIGN_IDS_ALL: Dict[str, Dict[str, List[str]]] = {}
 UNITY_CAMPAIGN_IDS: Dict[str, List[str]] = {}
 
-UNITY_BASE_URL = "https://services.api.unity.com/advertise/v1"
+UNITY_BASE_URL = UNITY_ADVERTISE_API_BASE
 
 # --------------------------------------------------------------------
 # Build derived maps from unity_cfg (for defaults)
@@ -900,7 +906,6 @@ def _unity_headers() -> dict:
     return {"Authorization": _get_unity_auth_header(), "Content-Type": "application/json"}
 
 def _unity_post(path: str, json_body: dict) -> dict:
-    url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
     last_429_detail: str = ""
     exhausted_quota = False
 
@@ -939,18 +944,23 @@ def _unity_post(path: str, json_body: dict) -> dict:
         return True
 
     try:
-        resp = request_with_retry(
-            method="POST",
-            url=url,
+        request_dto = build_unity_request(
+            "POST",
+            path,
             headers=_unity_headers(),
             json=json_body,
             timeout=60,
+        )
+        retry_dto = RetryPolicyDTO(
             max_retries=7,
-            backoff_seconds=lambda attempt: float(2 ** (attempt + 1)),
+            backoff_strategy=lambda attempt: float(2 ** (attempt + 1)),
             should_retry=_should_retry,
+        )
+        context = RequestExecutionContextDTO(
             on_response=lambda r: _record_unity_http_call("POST", path, r),
             on_retry=_on_retry,
         )
+        resp = execute_request(request_dto, retry_dto, context=context)
     except HttpRequestError:
         if exhausted_quota and last_429_detail:
             raise RuntimeError(f"Unity Quota Exceeded (all keys exhausted): {last_429_detail}")
@@ -971,23 +981,23 @@ def _unity_post(path: str, json_body: dict) -> dict:
     return resp.json()
 
 def _unity_put(path: str, json_body: dict) -> dict:
-    url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
-    resp = request_with_retry(
-        method="PUT",
-        url=url,
+    request_dto = build_unity_request(
+        "PUT",
+        path,
         headers=_unity_headers(),
         json=json_body,
         timeout=60,
-        max_retries=2,
+    )
+    context = RequestExecutionContextDTO(
         on_response=lambda r: _record_unity_http_call("PUT", path, r),
         on_retry=lambda attempt, resp, err: logger.warning("Unity PUT retry attempt=%s path=%s", attempt + 1, path),
     )
+    resp = execute_request(request_dto, build_default_api_policy(max_retries=2), context=context)
     if not resp.ok:
         raise RuntimeError(f"Unity PUT {path} failed ({resp.status_code}): {resp.text[:400]}")
     return resp.json()
 
 def _unity_get(path: str, params: dict | None = None) -> dict:
-    url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
     last_429_detail: str = ""
     exhausted_quota = False
 
@@ -1022,18 +1032,23 @@ def _unity_get(path: str, params: dict | None = None) -> dict:
         return True
 
     try:
-        resp = request_with_retry(
-            method="GET",
-            url=url,
+        request_dto = build_unity_request(
+            "GET",
+            path,
             headers=_unity_headers(),
             params=params or {},
             timeout=60,
+        )
+        retry_dto = RetryPolicyDTO(
             max_retries=4,
-            backoff_seconds=lambda attempt: float(2 ** (attempt + 1)),
+            backoff_strategy=lambda attempt: float(2 ** (attempt + 1)),
             should_retry=_should_retry,
+        )
+        context = RequestExecutionContextDTO(
             on_response=lambda r: _record_unity_http_call("GET", path, r),
             on_retry=_on_retry,
         )
+        resp = execute_request(request_dto, retry_dto, context=context)
     except HttpRequestError:
         raise RuntimeError(
             f"Unity 429 Rate Limit - GET {path} failed after 5 retries. "
@@ -1050,16 +1065,17 @@ def _unity_get(path: str, params: dict | None = None) -> dict:
     return resp.json()
 
 def _unity_delete(path: str) -> None:
-    url = f"{UNITY_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
-    resp = request_with_retry(
-        method="DELETE",
-        url=url,
+    request_dto = build_unity_request(
+        "DELETE",
+        path,
         headers=_unity_headers(),
         timeout=60,
-        max_retries=2,
+    )
+    context = RequestExecutionContextDTO(
         on_response=lambda r: _record_unity_http_call("DELETE", path, r),
         on_retry=lambda attempt, resp, err: logger.warning("Unity DELETE retry attempt=%s path=%s", attempt + 1, path),
     )
+    resp = execute_request(request_dto, build_default_api_policy(max_retries=2), context=context)
     if not resp.ok:
         error_body = resp.text[:800] if resp.text else ""
         logger.error(
@@ -1143,7 +1159,6 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
         "video": {"fileName": display_filename}
     }
 
-    url = f"{UNITY_BASE_URL.rstrip('/')}/organizations/{org_id}/apps/{title_id}/creatives"
     path = f"organizations/{org_id}/apps/{title_id}/creatives"
     last_429_detail: str = ""
 
@@ -1155,8 +1170,17 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
                     "creativeInfo": (None, json.dumps(creative_info), "application/json"),
                     "videoFile": (display_filename, f, "video/mp4"),
                 }
-                resp = requests.post(url, headers=headers, files=files, timeout=300)
-            _record_unity_http_call("POST", f"{path}#multipart_video", resp)
+                request_dto = build_unity_request(
+                    "POST",
+                    path,
+                    headers=headers,
+                    files=files,
+                    timeout=300,
+                )
+                context = RequestExecutionContextDTO(
+                    on_response=lambda r: _record_unity_http_call("POST", f"{path}#multipart_video", r)
+                )
+                resp = execute_request(request_dto, build_no_retry_policy(), context=context)
 
             if resp.status_code == 429:
                 detail = (resp.text or "")[:800]
@@ -1218,7 +1242,6 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
     }
 
     logger.info(f"Unity playable creativeInfo: {json.dumps(creative_info)}")
-    url = f"{UNITY_BASE_URL.rstrip('/')}/organizations/{org_id}/apps/{title_id}/creatives"
     path = f"organizations/{org_id}/apps/{title_id}/creatives"
 
     # MIME type 결정 (zip vs html)
@@ -1237,8 +1260,17 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
                     "creativeInfo": (None, json.dumps(creative_info), "application/json"),
                     "playableFile": (file_name, f, mime_type),
                 }
-                resp = requests.post(url, headers=headers, files=files, timeout=300)
-            _record_unity_http_call("POST", f"{path}#multipart_playable", resp)
+                request_dto = build_unity_request(
+                    "POST",
+                    path,
+                    headers=headers,
+                    files=files,
+                    timeout=300,
+                )
+                context = RequestExecutionContextDTO(
+                    on_response=lambda r: _record_unity_http_call("POST", f"{path}#multipart_playable", r)
+                )
+                resp = execute_request(request_dto, build_no_retry_policy(), context=context)
 
             if resp.status_code == 429:
                 detail = (resp.text or "")[:800]

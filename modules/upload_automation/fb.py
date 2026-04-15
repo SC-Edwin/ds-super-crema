@@ -30,7 +30,11 @@ from facebook_business.adobjects.campaign import Campaign
 from facebook_business.exceptions import FacebookRequestError
     
 # Local imports
-from modules.upload_automation import devtools
+from modules.upload_automation.utils import devtools
+from modules.upload_automation.network.dto import RequestExecutionContextDTO
+from modules.upload_automation.service.facebook import build_advideos_resumable_request
+from modules.upload_automation.network.http_client import execute_request
+from modules.upload_automation.network.retry_policies import build_no_retry_policy
 from facebook_ads import (
     FB_GAME_MAPPING,
     GAME_DEFAULTS,
@@ -1569,19 +1573,20 @@ def upload_videos_to_library_and_create_single_ads(
             token = st.secrets.get("access_token", "").strip()
         
         act = account.get_id()
-        base_url = f"https://graph.facebook.com/v24.0/{act}/advideos"
         file_size = os.path.getsize(path)
         
         def _post(data, files=None):
             sess = _get_session()
 
             def _do():
-                r = sess.post(
-                    base_url,
+                req = build_advideos_resumable_request(
+                    account_id=act,
                     data={**data, "access_token": token},
                     files=files,
                     timeout=180,
                 )
+                ctx = RequestExecutionContextDTO(session=sess)
+                r = execute_request(req, build_no_retry_policy(), context=ctx)
                 j = r.json()
                 if "error" in j:
                     raise RuntimeError(j["error"].get("message") or "Facebook video upload failed")
@@ -2033,11 +2038,16 @@ def upload_all_videos_to_media_library(
             token = st.secrets.get("access_token", "").strip()
         
         act = account.get_id()
-        base_url = f"https://graph.facebook.com/v24.0/{act}/advideos"
         file_size = os.path.getsize(path)
         
         def _post(data, files=None):
-            r = requests.post(base_url, data={**data, "access_token": token}, files=files, timeout=180)
+            req = build_advideos_resumable_request(
+                account_id=act,
+                data={**data, "access_token": token},
+                files=files,
+                timeout=180,
+            )
+            r = execute_request(req, build_no_retry_policy())
             j = r.json()
             if "error" in j: 
                 raise RuntimeError(j["error"].get("message"))
@@ -2342,11 +2352,16 @@ def _upload_dynamic_single_video_ads(
             token = st.secrets.get("access_token", "").strip()
         
         act = account.get_id()
-        base_url = f"https://graph.facebook.com/v24.0/{act}/advideos"
         file_size = os.path.getsize(path)
         
         def _post(data, files=None):
-            r = requests.post(base_url, data={**data, "access_token": token}, files=files, timeout=180)
+            req = build_advideos_resumable_request(
+                account_id=act,
+                data={**data, "access_token": token},
+                files=files,
+                timeout=180,
+            )
+            r = execute_request(req, build_no_retry_policy())
             j = r.json()
             if "error" in j: 
                 raise RuntimeError(j["error"].get("message"))
@@ -2753,11 +2768,16 @@ def _upload_dynamic_1x1_ads(
             token = st.secrets.get("access_token", "").strip()
         
         act = account.get_id()
-        base_url = f"https://graph.facebook.com/v24.0/{act}/advideos"
         file_size = os.path.getsize(path)
         
         def _post(data, files=None):
-            r = requests.post(base_url, data={**data, "access_token": token}, files=files, timeout=180)
+            req = build_advideos_resumable_request(
+                account_id=act,
+                data={**data, "access_token": token},
+                files=files,
+                timeout=180,
+            )
+            r = execute_request(req, build_no_retry_policy())
             j = r.json()
             if "error" in j: 
                 raise RuntimeError(j["error"].get("message"))
@@ -3244,11 +3264,16 @@ def _upload_dynamic_16x9_ads(
             token = st.secrets.get("access_token", "").strip()
 
         act = account.get_id()
-        base_url = f"https://graph.facebook.com/v24.0/{act}/advideos"
         file_size = os.path.getsize(path)
 
         def _post(data, files=None):
-            r = requests.post(base_url, data={**data, "access_token": token}, files=files, timeout=180)
+            req = build_advideos_resumable_request(
+                account_id=act,
+                data={**data, "access_token": token},
+                files=files,
+                timeout=180,
+            )
+            r = execute_request(req, build_no_retry_policy())
             j = r.json()
             if "error" in j:
                 raise RuntimeError(j["error"].get("message"))
@@ -3689,11 +3714,16 @@ def _upload_dynamic_9x16_ads(
             token = st.secrets.get("access_token", "").strip()
 
         act = account.get_id()
-        base_url = f"https://graph.facebook.com/v24.0/{act}/advideos"
         file_size = os.path.getsize(path)
 
         def _post(data, files=None):
-            r = requests.post(base_url, data={**data, "access_token": token}, files=files, timeout=180)
+            req = build_advideos_resumable_request(
+                account_id=act,
+                data={**data, "access_token": token},
+                files=files,
+                timeout=180,
+            )
+            r = execute_request(req, build_no_retry_policy())
             j = r.json()
             if "error" in j:
                 raise RuntimeError(j["error"].get("message"))

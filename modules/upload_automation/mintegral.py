@@ -22,7 +22,10 @@ import time
 import os
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from modules.upload_automation.network.http_client import request_with_retry, HttpRequestError
+from modules.upload_automation.network.dto import RequestExecutionContextDTO
+from modules.upload_automation.network.http_client import execute_request, HttpRequestError
+from modules.upload_automation.service.mintegral import build_mintegral_http_request
+from modules.upload_automation.network.retry_policies import build_mintegral_api_policy
 
 logger = logging.getLogger(__name__)
 
@@ -106,24 +109,26 @@ def _mt_request(
 ) -> requests.Response:
     """Mintegral API request wrapper with shared retry policy."""
     try:
-        return request_with_retry(
-            method=method,
-            url=url,
+        request_dto = build_mintegral_http_request(
+            method,
+            url,
             headers=headers,
             params=params,
             json=json,
             files=files,
             timeout=timeout,
-            max_retries=max_retries,
-            backoff_seconds=lambda attempt: float(1 + attempt * 2),
+        )
+        policy_dto = build_mintegral_api_policy(max_retries=max_retries)
+        context = RequestExecutionContextDTO(
             on_retry=lambda attempt, resp, err: logger.warning(
                 "Mintegral retry method=%s attempt=%s status=%s err=%s",
                 method.upper(),
                 attempt + 1,
                 getattr(resp, "status_code", None),
                 err,
-            ),
+            )
         )
+        return execute_request(request_dto, policy_dto, context=context)
     except HttpRequestError as exc:
         raise RuntimeError(str(exc)) from exc
 
@@ -994,7 +999,7 @@ def batch_upload_from_drive(
     Returns:
         Dict with success count, failed count, and errors
     """
-    from modules.upload_automation import drive_import
+    from modules.upload_automation.utils import drive_import
     
     try:
         # Download from Drive

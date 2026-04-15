@@ -45,8 +45,10 @@ There is no test suite, linter configuration, or build step.
 - `unity_ads.py` + `uni.py` — Unity Ads API (admin + marketer modes)
 - `mintegral.py` — Mintegral API integration
 - `applovin.py` — Applovin API integration
-- `game_manager.py` — game configuration management (runtime `games_config.json`)
-- `drive_import.py` — Google Drive video import with parallel processing
+- `config/game_manager.py` — game configuration management (runtime `games_config.json`)
+- `utils/drive_import.py` — Google Drive video import with parallel processing
+- `utils/devtools.py`, `utils/upload_logger.py` — developer debug panel and BigQuery audit logging
+- `scripts/generate_refresh_token.py` — one-off CLI to mint Google Ads OAuth refresh token (not imported by the app)
 
 Each ad platform module follows a similar pattern: platform-specific settings panel, media library upload, creative set/campaign creation. The `*_ads.py`/`*.py` split separates API logic from Marketer-mode UI wrappers.
 

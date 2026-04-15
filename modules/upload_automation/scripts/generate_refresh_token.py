@@ -2,7 +2,7 @@
 Generate OAuth2 refresh token for Google Ads API.
 
 Reads client_id / client_secret from .streamlit/secrets.toml [google_ads].
-Run: python3 modules/upload_automation/generate_refresh_token.py
+Run: python3 modules/upload_automation/scripts/generate_refresh_token.py
 """
 import os
 import sys
@@ -25,7 +25,7 @@ def _load_secrets() -> dict:
     """Load [google_ads] section from .streamlit/secrets.toml."""
     # Walk up to find repo root with .streamlit/
     search = os.path.abspath(os.path.dirname(__file__))
-    for _ in range(5):
+    for _ in range(6):
         candidate = os.path.join(search, ".streamlit", "secrets.toml")
         if os.path.exists(candidate):
             data = toml.load(candidate)

@@ -12,6 +12,13 @@ import os
 import requests
 import streamlit as st
 
+from modules.upload_automation.service.facebook import (
+    build_adimages_upload_request,
+    build_advideos_resumable_request,
+)
+from modules.upload_automation.network.http_client import HttpRequestError, execute_request
+from modules.upload_automation.network.retry_policies import build_default_api_policy, build_no_retry_policy
+
 try:
     import cv2
     CV2_AVAILABLE = True
@@ -80,13 +87,13 @@ def upload_thumbnail_image(account: "AdAccount", image_path: str) -> str:
         raise RuntimeError("Missing access_token in st.secrets (check [facebook] section)")
 
     act_id = account.get_id()
-    url = f"https://graph.facebook.com/v24.0/{act_id}/adimages"
 
     try:
         with open(image_path, "rb") as f:
             files = {"file": (os.path.basename(image_path), f, "image/jpeg")}
             data = {"access_token": token}
-            resp = requests.post(url, files=files, data=data, timeout=60)
+            req = build_adimages_upload_request(account_id=act_id, data=data, files=files, timeout=60)
+            resp = execute_request(req, build_default_api_policy(max_retries=2))
             resp.raise_for_status()
             result = resp.json()
 
@@ -113,13 +120,14 @@ def upload_thumbnail_image(account: "AdAccount", image_path: str) -> str:
 
         raise RuntimeError(f"Failed to parse AdImage response: {result}")
 
-    except requests.exceptions.RequestException as e:
+    except (requests.exceptions.RequestException, HttpRequestError) as e:
         msg = str(e)
-        if getattr(e, "response", None) is not None:
+        resp_obj = getattr(e, "response", None)
+        if resp_obj is not None:
             try:
-                msg = e.response.json().get("error", {}).get("message", msg)
+                msg = resp_obj.json().get("error", {}).get("message", msg)
             except Exception:
-                msg = (e.response.text or msg)[:200]
+                msg = (resp_obj.text or msg)[:200]
         logger.error(f"Failed to upload thumbnail image {image_path}: {msg}")
         raise RuntimeError(f"Failed to upload thumbnail image: {msg}") from e
 
@@ -829,7 +837,6 @@ def upload_videos_create_ads(
             token = st.secrets.get("access_token", "").strip()
         
         act = account.get_id()
-        base_url = f"https://graph.facebook.com/v24.0/{act}/advideos"
         file_size = os.path.getsize(path)
 
         def _post(data, files=None, max_retries=5):
@@ -837,7 +844,13 @@ def upload_videos_create_ads(
             for i, d in enumerate(delays[:max_retries], 1):
                 if d: time.sleep(d)
                 try:
-                    r = requests.post(base_url, data={**data, "access_token": token}, files=files, timeout=180)
+                    req = build_advideos_resumable_request(
+                        account_id=act,
+                        data={**data, "access_token": token},
+                        files=files,
+                        timeout=180,
+                    )
+                    r = execute_request(req, build_no_retry_policy())
                     if r.status_code >= 500: continue
                     j = r.json()
                     if "error" in j and j["error"].get("code") == 390 and i < max_retries: continue

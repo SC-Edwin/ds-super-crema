@@ -17,7 +17,10 @@ from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from datetime import datetime, timedelta, timezone
-from modules.upload_automation.network.http_client import request_with_retry, HttpRequestError
+from modules.upload_automation.service.applovin import build_applovin_http_request
+from modules.upload_automation.network.dto import RequestExecutionContextDTO
+from modules.upload_automation.network.http_client import execute_request, HttpRequestError
+from modules.upload_automation.network.retry_policies import build_applovin_api_policy
 logger = logging.getLogger(__name__)
 
 
@@ -63,24 +66,26 @@ def _applovin_request(
     max_retries: int = 2,
 ) -> requests.Response:
     try:
-        return request_with_retry(
-            method=method,
-            url=url,
+        request_dto = build_applovin_http_request(
+            method,
+            url,
             headers=headers,
             params=params,
             json=json,
             files=files,
             timeout=timeout,
-            max_retries=max_retries,
-            backoff_seconds=lambda attempt: float(1 + attempt * 2),
+        )
+        policy_dto = build_applovin_api_policy(max_retries=max_retries)
+        context = RequestExecutionContextDTO(
             on_retry=lambda attempt, resp, err: logger.warning(
                 "Applovin retry method=%s attempt=%s status=%s err=%s",
                 method.upper(),
                 attempt + 1,
                 getattr(resp, "status_code", None),
                 err,
-            ),
+            )
         )
+        return execute_request(request_dto, policy_dto, context=context)
     except HttpRequestError as exc:
         raise RuntimeError(str(exc)) from exc
 

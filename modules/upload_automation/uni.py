@@ -18,6 +18,7 @@ import logging
 
 import streamlit as st
 
+from modules.upload_automation.service.unity import UNITY_ADVERTISE_API_BASE
 
 import unity_ads  # ← 이 줄 확인
 from unity_ads import (
@@ -525,7 +526,7 @@ def _upload_playable_only_packs(*, game: str, videos: List[Dict], settings: Dict
     
     return all_results
 logger = logging.getLogger(__name__)
-UNITY_BASE_URL = "https://services.api.unity.com/advertise/v1"
+UNITY_BASE_URL = UNITY_ADVERTISE_API_BASE
 # -------------------------------------------------------------------------
 # Small helper: pick app (title) ID for game + platform
 # -------------------------------------------------------------------------

@@ -61,7 +61,7 @@ upload_automation/
 ├── game_manager.py            ← 게임 목록 관리 (games_config.json)
 ├── upload_logger.py           ← BigQuery 감사 로그 (비동기, 백그라운드 스레드)
 ├── devtools.py                ← 개발자 모드 로깅/디버깅 패널
-├── generate_refresh_token.py  ← Google Ads OAuth 토큰 생성 (1회성 CLI 유틸)
+├── scripts/generate_refresh_token.py  ← Google Ads OAuth 토큰 생성 (1회성 CLI)
 └── vietnam.py                 ← 베트남팀 전용 탭 (Test Mode 복제, prefix="vn")
 ```
 
@@ -944,7 +944,7 @@ row = {
 1회성 CLI 유틸리티. 다른 모듈에서 import하지 않습니다.
 
 ```bash
-python3 modules/upload_automation/generate_refresh_token.py
+python3 modules/upload_automation/scripts/generate_refresh_token.py
 ```
 
 **동작:**
@@ -1047,7 +1047,7 @@ st.session_state
 | `[facebook] access_token` | 만료 시 (보통 60일) | Meta Business Suite에서 새 토큰 발급 후 교체 |
 | `[unity] authorization_header` | 만료 시 | Unity Dashboard에서 새 API 키 발급 |
 | `[unity] authorization_header_2` | 위와 동일 | 보조 키도 같이 갱신 |
-| `[google_ads] refresh_token` | 취소/만료 시 | `python3 modules/upload_automation/generate_refresh_token.py` 실행 |
+| `[google_ads] refresh_token` | 취소/만료 시 | `python3 modules/upload_automation/scripts/generate_refresh_token.py` 실행 |
 | `[mintegral] api_key` | 변경 시 | Mintegral 대시보드에서 확인 |
 | `[applovin] campaign_management_api_key` | 변경 시 | Applovin 대시보드에서 확인 |
 | `[gcp_service_account]` | 키 로테이션 시 | GCP 콘솔에서 새 서비스 계정 키 JSON 발급 |
@@ -1194,7 +1194,7 @@ Google Ads: CONCURRENT_MODIFICATION, VIDEO_NOT_FOUND
 |------|------|
 | UAC 전용 | MULTI_CHANNEL(앱 캠페인)만 지원 |
 | 광고그룹당 영상 제한 | 최대 20개 |
-| refresh_token 만료 | 만료 시 `generate_refresh_token.py`로 재발급 필요 |
+| refresh_token 만료 | 만료 시 `scripts/generate_refresh_token.py`로 재발급 필요 |
 
 ### Mintegral
 
@@ -1233,7 +1233,7 @@ pip install -r requirements.txt
 gcloud auth application-default login
 
 # 4. Google Ads refresh_token 발급 (최초 1회)
-python3 modules/upload_automation/generate_refresh_token.py
+python3 modules/upload_automation/scripts/generate_refresh_token.py
 
 # 5. 앱 실행
 streamlit run app.py
@@ -1260,10 +1260,10 @@ streamlit run app.py
 - [x] `modules/upload_automation/network/http_client.py` 추가
   - `request_with_retry()` 공통 함수
   - `HttpRequestError` 표준 예외
-- [x] Unity API 헬퍼(`_unity_get/_post/_put/_delete`)를 공통 레이어 기반으로 전환
+- [x] Unity API 헬퍼(`_unity_get/_post/_put/_delete`) 및 멀티파트 크리에이티브 생성(`_unity_create_*`)를 공통 레이어 기반으로 전환
 - [x] Mintegral 주요 API 호출을 `_mt_request()`를 통해 공통 레이어로 통합
 - [x] Applovin 주요 API 호출을 `_applovin_request()`를 통해 공통 레이어로 통합
-- [ ] Facebook raw `requests` 경로(`facebook_ads.py`, `fb.py`)를 공통 레이어로 단계적 이관
+- [x] Facebook Graph `POST` 경로(`facebook_ads.py`, `fb.py`)를 `request_with_retry`로 이관 (`fb.py`는 `requests.Session` 연결 재사용을 `session=` 인자로 유지)
 - [ ] 공통 Retry 정책 표준화 (기본 backoff, 429/5xx 재시도, timeout 프로파일)
 
 ### 설정/시크릿 접근 표준화
