@@ -31,6 +31,7 @@ from facebook_business.exceptions import FacebookRequestError
     
 # Local imports
 from modules.upload_automation.utils import devtools
+from modules.upload_automation.utils.video_thumbnail import extract_thumbnail_from_video
 from modules.upload_automation.network.dto import RequestExecutionContextDTO
 from modules.upload_automation.service.facebook import build_advideos_resumable_request
 from modules.upload_automation.network.http_client import execute_request
@@ -42,7 +43,6 @@ from modules.upload_automation.platforms.meta.facebook_ads import (
     _plan_upload,
     build_targeting_from_settings,
     create_creativetest_adset,
-    extract_thumbnail_from_video,
     init_fb_from_secrets,
     init_fb_game_defaults,
     make_ad_name,

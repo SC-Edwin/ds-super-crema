@@ -18,61 +18,18 @@ from modules.upload_automation.service.facebook import (
 )
 from modules.upload_automation.network.http_client import HttpRequestError, execute_request
 from modules.upload_automation.network.retry_policies import build_default_api_policy, build_no_retry_policy
-
-try:
-    import cv2
-    CV2_AVAILABLE = True
-except ImportError:
-    CV2_AVAILABLE = False
+from modules.upload_automation.platforms.meta.facebook_game_catalog import (
+    DEFAULT_FB_AD_ACCOUNT_ID,
+    FB_GAME_MAPPING,
+    GAME_DEFAULTS,
+)
+from modules.upload_automation.utils.video_thumbnail import extract_thumbnail_from_video
 
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------
 # Thumbnail extraction and upload helpers
 # --------------------------------------------------------------------
-def extract_thumbnail_from_video(video_path: str, output_path: str | None = None) -> str:
-    """
-    Extract thumbnail from video using opencv.
-    Returns path to the saved thumbnail image.
-    """
-    if not CV2_AVAILABLE:
-        raise RuntimeError(
-            "opencv-python-headless is required for thumbnail extraction. "
-            "Install it with: pip install opencv-python-headless"
-        )
-    
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video: {video_path}")
-    
-    try:
-        # Get middle frame (or first frame if video is too short)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if total_frames > 0:
-            frame_number = max(0, total_frames // 2)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
-        
-        ret, frame = cap.read()
-        
-        if not ret:
-            # Fallback to first frame
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            ret, frame = cap.read()
-        
-        if not ret:
-            raise RuntimeError(f"Cannot read frame from video: {video_path}")
-        
-        # Save thumbnail
-        if output_path is None:
-            import tempfile
-            output_path = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False).name
-        
-        cv2.imwrite(output_path, frame)
-        logger.info(f"Extracted thumbnail from {video_path} to {output_path}")
-        return output_path
-    finally:
-        cap.release()
-
 def upload_thumbnail_image(account: "AdAccount", image_path: str) -> str:
     """
     Upload a thumbnail image to Meta (adimages) and return the *image hash*.
@@ -449,68 +406,6 @@ def get_fb_settings(game: str, prefix: str = "") -> dict:
     _ensure_settings_state(prefix)
     return st.session_state[_fb_key(prefix, "settings")].get(game, {})
 
-# --------------------------------------------------------------------
-# Default per-game App IDs + Store URLs
-# --------------------------------------------------------------------
-GAME_DEFAULTS: Dict[str, Dict[str, str]] = {
-    "XP HERO": {
-        "fb_app_id": "519275767201283",
-        "store_url": "https://play.google.com/store/apps/details?id=io.supercent.weaponrpg",
-    },
-    "Dino Universe": {
-        "fb_app_id": "1665399243918955",
-        "store_url": "https://play.google.com/store/apps/details?id=io.supercent.ageofdinosaurs",
-    },
-    "Snake Clash": {
-        "fb_app_id": "1205179980183812",
-        "store_url": "https://play.google.com/store/apps/details?id=io.supercent.linkedcubic",
-    },
-    "Pizza Ready": {
-        "fb_app_id": "1475920199615616",
-        "store_url": "https://play.google.com/store/apps/details?id=io.supercent.pizzaidle",
-    },
-    "Cafe Life": {
-        "fb_app_id": "1343040866909064",
-        "store_url": "https://play.google.com/store/apps/details?id=com.fireshrike.h2",
-    },
-    "Suzy's Restaurant": {
-        "fb_app_id": "836273807918279",
-        "store_url": "https://play.google.com/store/apps/details?id=com.corestudiso.suzyrest",
-    },
-    "Office Life": {
-        "fb_app_id": "1570824996873176",
-        "store_url": "https://play.google.com/store/apps/details?id=com.funreal.corporatetycoon",
-    },
-    "Lumber Chopper": {
-        "fb_app_id": "2824067207774178",
-        "store_url": "https://play.google.com/store/apps/details?id=dasi.prs2.lumberchopper",
-    },
-    "Burger Please": {
-        "fb_app_id": "2967105673598896",
-        "store_url": "https://play.google.com/store/apps/details?id=io.supercent.burgeridle",
-    },
-    "Prison Life": {
-        "fb_app_id": "6564765833603067",
-        "store_url": "https://play.google.com/store/apps/details?id=io.supercent.prison",
-    },
-    "Arrow Flow": {
-        "fb_app_id": "1178896120788157",
-        "store_url": "https://play.google.com/store/apps/details?id=com.hg.arrow&hl=ko",
-    },
-    "Roller Disco": {
-        "fb_app_id": "579397764432053",
-        "store_url": "https://play.google.com/store/apps/details?id=com.Albus.RollerDisco",
-    },
-    "Waterpark Boys": {
-        "fb_app_id": "957490872253064",
-        "store_url": "https://play.google.com/store/apps/details?id=com.Albus.WaterParkBoys",
-    },
-    "Downhill Racer": {
-        "fb_app_id": "1332540784297154",
-        "store_url": "https://play.google.com/store/apps/details?id=io.supercent.downhill",
-    },
-}
-
 def init_fb_game_defaults(prefix: str = "") -> None:
     """
     Apply FB app_id/store_url defaults per game without overwriting
@@ -551,8 +446,7 @@ def init_fb_from_secrets(ad_account_id: str | None = None) -> "AdAccount":
 
     FacebookAdsApi.init(access_token=token)
 
-    default_act_id = "act_692755193188182"  # XP HERO default
-    act_id = ad_account_id or default_act_id
+    act_id = ad_account_id or DEFAULT_FB_AD_ACCOUNT_ID
     return AdAccount(act_id)
 
 def validate_page_binding(account: "AdAccount", page_id: str) -> dict:
@@ -1293,108 +1187,8 @@ def create_creativetest_adset(
     return adset["id"]
 
 # --------------------------------------------------------------------
-# Per-game mapping + main entry
+# Per-game mapping + main entry  (데이터는 facebook_game_catalog)
 # --------------------------------------------------------------------
-FB_GAME_MAPPING: Dict[str, Dict[str, Any]] = {
-    "XP HERO": {
-        "account_id": "act_692755193188182",
-        "campaign_id": "120218934861590118",
-        "campaign_name": "weaponrpg_aos_facebook_us_creativetest",
-        "adset_prefix": "weaponrpg_aos_facebook_us_creativetest",
-        "page_id_key": "page_id_xp",
-    },
-    "Dino Universe": {
-        "account_id": "act_1400645283898971",
-        "campaign_id": "120203672340130431",
-        "campaign_name": "ageofdinosaurs_aos_facebook_us_test_6th+",
-        "adset_prefix": "ageofdinosaurs_aos_facebook_us_test",
-        "page_id_key": "page_id_dino",
-    },
-    "Snake Clash": {
-        "account_id": "act_837301614677763",
-        "campaign_id": "120201313657080615",
-        "campaign_name": "linkedcubic_aos_facebook_us_test_14th above",
-        "adset_prefix": "linkedcubic_aos_facebook_us_test",
-        "page_id_key": "page_id_snake",
-    },
-    "Pizza Ready": {
-        "account_id": "act_939943337267153",
-        "campaign_id": "120200161907250465",
-        "campaign_name": "pizzaidle_aos_facebook_us_test_12th+",
-        "adset_prefix": "pizzaidle_aos_facebook_us_test",
-        "page_id_key": "page_id_pizza",
-    },
-    "Cafe Life": {
-        "account_id": "act_1425841598550220",
-        "campaign_id": "120231530818850361",
-        "campaign_name": "cafelife_aos_facebook_us_creativetest",
-        "adset_prefix": "cafelife_aos_facebook_us_creativetest",
-        "page_id_key": "page_id_cafe",
-    },
-    "Suzy's Restaurant": {
-        "account_id": "act_953632226485498",
-        "campaign_id": "120217220153800643",
-        "campaign_name": "suzyrest_aos_facebook_us_creativetest",
-        "adset_prefix": "suzyrest_aos_facebook_us_creativetest",
-        "page_id_key": "page_id_suzy",
-    },
-    "Office Life": {
-        "account_id": "act_733192439468531",
-        "campaign_id": "120228464454680636",
-        "campaign_name": "corporatetycoon_aos_facebook_us_creativetest",
-        "adset_prefix": "corporatetycoon_aos_facebook_us_creativetest",
-        "page_id_key": "page_id_office",
-    },
-    "Lumber Chopper": {
-        "account_id": "act_1372896617079122",
-        "campaign_id": "120224569359980144",
-        "campaign_name": "lumberchopper_aos_facebook_us_creativetest",
-        "adset_prefix": "lumberchopper_aos_facebook_us_creativetest",
-        "page_id_key": "page_id_lumber",
-    },
-    "Burger Please": {
-        "account_id": "act_3546175519039834",
-        "campaign_id": "120200361364790724",
-        "campaign_name": "burgeridle_aos_facebook_us_test_30th+",
-        "adset_prefix": "burgeridle_aos_facebook_us_test",
-        "page_id_key": "page_id_burger",
-    },
-    "Prison Life": {
-        "account_id": "act_510600977962388",
-        "campaign_id": "120212520882120614",
-        "campaign_name": "prison_aos_facebook_us_install_test",
-        "adset_prefix": "prison_aos_facebook_us_install_test",
-        "page_id_key": "page_id_prison",
-    },
-    "Arrow Flow": {
-        "account_id": "act_24856362507399374",
-        "campaign_id": "120240666247060394",
-        "campaign_name": "arrow_aos_facebook_us_test",
-        "adset_prefix": "arrow_aos_facebook_us_test",
-        "page_id_key": "page_id_arrow",
-    },
-    "Roller Disco": {
-        "account_id": "act_505828195863528",
-        "campaign_id": "120216262440630087",
-        "campaign_name": "rollerdisco_aos_facebook_us_creativetest",
-        "adset_prefix": "rollerdisco_aos_facebook_us_creativetest",
-        "page_id_key": "page_id_roller",
-    },
-    "Waterpark Boys": {
-        "account_id": "act_1088490002247518",
-        "campaign_id": "120209343960830376",
-        "campaign_name": "WaterParkBoys_aos_facebook_us_test",
-        "adset_prefix": "WaterParkBoys_aos_facebook_us_test",
-        "page_id_key": "page_id_water",
-    },
-    "Downhill Racer": {
-        "account_id": "act_347210305097775",
-        "campaign_id": "",
-        "campaign_name": "",
-        "adset_prefix": "downhill_aos_facebook_us_test",
-        "page_id_key": "page_id_downhill",
-    },
-}
 def upload_to_facebook(
     game_name: str,
     uploaded_files: list,
