@@ -259,6 +259,15 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                         horizontal=True,
                         key=f"{kp}platform_{game}",
                     )
+                    # st.tabs는 rerun 시 선택 탭이 첫 탭으로 돌아갈 수 있어,
+                    # 플랫폼 변경이 감지되면 현재 게임 탭을 query params에 다시 고정한다.
+                    _plat_prev_key = f"{kp}platform_prev_{game}"
+                    _prev_platform = st.session_state.get(_plat_prev_key)
+                    if _prev_platform is None:
+                        st.session_state[_plat_prev_key] = platform
+                    elif _prev_platform != platform:
+                        st.session_state[_plat_prev_key] = platform
+                        st.query_params[_tab] = game
 
                     if platform == "Facebook":
                         st.markdown("### Facebook")
