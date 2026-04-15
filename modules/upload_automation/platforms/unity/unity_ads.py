@@ -41,6 +41,8 @@ _UNITY_HTTP_EVENTS: deque[tuple[float, str, str, int]] = deque(maxlen=12000)
 _UNITY_HTTP_LOCK = threading.Lock()
 _LAST_RATELIMIT_POLICY: str | None = None
 _LAST_UNITY_RATELIMIT: str | None = None
+_UNITY_GATE_TIMESTAMPS: deque[float] = deque(maxlen=20000)
+_UNITY_GATE_LOCK = threading.Lock()
 
 
 def _record_unity_http_call(method: str, path: str, resp: requests.Response) -> None:
@@ -200,6 +202,55 @@ UNITY_CAMPAIGN_IDS_ALL: Dict[str, Dict[str, List[str]]] = {}
 UNITY_CAMPAIGN_IDS: Dict[str, List[str]] = {}
 
 UNITY_BASE_URL = UNITY_ADVERTISE_API_BASE
+
+# --------------------------------------------------------------------
+# Global request gate constants (Redis 없이, 프로세스 전역 공용)
+# - 같은 Streamlit 프로세스 내 모든 세션/사용자 요청을 완만하게 직렬화
+# - Streamlit Cloud의 다중 인스턴스(프로세스 분산)까지는 조율하지 못함
+# - 운영값은 secrets가 아니라 코드 상수로 관리
+# --------------------------------------------------------------------
+UNITY_GATE_ENABLED = True
+UNITY_GATE_WINDOW_SECONDS = 1800
+UNITY_GATE_MAX_CALLS_PER_WINDOW = 30
+UNITY_GATE_MIN_INTERVAL_SECONDS = 55.0
+
+
+def _unity_wait_for_global_slot(method: str, path: str) -> None:
+    """요청 직전에 슬롯을 확보해 프로세스 전역 호출 밀도를 낮춘다."""
+    if not UNITY_GATE_ENABLED:
+        return
+
+    short_path = path if len(path) <= 120 else path[:117] + "..."
+    while True:
+        now = time.time()
+        wait_sec = 0.0
+        with _UNITY_GATE_LOCK:
+            cutoff = now - UNITY_GATE_WINDOW_SECONDS
+            while _UNITY_GATE_TIMESTAMPS and _UNITY_GATE_TIMESTAMPS[0] < cutoff:
+                _UNITY_GATE_TIMESTAMPS.popleft()
+
+            if _UNITY_GATE_TIMESTAMPS:
+                next_interval_at = _UNITY_GATE_TIMESTAMPS[-1] + UNITY_GATE_MIN_INTERVAL_SECONDS
+                wait_sec = max(wait_sec, next_interval_at - now)
+
+            if len(_UNITY_GATE_TIMESTAMPS) >= UNITY_GATE_MAX_CALLS_PER_WINDOW:
+                next_window_at = _UNITY_GATE_TIMESTAMPS[0] + UNITY_GATE_WINDOW_SECONDS
+                wait_sec = max(wait_sec, next_window_at - now)
+
+            if wait_sec <= 0:
+                _UNITY_GATE_TIMESTAMPS.append(now)
+                return
+
+        logger.info(
+            "[Unity gate] wait %.1fs before %s %s (window=%ss max=%s min_interval=%.1fs)",
+            wait_sec,
+            method,
+            short_path,
+            UNITY_GATE_WINDOW_SECONDS,
+            UNITY_GATE_MAX_CALLS_PER_WINDOW,
+            UNITY_GATE_MIN_INTERVAL_SECONDS,
+        )
+        time.sleep(min(wait_sec, 5.0))
 
 # --------------------------------------------------------------------
 # Build derived maps from unity_cfg (for defaults)
@@ -947,6 +998,7 @@ def _unity_post(path: str, json_body: dict) -> dict:
         return True
 
     try:
+        _unity_wait_for_global_slot("POST", path)
         request_dto = build_unity_request(
             "POST",
             path,
@@ -984,6 +1036,7 @@ def _unity_post(path: str, json_body: dict) -> dict:
     return resp.json()
 
 def _unity_put(path: str, json_body: dict) -> dict:
+    _unity_wait_for_global_slot("PUT", path)
     request_dto = build_unity_request(
         "PUT",
         path,
@@ -1035,6 +1088,7 @@ def _unity_get(path: str, params: dict | None = None) -> dict:
         return True
 
     try:
+        _unity_wait_for_global_slot("GET", path)
         request_dto = build_unity_request(
             "GET",
             path,
@@ -1068,6 +1122,7 @@ def _unity_get(path: str, params: dict | None = None) -> dict:
     return resp.json()
 
 def _unity_delete(path: str) -> None:
+    _unity_wait_for_global_slot("DELETE", path)
     request_dto = build_unity_request(
         "DELETE",
         path,
@@ -1180,6 +1235,7 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
                     files=files,
                     timeout=300,
                 )
+                _unity_wait_for_global_slot("POST", f"{path}#multipart_video")
                 context = RequestExecutionContextDTO(
                     on_response=lambda r: _record_unity_http_call("POST", f"{path}#multipart_video", r),
                     on_retry=lambda a, _r, err: logger.warning(
@@ -1281,6 +1337,7 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
                     files=files,
                     timeout=300,
                 )
+                _unity_wait_for_global_slot("POST", f"{path}#multipart_playable")
                 context = RequestExecutionContextDTO(
                     on_response=lambda r: _record_unity_http_call("POST", f"{path}#multipart_playable", r),
                     on_retry=lambda a, _r, err: logger.warning(
