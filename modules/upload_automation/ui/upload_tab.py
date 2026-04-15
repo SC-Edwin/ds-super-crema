@@ -1153,6 +1153,46 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             summary = unity_module.upload_unity_creatives_to_campaign(
                                 game=game, videos=remote_list, settings=unity_settings
                             )
+                            _ctx = summary.get("upload_context") or {}
+                            if _ctx:
+                                st.info(
+                                    "Unity 생성 컨텍스트\n"
+                                    f"- org_id: `{_ctx.get('org_id', '')}`\n"
+                                    f"- title_id: `{_ctx.get('title_id', '')}`\n"
+                                    f"- campaign_id: `{_ctx.get('campaign_id', '')}`\n"
+                                    f"- platform: `{_ctx.get('platform', '')}`\n"
+                                    f"- title_id_source: `{_ctx.get('title_id_source', '')}`"
+                                )
+                                if _ctx.get("title_id_source") == "campaign_set":
+                                    st.warning(
+                                        "이 실행은 campaign set ID 기반 컨텍스트입니다. "
+                                        "Unity Ads 콘솔에서 일반 앱 소재 리스트가 아닌, 동일 캠페인 컨텍스트에서 확인하세요."
+                                    )
+                            _pack_records = summary.get("created_pack_records") or []
+                            if _pack_records:
+                                with st.expander(f"생성/사용된 Pack 목록 ({len(_pack_records)}개)", expanded=False):
+                                    for rec in _pack_records[:100]:
+                                        st.write(f"- `{rec.get('pack_name', '')}` ({rec.get('pack_id', '')})")
+                            _new_pack_count = int(summary.get("created_new_pack_count") or 0)
+                            _reused_pack_count = int(summary.get("reused_existing_pack_count") or 0)
+                            _new_video_count = int(summary.get("created_new_video_creative_count") or 0)
+                            _reused_video_count = int(summary.get("reused_existing_video_creative_count") or 0)
+                            _new_playable_count = int(summary.get("created_new_playable_creative_count") or 0)
+                            _reused_playable_count = int(summary.get("reused_existing_playable_creative_count") or 0)
+                            if any([
+                                _new_pack_count,
+                                _reused_pack_count,
+                                _new_video_count,
+                                _reused_video_count,
+                                _new_playable_count,
+                                _reused_playable_count,
+                            ]):
+                                st.info(
+                                    "실행 결과 상세\n"
+                                    f"- Pack: 신규 `{_new_pack_count}` / 재사용 `{_reused_pack_count}`\n"
+                                    f"- Video Creative: 신규 `{_new_video_count}` / 재사용 `{_reused_video_count}`\n"
+                                    f"- Playable Creative: 신규 `{_new_playable_count}` / 재사용 `{_reused_playable_count}`"
+                                )
                             
                             # 플랫폼별 결과 처리
                             if summary.get("results_per_platform"):

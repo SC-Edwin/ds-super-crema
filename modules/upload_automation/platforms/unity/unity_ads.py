@@ -857,6 +857,7 @@ def render_unity_settings_panel(right_col, game: str, idx: int, is_marketer: boo
             "selected_playable": chosen_drive_playable,
             "existing_playable_id": existing_playable_id,
             "existing_playable_label": selected_existing_label,
+            "title_id_source": "app" if is_marketer else "campaign_set",
         }
         
         # 플랫폼 정보 추가
@@ -2167,8 +2168,32 @@ def upload_unity_creatives_to_campaign(
         raise RuntimeError(f"Unity Settings Missing for upload. Missing: {', '.join(missing)}")
     
     language = (settings.get("language") or "en").strip()
+    upload_context = {
+        "org_id": org_id,
+        "title_id": title_id,
+        "campaign_id": campaign_id,
+        "language": language,
+        "platform": settings.get("platform", "aos"),
+        "title_id_source": settings.get("title_id_source", ""),
+    }
 
     logger.info(f"Unity upload - org_id={org_id}, title_id={title_id}, campaign_id={campaign_id}, language={language}")
+    st.caption(
+        f"Unity 대상 컨텍스트: org={org_id}, title_id={title_id}, campaign_id={campaign_id}, platform={upload_context['platform']}"
+    )
+    if upload_context.get("title_id_source") == "campaign_set":
+        st.warning(
+            "현재 Test Mode로 동작 중이며 `title_id`에 campaign set ID를 사용합니다. "
+            "Unity 콘솔의 일반 앱 소재 리스트에서 바로 보이지 않을 수 있으니, "
+            "동일 캠페인 컨텍스트에서 확인하세요."
+        )
+        logger.info(
+            "[Unity context] title_id_source=campaign_set org_id=%s title_id=%s campaign_id=%s platform=%s",
+            org_id,
+            title_id,
+            campaign_id,
+            upload_context["platform"],
+        )
 
     # Unity Ads creative limit per app (typically very high, but check for safety)
     # Unity Ads creative pack limit per campaign (typically 50)
@@ -2187,6 +2212,13 @@ def upload_unity_creatives_to_campaign(
 
     start_iso = next_sat_0000_kst()
     errors: List[str] = []
+    created_pack_records: List[Dict[str, str]] = []
+    created_new_pack_count = 0
+    reused_existing_pack_count = 0
+    created_new_video_creative_count = 0
+    reused_existing_video_creative_count = 0
+    created_new_playable_creative_count = 0
+    reused_existing_playable_creative_count = 0
 
     # Pre-fetch existing creatives & packs (1-2 API calls instead of N per pair)
     st.info("📋 기존 creative/pack 목록 조회 중...")
@@ -2221,6 +2253,7 @@ def upload_unity_creatives_to_campaign(
                     playable_creative_id = _check_existing_creative(org_id, title_id, playable_name)
                     
                     if playable_creative_id:
+                        reused_existing_playable_creative_count += 1
                         st.info(f"✅ Found existing playable: {playable_name}")
                     else:
                         st.info(f"⬆️ Uploading playable: {playable_name}")
@@ -2231,6 +2264,7 @@ def upload_unity_creatives_to_campaign(
                             name=playable_name,
                             language=language
                         )
+                        created_new_playable_creative_count += 1
                     
                     upload_state["playable_creative"] = playable_creative_id
                     _save_upload_state(game, campaign_id, upload_state)
@@ -2253,13 +2287,34 @@ def upload_unity_creatives_to_campaign(
             if "playable" not in p_type and "cpe" not in p_type:
                 error_msg = f"CRITICAL: Playable ID ({playable_creative_id}) is type '{p_type}'. Must be 'playable'."
                 errors.append(error_msg)
-                return {"game": game, "campaign_id": campaign_id, "errors": errors, "creative_ids": upload_state["completed_packs"]}
+                return {
+                    "game": game,
+                    "campaign_id": campaign_id,
+                    "errors": errors,
+                    "creative_ids": upload_state["completed_packs"],
+                    "upload_context": upload_context,
+                    "created_pack_records": created_pack_records,
+                }
         except Exception as e:
             errors.append(f"Could not validate Playable ID: {e}")
-            return {"game": game, "campaign_id": campaign_id, "errors": errors, "creative_ids": upload_state["completed_packs"]}
+            return {
+                "game": game,
+                "campaign_id": campaign_id,
+                "errors": errors,
+                "creative_ids": upload_state["completed_packs"],
+                "upload_context": upload_context,
+                "created_pack_records": created_pack_records,
+            }
     else:
         errors.append("No Playable End Card selected.")
-        return {"game": game, "campaign_id": campaign_id, "errors": errors, "creative_ids": upload_state["completed_packs"]}
+        return {
+            "game": game,
+            "campaign_id": campaign_id,
+            "errors": errors,
+            "creative_ids": upload_state["completed_packs"],
+            "upload_context": upload_context,
+            "created_pack_records": created_pack_records,
+        }
 
     # ========================================
     # 2. VIDEO PAIRING
@@ -2282,7 +2337,9 @@ def upload_unity_creatives_to_campaign(
             "game": game,
             "campaign_id": campaign_id,
             "errors": errors,
-            "creative_ids": upload_state["completed_packs"]
+            "creative_ids": upload_state["completed_packs"],
+            "upload_context": upload_context,
+            "created_pack_records": created_pack_records,
         }
 
     processed_count = 0
@@ -2385,11 +2442,13 @@ def upload_unity_creatives_to_campaign(
                         name=portrait["name"],
                         language=language
                     )
+                    created_new_video_creative_count += 1
                     _creative_cache[portrait["name"]] = p_id  # update cache
                     upload_state["video_creatives"][portrait["name"]] = p_id
                     _save_upload_state(game, campaign_id, upload_state)
                     time.sleep(2)
                 else:
+                    reused_existing_video_creative_count += 1
                     status_container.success(f"✅ Found existing: {portrait['name']}")
 
                 # Upload landscape video (check cache first, then upload)
@@ -2406,11 +2465,13 @@ def upload_unity_creatives_to_campaign(
                         name=landscape["name"],
                         language=language
                     )
+                    created_new_video_creative_count += 1
                     _creative_cache[landscape["name"]] = l_id  # update cache
                     upload_state["video_creatives"][landscape["name"]] = l_id
                     _save_upload_state(game, campaign_id, upload_state)
                     time.sleep(2)
                 else:
+                    reused_existing_video_creative_count += 1
                     status_container.success(f"✅ Found existing: {landscape['name']}")
 
                 pack_creatives = [p_id, l_id, playable_creative_id]
@@ -2420,6 +2481,7 @@ def upload_unity_creatives_to_campaign(
                 existing_pack_name = final_pack_name
 
                 if pack_id:
+                    reused_existing_pack_count += 1
                     status_container.warning(
                         f"⚠️ **Creative pack already exists with same name:**\n\n"
                         f"   - Pack Name: `{final_pack_name}`\n"
@@ -2432,6 +2494,7 @@ def upload_unity_creatives_to_campaign(
                     cids_key = ",".join(sorted(str(c) for c in pack_creatives if c))
                     cached_match = _pack_creatives_cache.get(cids_key)
                     if cached_match:
+                        reused_existing_pack_count += 1
                         pack_id, existing_pack_name = cached_match
                         status_container.warning(
                             f"⚠️ **Creative pack already exists** with same video + playable combination:\n\n"
@@ -2454,10 +2517,19 @@ def upload_unity_creatives_to_campaign(
                         pack_type="video+playable"
                     )
                     logger.info(f"✅ Created pack with ID: {pack_id}")
+                    created_new_pack_count += 1
                     # Update caches with newly created pack
                     _pack_name_cache[final_pack_name.strip().lower()] = pack_id
                     cids_key = ",".join(sorted(str(c) for c in pack_creatives if c))
                     _pack_creatives_cache[cids_key] = (pack_id, final_pack_name)
+                    logger.info(
+                        "[Unity pack created] org_id=%s title_id=%s campaign_id=%s pack_id=%s pack_name=%s",
+                        org_id,
+                        title_id,
+                        campaign_id,
+                        pack_id,
+                        final_pack_name,
+                    )
                     time.sleep(2)
                 else:
                     # ✅ 기존 팩이 있으면 명확하게 표시
@@ -2468,6 +2540,12 @@ def upload_unity_creatives_to_campaign(
                 
                 upload_state["creative_packs"][final_pack_name] = pack_id
                 upload_state["completed_packs"].append(pack_id)
+                created_pack_records.append(
+                    {
+                        "pack_id": str(pack_id),
+                        "pack_name": final_pack_name,
+                    }
+                )
                 _save_upload_state(game, campaign_id, upload_state)
                 
                 status_container.success(f"✅ Completed: {final_pack_name}")
@@ -2546,15 +2624,22 @@ def upload_unity_creatives_to_campaign(
     if total_created == total_pairs:
         st.success(
             f"🎉 **Upload Complete!**\n\n"
-            f"Successfully created **{total_created}/{total_pairs}** creative packs."
+            f"Successfully resolved **{total_created}/{total_pairs}** creative packs.\n"
+            f"(신규 생성: {created_new_pack_count}, 기존 재사용: {reused_existing_pack_count})"
         )
         # Clear state on successful completion
         _clear_upload_state(game, campaign_id)
     elif total_created > 0:
         st.warning(
             f"⚠️ **Partial Upload**\n\n"
-            f"Created **{total_created}/{total_pairs}** creative packs.\n"
+            f"Resolved **{total_created}/{total_pairs}** creative packs.\n"
+            f"(신규 생성: {created_new_pack_count}, 기존 재사용: {reused_existing_pack_count})\n"
             f"Click '크리에이티브/팩 생성' again to continue uploading remaining packs."
+        )
+    if total_created > 0 and created_new_pack_count == 0 and reused_existing_pack_count > 0:
+        st.info(
+            "이번 실행에서는 새 팩 생성 없이 기존 팩만 재사용되었습니다. "
+            "동일한 video/playable 이름 조합이 이미 존재할 수 있습니다."
         )
     
     return {
@@ -2565,7 +2650,15 @@ def upload_unity_creatives_to_campaign(
         "errors": errors,
         "removed_ids": [],
         "total_created": total_created,
-        "total_expected": total_pairs
+        "total_expected": total_pairs,
+        "created_new_pack_count": created_new_pack_count,
+        "reused_existing_pack_count": reused_existing_pack_count,
+        "created_new_video_creative_count": created_new_video_creative_count,
+        "reused_existing_video_creative_count": reused_existing_video_creative_count,
+        "created_new_playable_creative_count": created_new_playable_creative_count,
+        "reused_existing_playable_creative_count": reused_existing_playable_creative_count,
+        "upload_context": upload_context,
+        "created_pack_records": created_pack_records,
     }
 
 @_unity_http_op_summary_log("apply_unity_creative_packs_to_campaign")
