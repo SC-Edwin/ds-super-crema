@@ -38,8 +38,13 @@ def get_drive_service_from_secrets():
 
     # 1) Try st.secrets safely (no KeyError)
     try:
-        if "gcp_service_account" in st.secrets:
+        # 하위호환: 배포마다 키명이 다를 수 있어 둘 다 지원
+        if "creative_gcp_key" in st.secrets:
             info = dict(st.secrets["creative_gcp_key"])
+            logger.info("[Drive import] credentials source=st.secrets.creative_gcp_key")
+        elif "gcp_service_account" in st.secrets:
+            info = dict(st.secrets["gcp_service_account"])
+            logger.info("[Drive import] credentials source=st.secrets.gcp_service_account")
     except Exception:
         # st.secrets may not exist outside Streamlit runtime
         pass
@@ -50,6 +55,7 @@ def get_drive_service_from_secrets():
         if env_json:
             try:
                 info = json.loads(env_json)
+                logger.info("[Drive import] credentials source=env_json")
             except Exception as e:
                 raise RuntimeError(
                     "GOOGLE_CREDENTIALS / GCP_SERVICE_ACCOUNT_JSON is set "
@@ -66,6 +72,7 @@ def get_drive_service_from_secrets():
                     "but that file does not exist."
                 )
             creds = Credentials.from_service_account_file(cred_path, scopes=DRIVE_SCOPES)
+            logger.info("[Drive import] credentials source=GOOGLE_APPLICATION_CREDENTIALS path")
             return build("drive", "v3", credentials=creds, cache_discovery=False)
 
     if info is None:

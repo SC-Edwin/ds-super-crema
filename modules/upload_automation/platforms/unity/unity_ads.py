@@ -43,6 +43,8 @@ _LAST_RATELIMIT_POLICY: str | None = None
 _LAST_UNITY_RATELIMIT: str | None = None
 _UNITY_GATE_TIMESTAMPS: deque[float] = deque(maxlen=20000)
 _UNITY_GATE_LOCK = threading.Lock()
+_UNITY_PROGRESS_HOOK: Callable[[str], None] | None = None
+_UNITY_PROGRESS_HOOK_LOCK = threading.Lock()
 
 
 def _record_unity_http_call(method: str, path: str, resp: requests.Response) -> None:
@@ -131,6 +133,7 @@ def _unity_http_op_summary_log(op_name: str) -> Callable[[Callable[..., Any]], C
                     hdrs.get("RateLimit-Policy"),
                     hdrs.get("Unity-RateLimit"),
                 )
+                _set_unity_progress_hook(None)
 
         return wrapper
 
@@ -250,7 +253,28 @@ def _unity_wait_for_global_slot(method: str, path: str) -> None:
             UNITY_GATE_MAX_CALLS_PER_WINDOW,
             UNITY_GATE_MIN_INTERVAL_SECONDS,
         )
+        _emit_unity_progress_text(
+            f"⏳ Unity API 대기 중: {method} {short_path} (약 {int(wait_sec + 0.99)}초 남음)"
+        )
         time.sleep(min(wait_sec, 5.0))
+
+
+def _set_unity_progress_hook(hook: Callable[[str], None] | None) -> None:
+    with _UNITY_PROGRESS_HOOK_LOCK:
+        global _UNITY_PROGRESS_HOOK
+        _UNITY_PROGRESS_HOOK = hook
+
+
+def _emit_unity_progress_text(msg: str) -> None:
+    with _UNITY_PROGRESS_HOOK_LOCK:
+        hook = _UNITY_PROGRESS_HOOK
+    if hook is None:
+        return
+    try:
+        hook(msg)
+    except Exception:
+        # UI 훅 실패가 업로드 본 동작을 막지 않도록 무시
+        pass
 
 # --------------------------------------------------------------------
 # Build derived maps from unity_cfg (for defaults)
@@ -1088,7 +1112,6 @@ def _unity_get(path: str, params: dict | None = None) -> dict:
         return True
 
     try:
-        _unity_wait_for_global_slot("GET", path)
         request_dto = build_unity_request(
             "GET",
             path,
@@ -2270,6 +2293,7 @@ def upload_unity_creatives_to_campaign(
     
     # Status container for real-time updates
     status_container = st.empty()
+    _set_unity_progress_hook(lambda m: status_container.info(m))
 
     # ========================================
     # 3. PROCESSING LOOP (BATCHED)
@@ -2514,6 +2538,7 @@ def upload_unity_creatives_to_campaign(
 
     progress_bar.empty()
     status_container.empty()
+    _set_unity_progress_hook(None)
     
     # Final summary
     total_created = len(upload_state["completed_packs"])
