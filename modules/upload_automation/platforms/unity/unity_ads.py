@@ -20,7 +20,10 @@ import streamlit as st
 from modules.upload_automation.utils import devtools
 from modules.upload_automation.network.dto import RequestExecutionContextDTO, RetryPolicyDTO
 from modules.upload_automation.network.http_client import execute_request, HttpRequestError
-from modules.upload_automation.network.retry_policies import build_default_api_policy, build_no_retry_policy
+from modules.upload_automation.network.retry_policies import (
+    build_default_api_policy,
+    build_upload_multipart_policy,
+)
 from modules.upload_automation.service.unity import (
     UNITY_ADVERTISE_API_BASE,
     build_unity_request,
@@ -1178,9 +1181,20 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
                     timeout=300,
                 )
                 context = RequestExecutionContextDTO(
-                    on_response=lambda r: _record_unity_http_call("POST", f"{path}#multipart_video", r)
+                    on_response=lambda r: _record_unity_http_call("POST", f"{path}#multipart_video", r),
+                    on_retry=lambda a, _r, err: logger.warning(
+                        "[Unity HTTP retry] CREATE CREATIVE transport retry=%s/2 name=%s err=%s",
+                        a + 1,
+                        name,
+                        str(err)[:200] if err else "",
+                    ),
                 )
-                resp = execute_request(request_dto, build_no_retry_policy(), context=context)
+                # TLS EOF / transient network 오류 완화를 위해 multipart 단계에도 짧은 전송 재시도 적용
+                resp = execute_request(
+                    request_dto,
+                    build_upload_multipart_policy(max_retries=2),
+                    context=context,
+                )
 
             if resp.status_code == 429:
                 detail = (resp.text or "")[:800]
@@ -1268,9 +1282,20 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
                     timeout=300,
                 )
                 context = RequestExecutionContextDTO(
-                    on_response=lambda r: _record_unity_http_call("POST", f"{path}#multipart_playable", r)
+                    on_response=lambda r: _record_unity_http_call("POST", f"{path}#multipart_playable", r),
+                    on_retry=lambda a, _r, err: logger.warning(
+                        "[Unity HTTP retry] CREATE PLAYABLE transport retry=%s/2 file=%s err=%s",
+                        a + 1,
+                        file_name,
+                        str(err)[:200] if err else "",
+                    ),
                 )
-                resp = execute_request(request_dto, build_no_retry_policy(), context=context)
+                # TLS EOF / transient network 오류 완화를 위해 multipart 단계에도 짧은 전송 재시도 적용
+                resp = execute_request(
+                    request_dto,
+                    build_upload_multipart_policy(max_retries=2),
+                    context=context,
+                )
 
             if resp.status_code == 429:
                 detail = (resp.text or "")[:800]
@@ -2182,207 +2207,253 @@ def upload_unity_creatives_to_campaign(
 
     processed_count = 0
     progress_bar = st.progress(0, text=f"Starting upload... (0/{total_pairs})")
+    # Batch upload controls (기본값: 8개씩 처리)
+    batch_size = max(1, int(settings.get("upload_batch_size", 8)))
+    batch_cooldown_seconds = max(0, int(settings.get("upload_batch_cooldown_seconds", 75)))
     
     # Status container for real-time updates
     status_container = st.empty()
 
     # ========================================
-    # 3. PROCESSING LOOP
+    # 3. PROCESSING LOOP (BATCHED)
     # ========================================
-    for base, items in subjects.items():
-        portrait = next((x for x in items if "1080x1920" in (x.get("name") or "")), None)
-        landscape = next((x for x in items if "1920x1080" in (x.get("name") or "")), None)
+    subject_items = list(subjects.items())
+    batches = [
+        subject_items[i : i + batch_size]
+        for i in range(0, len(subject_items), batch_size)
+    ]
+    total_batches = len(batches)
+    logger.info(
+        "[Unity batch] start game=%s total_pairs=%s batch_size=%s total_batches=%s cooldown=%ss",
+        game,
+        total_pairs,
+        batch_size,
+        total_batches,
+        batch_cooldown_seconds,
+    )
 
-        if not portrait or not landscape:
-            errors.append(f"{base}: Missing Portrait or Landscape video.")
-            processed_count += 1
-            progress_bar.progress(
-                int(processed_count / total_pairs * 100),
-                text=f"❌ Skipped {base} (Missing videos) - {processed_count}/{total_pairs}"
-            )
-            continue
+    should_stop = False
+    for batch_idx, batch_items in enumerate(batches, start=1):
+        st.info(
+            f"📦 Unity 배치 {batch_idx}/{total_batches} 시작 "
+            f"({len(batch_items)} pairs, created {len(upload_state['completed_packs'])}/{total_pairs})"
+        )
+
+        for base, items in batch_items:
+            portrait = next((x for x in items if "1080x1920" in (x.get("name") or "")), None)
+            landscape = next((x for x in items if "1920x1080" in (x.get("name") or "")), None)
+
+            if not portrait or not landscape:
+                errors.append(f"{base}: Missing Portrait or Landscape video.")
+                processed_count += 1
+                progress_bar.progress(
+                    int(processed_count / total_pairs * 100),
+                    text=f"❌ Skipped {base} (Missing videos) - {processed_count}/{total_pairs}"
+                )
+                continue
         
-        # Generate pack name
-        # Extract video part (e.g., "video001")
-        video_part = _extract_video_part_from_base(base)
+            # Generate pack name
+            # Extract video part (e.g., "video001")
+            video_part = _extract_video_part_from_base(base)
         
-        # Get playable name or label
-        raw_p_name = playable_name if playable_name else settings.get("existing_playable_label", "")
+            # Get playable name or label
+            raw_p_name = playable_name if playable_name else settings.get("existing_playable_label", "")
         
-        # Clean playable name according to rules
-        playable_part = _clean_playable_name_for_pack(raw_p_name)
+            # Clean playable name according to rules
+            playable_part = _clean_playable_name_for_pack(raw_p_name)
         
-        # Final pack name: videoxxx_playable003escalater감옥 (underscore between video and playable)
-        if playable_part:
-            final_pack_name = f"{video_part}_{playable_part}"
-        else:
-            # Fallback if no playable name
-            final_pack_name = f"{video_part}_playable"
+            # Final pack name: videoxxx_playable003escalater감옥 (underscore between video and playable)
+            if playable_part:
+                final_pack_name = f"{video_part}_{playable_part}"
+            else:
+                # Fallback if no playable name
+                final_pack_name = f"{video_part}_playable"
         
-        # Check if pack already exists
-        if final_pack_name in upload_state["creative_packs"] and upload_state["creative_packs"][final_pack_name]:
-            pack_id = upload_state["creative_packs"][final_pack_name]
-            if pack_id not in upload_state["completed_packs"]:
+            # Check if pack already exists
+            if final_pack_name in upload_state["creative_packs"] and upload_state["creative_packs"][final_pack_name]:
+                pack_id = upload_state["creative_packs"][final_pack_name]
+                if pack_id not in upload_state["completed_packs"]:
+                    upload_state["completed_packs"].append(pack_id)
+                    _save_upload_state(game, campaign_id, upload_state)
+                
+                processed_count += 1
+                progress_bar.progress(
+                    int(processed_count / total_pairs * 100),
+                    text=f"✅ Already uploaded: {base} - {processed_count}/{total_pairs}"
+                )
+                status_container.success(f"✅ Skipped (already exists): {final_pack_name}")
+                continue
+
+            try:
+                progress_bar.progress(
+                    int(processed_count / total_pairs * 100),
+                    text=f"⬆️ Uploading {base} ({processed_count + 1}/{total_pairs})..."
+                )
+                
+                # Upload portrait video (check cache first, then upload)
+                p_id = upload_state["video_creatives"].get(portrait["name"])
+                if not p_id:
+                    p_id = _creative_cache.get(portrait["name"])
+
+                if not p_id:
+                    status_container.info(f"⬆️ Uploading portrait: {portrait['name']}")
+                    p_id = _unity_create_video_creative(
+                        org_id=org_id,
+                        title_id=title_id,
+                        video_path=portrait["path"],
+                        name=portrait["name"],
+                        language=language
+                    )
+                    _creative_cache[portrait["name"]] = p_id  # update cache
+                    upload_state["video_creatives"][portrait["name"]] = p_id
+                    _save_upload_state(game, campaign_id, upload_state)
+                    time.sleep(2)
+                else:
+                    status_container.success(f"✅ Found existing: {portrait['name']}")
+
+                # Upload landscape video (check cache first, then upload)
+                l_id = upload_state["video_creatives"].get(landscape["name"])
+                if not l_id:
+                    l_id = _creative_cache.get(landscape["name"])
+
+                if not l_id:
+                    status_container.info(f"⬆️ Uploading landscape: {landscape['name']}")
+                    l_id = _unity_create_video_creative(
+                        org_id=org_id,
+                        title_id=title_id,
+                        video_path=landscape["path"],
+                        name=landscape["name"],
+                        language=language
+                    )
+                    _creative_cache[landscape["name"]] = l_id  # update cache
+                    upload_state["video_creatives"][landscape["name"]] = l_id
+                    _save_upload_state(game, campaign_id, upload_state)
+                    time.sleep(2)
+                else:
+                    status_container.success(f"✅ Found existing: {landscape['name']}")
+
+                pack_creatives = [p_id, l_id, playable_creative_id]
+
+                # ✅ Check cache instead of API calls
+                pack_id = _pack_name_cache.get(final_pack_name.strip().lower())
+                existing_pack_name = final_pack_name
+
+                if pack_id:
+                    status_container.warning(
+                        f"⚠️ **Creative pack already exists with same name:**\n\n"
+                        f"   - Pack Name: `{final_pack_name}`\n"
+                        f"   - Pack ID: `{pack_id}`\n"
+                        f"   - Skipping creation...\n"
+                    )
+                    logger.info(f"Skipping pack creation for {final_pack_name} - already exists ({pack_id})")
+                else:
+                    # Check by creative IDs combination (from cache)
+                    cids_key = ",".join(sorted(str(c) for c in pack_creatives if c))
+                    cached_match = _pack_creatives_cache.get(cids_key)
+                    if cached_match:
+                        pack_id, existing_pack_name = cached_match
+                        status_container.warning(
+                            f"⚠️ **Creative pack already exists** with same video + playable combination:\n\n"
+                            f"   - Existing Pack Name: `{existing_pack_name}`\n"
+                            f"   - Existing Pack ID: `{pack_id}`\n"
+                            f"   - Skipping upload for: `{final_pack_name}`\n\n"
+                            f"   Continuing with remaining uploads..."
+                        )
+                        logger.info(f"Skipping pack creation for {final_pack_name} - already exists as {existing_pack_name} ({pack_id})")
+                
+                # ✅ pack_id가 있으면 생성하지 않고 기존 팩 사용
+                if not pack_id:
+                    status_container.info(f"📦 Creating pack: {final_pack_name}")
+                    logger.info(f"Creating pack with org_id={org_id}, title_id={title_id}, pack_name={final_pack_name}, creative_ids={pack_creatives}")
+                    pack_id = _unity_create_creative_pack(
+                        org_id=org_id,
+                        title_id=title_id,
+                        pack_name=final_pack_name,
+                        creative_ids=pack_creatives,
+                        pack_type="video+playable"
+                    )
+                    logger.info(f"✅ Created pack with ID: {pack_id}")
+                    # Update caches with newly created pack
+                    _pack_name_cache[final_pack_name.strip().lower()] = pack_id
+                    cids_key = ",".join(sorted(str(c) for c in pack_creatives if c))
+                    _pack_creatives_cache[cids_key] = (pack_id, final_pack_name)
+                    time.sleep(2)
+                else:
+                    # ✅ 기존 팩이 있으면 명확하게 표시
+                    if existing_pack_name != final_pack_name:
+                        status_container.success(f"✅ Found existing pack with same video + playable: `{existing_pack_name}`")
+                    else:
+                        status_container.success(f"✅ Found existing pack with same name: `{final_pack_name}`")
+                
+                upload_state["creative_packs"][final_pack_name] = pack_id
                 upload_state["completed_packs"].append(pack_id)
                 _save_upload_state(game, campaign_id, upload_state)
-            
-            processed_count += 1
-            progress_bar.progress(
-                int(processed_count / total_pairs * 100),
-                text=f"✅ Already uploaded: {base} - {processed_count}/{total_pairs}"
-            )
-            status_container.success(f"✅ Skipped (already exists): {final_pack_name}")
-            continue
+                
+                status_container.success(f"✅ Completed: {final_pack_name}")
+                time.sleep(0.5)
 
-        try:
-            progress_bar.progress(
-                int(processed_count / total_pairs * 100),
-                text=f"⬆️ Uploading {base} ({processed_count + 1}/{total_pairs})..."
-            )
-            
-            # Upload portrait video (check cache first, then upload)
-            p_id = upload_state["video_creatives"].get(portrait["name"])
-            if not p_id:
-                p_id = _creative_cache.get(portrait["name"])
+            except Exception as e:
+                msg = str(e)
+                msg_lower = msg.lower()
+                logger.error(f"[Unity Error] PACK LOOP FAILED | base={base} | error={msg}")
 
-            if not p_id:
-                status_container.info(f"⬆️ Uploading portrait: {portrait['name']}")
-                p_id = _unity_create_video_creative(
-                    org_id=org_id,
-                    title_id=title_id,
-                    video_path=portrait["path"],
-                    name=portrait["name"],
-                    language=language
-                )
-                _creative_cache[portrait["name"]] = p_id  # update cache
-                upload_state["video_creatives"][portrait["name"]] = p_id
-                _save_upload_state(game, campaign_id, upload_state)
-                time.sleep(2)
-            else:
-                status_container.success(f"✅ Found existing: {portrait['name']}")
+                # 1) Capacity/quota limit (not rate limit — won't resolve with retry)
+                is_capacity = any(kw in msg_lower for kw in ["최대", "capacity", "full", "maximum"])
+                # 2) Rate limit (429 — may resolve with time)
+                is_rate_limit = "429" in msg or "Quota Exceeded" in msg
 
-            # Upload landscape video (check cache first, then upload)
-            l_id = upload_state["video_creatives"].get(landscape["name"])
-            if not l_id:
-                l_id = _creative_cache.get(landscape["name"])
-
-            if not l_id:
-                status_container.info(f"⬆️ Uploading landscape: {landscape['name']}")
-                l_id = _unity_create_video_creative(
-                    org_id=org_id,
-                    title_id=title_id,
-                    video_path=landscape["path"],
-                    name=landscape["name"],
-                    language=language
-                )
-                _creative_cache[landscape["name"]] = l_id  # update cache
-                upload_state["video_creatives"][landscape["name"]] = l_id
-                _save_upload_state(game, campaign_id, upload_state)
-                time.sleep(2)
-            else:
-                status_container.success(f"✅ Found existing: {landscape['name']}")
-
-            pack_creatives = [p_id, l_id, playable_creative_id]
-
-            # ✅ Check cache instead of API calls
-            pack_id = _pack_name_cache.get(final_pack_name.strip().lower())
-            existing_pack_name = final_pack_name
-
-            if pack_id:
-                status_container.warning(
-                    f"⚠️ **Creative pack already exists with same name:**\n\n"
-                    f"   - Pack Name: `{final_pack_name}`\n"
-                    f"   - Pack ID: `{pack_id}`\n"
-                    f"   - Skipping creation...\n"
-                )
-                logger.info(f"Skipping pack creation for {final_pack_name} - already exists ({pack_id})")
-            else:
-                # Check by creative IDs combination (from cache)
-                cids_key = ",".join(sorted(str(c) for c in pack_creatives if c))
-                cached_match = _pack_creatives_cache.get(cids_key)
-                if cached_match:
-                    pack_id, existing_pack_name = cached_match
-                    status_container.warning(
-                        f"⚠️ **Creative pack already exists** with same video + playable combination:\n\n"
-                        f"   - Existing Pack Name: `{existing_pack_name}`\n"
-                        f"   - Existing Pack ID: `{pack_id}`\n"
-                        f"   - Skipping upload for: `{final_pack_name}`\n\n"
-                        f"   Continuing with remaining uploads..."
+                if is_capacity:
+                    errors.append(f"🚫 Creative/Pack 용량 초과 at {base}: {msg[:200]}")
+                    status_container.error(
+                        f"🚫 **Creative/Pack 용량 초과**\n\n"
+                        f"Unity API 응답: `{msg[:300]}`\n\n"
+                        f"사용하지 않는 creative/pack을 삭제한 후 다시 시도해주세요.\n"
+                        f"Progress saved: {len(upload_state['completed_packs'])}/{total_pairs} packs."
                     )
-                    logger.info(f"Skipping pack creation for {final_pack_name} - already exists as {existing_pack_name} ({pack_id})")
-            
-            # ✅ pack_id가 있으면 생성하지 않고 기존 팩 사용
-            if not pack_id:
-                status_container.info(f"📦 Creating pack: {final_pack_name}")
-                logger.info(f"Creating pack with org_id={org_id}, title_id={title_id}, pack_name={final_pack_name}, creative_ids={pack_creatives}")
-                pack_id = _unity_create_creative_pack(
-                    org_id=org_id,
-                    title_id=title_id,
-                    pack_name=final_pack_name,
-                    creative_ids=pack_creatives,
-                    pack_type="video+playable"
-                )
-                logger.info(f"✅ Created pack with ID: {pack_id}")
-                # Update caches with newly created pack
-                _pack_name_cache[final_pack_name.strip().lower()] = pack_id
-                cids_key = ",".join(sorted(str(c) for c in pack_creatives if c))
-                _pack_creatives_cache[cids_key] = (pack_id, final_pack_name)
-                time.sleep(2)
-            else:
-                # ✅ 기존 팩이 있으면 명확하게 표시
-                if existing_pack_name != final_pack_name:
-                    status_container.success(f"✅ Found existing pack with same video + playable: `{existing_pack_name}`")
+                    should_stop = True
+                    break
+                elif is_rate_limit:
+                    errors.append(f"⚠️ Rate limit at {base}: {msg[:200]}")
+                    status_container.error(
+                        f"⚠️ **API Rate Limit**\n\n"
+                        f"Unity API 응답: `{msg[:300]}`\n\n"
+                        f"Progress saved: {len(upload_state['completed_packs'])}/{total_pairs} packs.\n"
+                        f"Click '크리에이티브/팩 생성' again to resume."
+                    )
+                    should_stop = True
+                    break
                 else:
-                    status_container.success(f"✅ Found existing pack with same name: `{final_pack_name}`")
-            
-            upload_state["creative_packs"][final_pack_name] = pack_id
-            upload_state["completed_packs"].append(pack_id)
-            _save_upload_state(game, campaign_id, upload_state)
-            
-            status_container.success(f"✅ Completed: {final_pack_name}")
-            time.sleep(0.5)
+                    logger.exception(f"Unity pack creation failed for {base}")
+                    errors.append(f"{base}: {msg}")
+                    status_container.error(f"❌ Failed: {base} - {msg[:300]}")
 
-        except Exception as e:
-            msg = str(e)
-            msg_lower = msg.lower()
-            logger.error(f"[Unity Error] PACK LOOP FAILED | base={base} | error={msg}")
-
-            # 1) Capacity/quota limit (not rate limit — won't resolve with retry)
-            is_capacity = any(kw in msg_lower for kw in ["최대", "capacity", "full", "maximum"])
-            # 2) Rate limit (429 — may resolve with time)
-            is_rate_limit = "429" in msg or "Quota Exceeded" in msg
-
-            if is_capacity:
-                errors.append(f"🚫 Creative/Pack 용량 초과 at {base}: {msg[:200]}")
-                status_container.error(
-                    f"🚫 **Creative/Pack 용량 초과**\n\n"
-                    f"Unity API 응답: `{msg[:300]}`\n\n"
-                    f"사용하지 않는 creative/pack을 삭제한 후 다시 시도해주세요.\n"
-                    f"Progress saved: {len(upload_state['completed_packs'])}/{total_pairs} packs."
+            finally:
+                processed_count += 1
+                pct = int(processed_count / total_pairs * 100)
+                completed = len(upload_state["completed_packs"])
+                progress_bar.progress(
+                    pct,
+                    text=f"Batch {batch_idx}/{total_batches} | Processing: {processed_count}/{total_pairs} pairs | Created: {completed}/{total_pairs} packs",
                 )
-                break
-            elif is_rate_limit:
-                errors.append(f"⚠️ Rate limit at {base}: {msg[:200]}")
-                status_container.error(
-                    f"⚠️ **API Rate Limit**\n\n"
-                    f"Unity API 응답: `{msg[:300]}`\n\n"
-                    f"Progress saved: {len(upload_state['completed_packs'])}/{total_pairs} packs.\n"
-                    f"Click '크리에이티브/팩 생성' again to resume."
-                )
-                break
-            else:
-                logger.exception(f"Unity pack creation failed for {base}")
-                errors.append(f"{base}: {msg}")
-                status_container.error(f"❌ Failed: {base} - {msg[:300]}")
 
-        finally:
-            processed_count += 1
-            pct = int(processed_count / total_pairs * 100)
-            completed = len(upload_state["completed_packs"])
-            progress_bar.progress(
-                pct, 
-                text=f"Progress: {completed}/{total_pairs} packs created"
+        if should_stop:
+            break
+
+        # 배치 사이 쿨다운 (마지막 배치는 제외)
+        if batch_idx < total_batches and batch_cooldown_seconds > 0:
+            logger.info(
+                "[Unity batch] completed %s/%s, cooldown %ss before next batch (created=%s/%s)",
+                batch_idx,
+                total_batches,
+                batch_cooldown_seconds,
+                len(upload_state["completed_packs"]),
+                total_pairs,
             )
+            status_container.info(
+                f"⏸️ Batch {batch_idx}/{total_batches} 완료. "
+                f"{batch_cooldown_seconds}초 대기 후 다음 배치를 시작합니다."
+            )
+            time.sleep(batch_cooldown_seconds)
 
     progress_bar.empty()
     status_container.empty()

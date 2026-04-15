@@ -489,7 +489,6 @@ def run(test_market='WW', key_prefix='ww'):
         all_data['path'] = all_data['past_network'] + ' → ' + all_data['network']
 
         # 패널티 적용된 확률 계산
-        # 패널티 적용된 확률 계산
         all_data['probability_pct'] = all_data['prediction_score'] * 100
         all_data.loc[all_data['sum_installs'] == 0, 'probability_pct'] *= 0.1
         all_data.loc[all_data['sum_impressions'] == 0, 'probability_pct'] *= 0.05
