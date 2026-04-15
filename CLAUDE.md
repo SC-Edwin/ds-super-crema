@@ -40,6 +40,12 @@ There is no test suite, linter configuration, or build step.
 
 - **Tabs 3-5**: Placeholders or external redirects (localization → `creative-crema.web.app`).
 
+**Upload tab layout** (under `modules/upload_automation/`):
+- `ui/upload_tab.py` — Streamlit Creative Upload tab (widgets + `session_state`; entry `run`)
+- `session/keys.py` — shared session key constants for that tab
+- `application/` — use-case / validation without Streamlit (grows incrementally; e.g. `upload_validation.py`)
+- `main.py` — thin re-exports `run` / `render_main_app` / `init_*` for `app.py` compatibility
+
 **Ad platform modules** (under `modules/upload_automation/`):
 - `facebook_ads.py` + `fb.py` — Meta/Facebook Graph API integration (admin + marketer modes)
 - `unity_ads.py` + `uni.py` — Unity Ads API (admin + marketer modes)

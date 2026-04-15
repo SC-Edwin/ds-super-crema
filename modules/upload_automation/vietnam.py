@@ -6,9 +6,9 @@ Vietnam Creative Upload Tab
 """
 from __future__ import annotations
 
-from modules.upload_automation.main import (
-    init_state,
+from modules.upload_automation.ui.upload_tab import (
     init_remote_state,
+    init_state,
     render_main_app,
 )
 from modules.upload_automation import facebook_ads as fb_ops
