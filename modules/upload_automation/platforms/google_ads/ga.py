@@ -16,7 +16,7 @@ from typing import Dict, List
 
 import streamlit as st
 
-from modules.upload_automation import google_ads as gads
+from modules.upload_automation.platforms.google_ads import google_ads as gads
 from modules.upload_automation.utils import devtools
 
 logger = logging.getLogger(__name__)

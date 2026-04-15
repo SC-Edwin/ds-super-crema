@@ -37,32 +37,22 @@ Streamlit 기반이며, 두 가지 모드로 운영됩니다:
 ```
 upload_automation/
 │
-├── main.py                    ← 메인 UI (탭 라우팅, 파일 임포트, 업로드 실행)
-├── __init__.py                ← run() 함수 export (from .main import run)
-│
-│  ── Facebook ──
-├── facebook_ads.py            ← Facebook API 핵심 함수 (Test Mode + 공용 헬퍼)
-├── fb.py                      ← Facebook 마케터 모드 (UI + 업로드 로직)
-│
-│  ── Unity ──
-├── unity_ads.py               ← Unity Ads API 핵심 함수 (Test Mode + 공용 헬퍼)
-├── uni.py                     ← Unity 마케터 모드 (UI + 업로드 로직)
-│
-│  ── Google Ads ──
-├── google_ads.py              ← Google Ads API 핵심 함수 (GAQL 쿼리, 에셋 업로드)
-├── ga.py                      ← Google Ads 마케터 모드 (카테고리 기반 배포 UI)
-│
-│  ── 기타 플랫폼 ──
-├── mintegral.py               ← Mintegral 크리에이티브 세트 관리 (마케터 전용)
-├── applovin.py                ← Applovin 크리에이티브 세트 관리 (마케터 전용)
-│
-│  ── 유틸리티 ──
-├── drive_import.py            ← Google Drive 폴더에서 파일 병렬 다운로드
-├── game_manager.py            ← 게임 목록 관리 (games_config.json)
-├── upload_logger.py           ← BigQuery 감사 로그 (비동기, 백그라운드 스레드)
-├── devtools.py                ← 개발자 모드 로깅/디버깅 패널
-├── scripts/generate_refresh_token.py  ← Google Ads OAuth 토큰 생성 (1회성 CLI)
-└── vietnam.py                 ← 베트남팀 전용 탭 (Test Mode 복제, prefix="vn")
+├── main.py                    ← run() 등 re-export (실제 UI는 ui/upload_tab.py)
+├── __init__.py                ← run() export
+├── ui/upload_tab.py           ← Creative Upload 탭 본문
+├── platforms/                 ← 광고 플랫폼별 모듈
+│   ├── meta/facebook_ads.py
+│   ├── meta/fb.py
+│   ├── unity/unity_ads.py
+│   ├── unity/uni.py
+│   ├── google_ads/google_ads.py
+│   ├── google_ads/ga.py
+│   ├── mintegral/mintegral.py
+│   └── applovin/applovin.py
+├── utils/
+├── config/game_manager.py
+├── scripts/generate_refresh_token.py
+└── vietnam.py
 ```
 
 ---

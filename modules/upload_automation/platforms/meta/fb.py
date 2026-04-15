@@ -35,7 +35,7 @@ from modules.upload_automation.network.dto import RequestExecutionContextDTO
 from modules.upload_automation.service.facebook import build_advideos_resumable_request
 from modules.upload_automation.network.http_client import execute_request
 from modules.upload_automation.network.retry_policies import build_no_retry_policy
-from facebook_ads import (
+from modules.upload_automation.platforms.meta.facebook_ads import (
     FB_GAME_MAPPING,
     GAME_DEFAULTS,
     OPT_GOAL_LABEL_TO_API,

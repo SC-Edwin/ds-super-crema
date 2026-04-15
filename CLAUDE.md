@@ -46,17 +46,18 @@ There is no test suite, linter configuration, or build step.
 - `application/` — use-case / validation without Streamlit (grows incrementally; e.g. `upload_validation.py`)
 - `main.py` — thin re-exports `run` / `render_main_app` / `init_*` for `app.py` compatibility
 
-**Ad platform modules** (under `modules/upload_automation/`):
-- `facebook_ads.py` + `fb.py` — Meta/Facebook Graph API integration (admin + marketer modes)
-- `unity_ads.py` + `uni.py` — Unity Ads API (admin + marketer modes)
-- `mintegral.py` — Mintegral API integration
-- `applovin.py` — Applovin API integration
+**Ad platform modules** (under `modules/upload_automation/platforms/`):
+- `platforms/meta/facebook_ads.py` + `platforms/meta/fb.py` — Meta/Facebook (admin + marketer)
+- `platforms/unity/unity_ads.py` + `platforms/unity/uni.py` — Unity Ads (admin + marketer)
+- `platforms/mintegral/mintegral.py` — Mintegral
+- `platforms/applovin/applovin.py` — Applovin
+- `platforms/google_ads/google_ads.py` + `platforms/google_ads/ga.py` — Google Ads API + marketer UI
 - `config/game_manager.py` — game configuration management (runtime `games_config.json`)
 - `utils/drive_import.py` — Google Drive video import with parallel processing
 - `utils/devtools.py`, `utils/upload_logger.py` — developer debug panel and BigQuery audit logging
 - `scripts/generate_refresh_token.py` — one-off CLI to mint Google Ads OAuth refresh token (not imported by the app)
 
-Each ad platform module follows a similar pattern: platform-specific settings panel, media library upload, creative set/campaign creation. The `*_ads.py`/`*.py` split separates API logic from Marketer-mode UI wrappers.
+Each platform package follows a similar pattern: settings panel, media library upload, creative set/campaign creation. Meta/Unity/Google keep a thick `*_ads`/`google_ads` module plus a marketer-facing sibling (`fb`, `uni`, `ga`); `fb` still imports Facebook Business SDK and orchestration, so it was not merged into `facebook_ads` in this pass.
 
 ## Key Patterns
 

@@ -76,27 +76,30 @@ from modules.upload_automation.config import game_manager  # ← 수정
 
 # 2. Operations Modules (Admin/Full Access)
 # 2. Operations Modules (Admin/Full Access)
-from modules.upload_automation import facebook_ads as fb_ops
-from modules.upload_automation import unity_ads as uni_ops
+from modules.upload_automation.platforms.meta import facebook_ads as fb_ops
+from modules.upload_automation.platforms.unity import unity_ads as uni_ops
 
 # 3. Marketer Modules (Simplified/Restricted)
 try:
-    from modules.upload_automation import fb as fb_marketer
-    from modules.upload_automation import uni as uni_marketer
+    from modules.upload_automation.platforms.meta import fb as fb_marketer
+    from modules.upload_automation.platforms.unity import uni as uni_marketer
 except ImportError as e:
-    st.error(f"Module Import Error: {e}. Please ensure fb.py and uni.py are in {current_dir}")
+    st.error(
+        f"Module Import Error: {e}. "
+        f"Ensure platforms/meta/fb.py and platforms/unity/uni.py exist under {current_dir}"
+    )
     st.stop()
 
 # 4. Applovin Module (Both Test & Marketer modes)
 try:
-    from modules.upload_automation import applovin as applovin_module
+    from modules.upload_automation.platforms.applovin import applovin as applovin_module
 except ImportError as e:
     st.error(f"Applovin Module Import Error: {e}")
     st.stop()
 
 # 5. Google Ads Module (Marketer mode only)
 try:
-    from modules.upload_automation import ga as google_marketer
+    from modules.upload_automation.platforms.google_ads import ga as google_marketer
     _GOOGLE_ADS_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Google Ads module not available: {e}")
@@ -596,7 +599,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                                 st.warning("⚠️ 먼저 위에서 파일을 가져오세요 (Google Drive 또는 로컬 파일)")
                             else:
                                 try:
-                                    from modules.upload_automation import mintegral as mintegral_module
+                                    from modules.upload_automation.platforms.mintegral import mintegral as mintegral_module
                                     
                                     # Progress UI
                                     progress_bar = st.progress(0)
@@ -742,7 +745,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 with right_col:
                     mintegral_card = st.container(border=True)
                     try:
-                        from modules.upload_automation import mintegral as mintegral_module
+                        from modules.upload_automation.platforms.mintegral import mintegral as mintegral_module
                         mintegral_module.render_mintegral_settings_panel(mintegral_card, game, i, is_marketer=is_marketer)
                     except Exception as e:
                         st.error(str(e) if str(e) else "Mintegral 설정 패널 로드 실패")
@@ -1274,7 +1277,7 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                     st.query_params[_tab] = game
                     
                     try:
-                        from modules.upload_automation import mintegral as mintegral_module
+                        from modules.upload_automation.platforms.mintegral import mintegral as mintegral_module
                         mintegral_settings = mintegral_module.get_mintegral_settings(game)
                         
                         mode = mintegral_settings.get("mode", "upload")

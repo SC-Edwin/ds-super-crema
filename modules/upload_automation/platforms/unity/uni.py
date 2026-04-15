@@ -20,8 +20,7 @@ import streamlit as st
 
 from modules.upload_automation.service.unity import UNITY_ADVERTISE_API_BASE
 
-import unity_ads  # ← 이 줄 확인
-from unity_ads import (
+from modules.upload_automation.platforms.unity.unity_ads import (
     UNITY_ORG_ID_DEFAULT,
     get_unity_app_id,
     get_unity_campaign_set_id,

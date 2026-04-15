@@ -11,8 +11,8 @@ from modules.upload_automation.ui.upload_tab import (
     init_state,
     render_main_app,
 )
-from modules.upload_automation import facebook_ads as fb_ops
-from modules.upload_automation import unity_ads as uni_ops
+from modules.upload_automation.platforms.meta import facebook_ads as fb_ops
+from modules.upload_automation.platforms.unity import unity_ads as uni_ops
 
 # ── Vietnam-specific config ──────────────────────────────────────────
 PREFIX = "vn"
