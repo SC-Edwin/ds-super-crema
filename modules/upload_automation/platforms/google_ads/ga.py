@@ -511,6 +511,20 @@ def _render_category_tabs(
             if actual_name in lib_play_rn_map:
                 selected_playable_rns[actual_name] = lib_play_rn_map[actual_name]
 
+    # 라이브러리에 없고 Step1 업로드도 안 한 플레이어블 → 배치 시 resource_name 없음
+    play_missing_rn = [
+        p
+        for p in selected_playables
+        if p not in lib_play_rn_map and p not in uploaded_assets
+    ]
+    if play_missing_rn:
+        st.warning(
+            f"플레이어블 {len(play_missing_rn)}개는 아직 **Google Ads 에셋 라이브러리에 등록되지 않았습니다.** "
+            f"아래 **에셋 업로드**를 먼저 실행한 뒤 배치하세요.\n\n"
+            f"대상: {', '.join(play_missing_rn[:10])}"
+            + (" …" if len(play_missing_rn) > 10 else "")
+        )
+
     # Show status for new files
     new_in_selection = [v for v in selected_videos if v not in lib_label_to_rn]
     if new_in_selection:
@@ -765,7 +779,10 @@ def distribute_by_category(
         for pname in sel.get("selected_playables", []):
             rn = playable_rns.get(pname)
             if not rn:
-                all_errors.append(f"[{cat_label}] {pname}: resource name을 찾을 수 없습니다.")
+                all_errors.append(
+                    f"[{cat_label}] {pname}: 에셋 resource_name 없음 "
+                    f"(라이브러리에 없는 신규 파일이면 **에셋 업로드** 후 다시 시도)"
+                )
                 continue
             if rn not in seen_playable_rns:
                 seen_playable_rns.add(rn)
