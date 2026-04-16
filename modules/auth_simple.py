@@ -3,6 +3,7 @@
 서버 세션 토큰 방식: 쿠키엔 토큰 1개, 유저 정보는 서버 메모리
 """
 import hashlib
+import os
 import secrets
 import streamlit as st
 from datetime import datetime, timedelta
@@ -81,9 +82,29 @@ def _delete_token_cookie():
 
 
 # ========== Google OAuth ==========
+def _get_oauth_redirect_uri() -> str:
+    """
+    Resolve OAuth redirect URI by environment.
+
+    Priority:
+    1) [google_oauth].redirect_uri_{env} (e.g. redirect_uri_dev)
+    2) [google_oauth].redirect_uri
+    """
+    oauth_cfg = st.secrets["google_oauth"]
+    env = os.getenv("STREAMLIT_ENV", "").strip().lower()
+    if not env:
+        env = str(oauth_cfg.get("app_env", "")).strip().lower()
+    if env:
+        env_key = f"redirect_uri_{env}"
+        env_uri = oauth_cfg.get(env_key, "").strip()
+        if env_uri:
+            return env_uri
+    return oauth_cfg["redirect_uri"]
+
+
 def get_google_login_url():
     import urllib.parse
-    redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
+    redirect_uri = _get_oauth_redirect_uri()
     params = {
         "response_type": "code",
         "client_id": st.secrets["google_oauth"]["client_id"],
@@ -110,7 +131,7 @@ def handle_google_callback():
             "code": code,
             "client_id": st.secrets["google_oauth"]["client_id"],
             "client_secret": st.secrets["google_oauth"]["client_secret"],
-            "redirect_uri": st.secrets["google_oauth"]["redirect_uri"],
+            "redirect_uri": _get_oauth_redirect_uri(),
             "grant_type": "authorization_code",
         }, timeout=20)
         token_data = token_resp.json()
@@ -154,7 +175,7 @@ def load_users():
         "nova": {"password_hash": h("nova48"), "name": "Nova", "role": "user"},
         "dawoony": {"password_hash": h("dawoony72"), "name": "Dawoony", "role": "user"},
         "luca": {"password_hash": h("luca19"), "name": "Luca", "role": "user"},
-        "zino": {"password_hash": h("zino46"), "name": "Zino", "role": "user"},
+        "esca": {"password_hash": h("esca_kr"), "name": "Esca", "role": "user"},
         "crissy": {"password_hash": h("crissy31"), "name": "Crissy", "role": "user"},
         "kira": {"password_hash": h("kira69"), "name": "Kira", "role": "user"},
         "heny": {"password_hash": h("heny88"), "name": "Heny", "role": "user"},
