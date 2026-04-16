@@ -21,7 +21,8 @@ import hashlib
 import time
 import os
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
+from modules.upload_automation.utils.slack_executor import SlackNotifyThreadPoolExecutor as ThreadPoolExecutor
 from modules.upload_automation.network.dto import RequestExecutionContextDTO
 from modules.upload_automation.network.http_client import execute_request, HttpRequestError
 from modules.upload_automation.service.mintegral import build_mintegral_http_request

@@ -41,7 +41,8 @@ from modules.upload_automation.platforms.unity.unity_ads import (
     upload_unity_creatives_to_campaign as _upload_unity_creatives_to_campaign,
 )
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
+from modules.upload_automation.utils.slack_executor import SlackNotifyThreadPoolExecutor as ThreadPoolExecutor
 import time
 # Re-export for compatibility
 def get_unity_settings(game: str, **kwargs) -> Dict:
@@ -52,8 +53,6 @@ def preview_unity_upload(*, game: str, videos: List[Dict], settings: Dict, is_ma
     """Re-export from unity_ads for compatibility. Default is_marketer=True for marketer mode."""
     return _preview_unity_upload(game=game, videos=videos, settings=settings, is_marketer=is_marketer)
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
 
 def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List[str], settings: Dict, is_marketer: bool = True) -> Dict:
     """

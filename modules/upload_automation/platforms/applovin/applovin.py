@@ -14,7 +14,8 @@ import streamlit as st
 
 import requests
 from typing import Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
+from modules.upload_automation.utils.slack_executor import SlackNotifyThreadPoolExecutor as ThreadPoolExecutor
 
 from datetime import datetime, timedelta, timezone
 from modules.upload_automation.service.applovin import build_applovin_http_request
@@ -493,8 +494,7 @@ def _upload_assets_to_media_library(files: List[Dict], max_workers: int = 3) -> 
         Dict with uploaded_ids, failed, errors
     """
     import time
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    
+
     config = _get_api_config()
     headers = {"Authorization": config["api_key"]}
     account_id = config["account_id"]

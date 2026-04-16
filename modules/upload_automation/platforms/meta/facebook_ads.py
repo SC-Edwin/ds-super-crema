@@ -685,7 +685,8 @@ def upload_videos_create_ads(
     from facebook_business.adobjects.adcreative import AdCreative
     from facebook_business.adobjects.ad import Ad
     from facebook_business.exceptions import FacebookRequestError
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import as_completed
+    from modules.upload_automation.utils.slack_executor import SlackNotifyThreadPoolExecutor as ThreadPoolExecutor
     import time
     import re
     import pathlib
