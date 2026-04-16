@@ -418,6 +418,20 @@ def _normalize_game_name(name: str) -> str:
     return "".join(str(name).split()).lower()
 
 
+def _unity_lookup_platform_slug(platform: str) -> str:
+    """
+    UI/설정의 platform 문자열을 game_ids 블록의 aos|ios 키로 매핑한다.
+
+    campaign_ids가 플랫폼 없이 리스트일 때 UNITY_CAMPAIGN_IDS_ALL에 {"default": [...]}만
+    생기고 selectbox 값이 "default"가 되는데, 이전에는 platform != "aos"면 무조건 ios로
+    조회해서 잘못된 캠페인 세트/앱 ID가 선택될 수 있었다.
+    """
+    p = (platform or "aos").strip().lower()
+    if p == "ios":
+        return "ios"
+    # aos, default, android, 기타 → operator 기본은 AOS와 동일하게 aos
+    return "aos"
+
 
 def get_unity_app_id(game: str, platform: str = "aos") -> str:
     """
@@ -429,12 +443,14 @@ def get_unity_app_id(game: str, platform: str = "aos") -> str:
     if not game_ids_section:
         raise RuntimeError(f"❌ unity.game_ids is missing")
     
+    plat_slug = _unity_lookup_platform_slug(platform)
+
     # Exact key match
     if game in game_ids_section:
         block = game_ids_section[game]
         # ❌ 삭제: isinstance(block, dict) 체크
         
-        key = "aos_app_id" if platform == "aos" else "ios_app_id"
+        key = "aos_app_id" if plat_slug == "aos" else "ios_app_id"
         val = block.get(key)
         
         if val is not None:
@@ -447,7 +463,7 @@ def get_unity_app_id(game: str, platform: str = "aos") -> str:
     for k in game_ids_section:
         if _normalize_game_name(k) == target:
             v = game_ids_section[k]
-            key = "aos_app_id" if platform == "aos" else "ios_app_id"
+            key = "aos_app_id" if plat_slug == "aos" else "ios_app_id"
             val = v.get(key) if hasattr(v, 'get') else None
             
             if val is not None:
@@ -471,7 +487,7 @@ def get_unity_campaign_set_id(game: str, platform: str = "aos") -> str:
     """
     Return Unity campaign-set ID for a given game + platform.
     """
-    plat = "aos" if platform == "aos" else "ios"
+    plat = _unity_lookup_platform_slug(platform)
     
     # 1) Check unity.game_ids (XP HERO)
     game_ids_section = unity_cfg.get("game_ids")
