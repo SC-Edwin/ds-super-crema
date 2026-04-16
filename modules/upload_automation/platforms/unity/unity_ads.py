@@ -214,8 +214,10 @@ UNITY_BASE_URL = UNITY_ADVERTISE_API_BASE
 # --------------------------------------------------------------------
 UNITY_GATE_ENABLED = True
 UNITY_GATE_WINDOW_SECONDS = 1800
-UNITY_GATE_MAX_CALLS_PER_WINDOW = 30
-UNITY_GATE_MIN_INTERVAL_SECONDS = 55.0
+# Unity header sample: RateLimit-Policy=20;w=1,4000;w=1800
+# Keep margin under 4000/1800 to reduce unexpected 429 from concurrent sessions.
+UNITY_GATE_MAX_CALLS_PER_WINDOW = 3500
+UNITY_GATE_MIN_INTERVAL_SECONDS = 0.3
 
 
 def _unity_wait_for_global_slot(method: str, path: str) -> None:
@@ -2362,7 +2364,7 @@ def upload_unity_creatives_to_campaign(
     progress_bar = st.progress(0, text=f"Starting upload... (0/{total_pairs})")
     # Batch upload controls (기본값: 8개씩 처리)
     batch_size = max(1, int(settings.get("upload_batch_size", 8)))
-    batch_cooldown_seconds = max(0, int(settings.get("upload_batch_cooldown_seconds", 75)))
+    batch_cooldown_seconds = max(0, int(settings.get("upload_batch_cooldown_seconds", 1)))
     
     # Status container for real-time updates
     status_container = st.empty()
