@@ -128,9 +128,6 @@ def get_bigquery_client():
 
 
 
-
-
-
 @st.cache_data(ttl=300)
 def load_prediction_data():
     """최신 예측 결과 데이터 로드"""
@@ -138,67 +135,71 @@ def load_prediction_data():
     
     query = """        
         WITH WeekendData AS (
-            SELECT *
-            FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted`
-            WHERE 
-                CAST(day_1 AS DATE) >= DATE_SUB(CURRENT_DATE(), INTERVAL 8 WEEK)
-            ),
+            -- 🔧 app 이름 정규화: Adjust 코드 → Appsflyer 표시명으로 통일
+            SELECT 
+              p.* EXCEPT(app),
+              COALESCE(m.display_name, p.app) AS app
+            FROM `roas-test-456808.marketing_datascience.creative_performance_high_performing_predicted` p
+            LEFT JOIN `roas-test-456808.marketing_datascience.app_name_mapping` m
+              ON p.app = m.app_match_name
+            WHERE CAST(p.day_1 AS DATE) >= DATE_SUB(CURRENT_DATE(), INTERVAL 8 WEEK)
+        ),
         LatestSnapshot AS (
-        SELECT *
-        FROM (
-            SELECT
-            *,
-            impressions_1 + impressions_2 + impressions_3 as sum_impressions,
-            installs_1 + installs_2 + installs_3 as sum_installs,
-            clicks_1 + clicks_2 + clicks_3 as sum_clicks,
-            ROUND(cost_1 + cost_2 + cost_3,2) as sum_costs,
-            COALESCE(ROUND(SAFE_DIVIDE((cost_1 + cost_2 + cost_3), (installs_1 + installs_2 + installs_3)),2),0) as sum_CPI,
-            ROW_NUMBER() OVER (
-                PARTITION BY subject, network, app, past_network, future_locality, test_market
-                ORDER BY SAFE_CAST(prediction_timestamp AS TIMESTAMP) DESC
-            ) AS row_num
-            FROM WeekendData
-        )
-        WHERE row_num = 1
+            SELECT *
+            FROM (
+                SELECT
+                  *,
+                  impressions_1 + impressions_2 + impressions_3 AS sum_impressions,
+                  installs_1 + installs_2 + installs_3 AS sum_installs,
+                  clicks_1 + clicks_2 + clicks_3 AS sum_clicks,
+                  ROUND(cost_1 + cost_2 + cost_3, 2) AS sum_costs,
+                  COALESCE(ROUND(SAFE_DIVIDE((cost_1 + cost_2 + cost_3), (installs_1 + installs_2 + installs_3)), 2), 0) AS sum_CPI,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY subject, network, app, past_network, future_locality, test_market
+                    ORDER BY SAFE_CAST(prediction_timestamp AS TIMESTAMP) DESC
+                  ) AS row_num
+                FROM WeekendData
+            )
+            WHERE row_num = 1
         )
         SELECT
-        subject,
-        COALESCE(
+          subject,
+          COALESCE(
             REGEXP_EXTRACT(subject, r'(-?\\d+)'),
             subject
-        ) AS subject_label,
-        network,
-        app,
-        locality,
-        future_locality,
-        day_1,
-        day_2,
-        day_3,
-        prediction_score,  
-        ranking_score,
-        past_network,
-        sum_impressions,
-        sum_installs,
-        sum_clicks,
-        sum_costs,
-        sum_CPI,
-        roas_sum_1to3,
-        cpm_sum_1to3,
-        cpi_sum_1to3,
-        cvr_sum_1to3,        
-        ROUND(SAFE_DIVIDE(sum_installs * 1000, sum_impressions), 2) as IPM,
-        ROUND(SAFE_DIVIDE(sum_clicks * 100, sum_impressions), 2) as CTR,
-        ROUND(SAFE_DIVIDE(sum_installs * 100, sum_clicks), 2) as CVR,
-        ROUND(SAFE_DIVIDE(sum_installs * 100, sum_impressions), 2) as CVR_IMP,
-        retention_rate_sum_1to3,
-        test_market,
-        engagement_quality_2,
-        ROW_NUMBER() OVER (
+          ) AS subject_label,
+          network,
+          app,
+          locality,
+          future_locality,
+          day_1,
+          day_2,
+          day_3,
+          prediction_score,  
+          ranking_score,
+          past_network,
+          sum_impressions,
+          sum_installs,
+          sum_clicks,
+          sum_costs,
+          sum_CPI,
+          roas_sum_1to3,
+          cpm_sum_1to3,
+          cpi_sum_1to3,
+          cvr_sum_1to3,        
+          ROUND(SAFE_DIVIDE(sum_installs * 1000, sum_impressions), 2) AS IPM,
+          ROUND(SAFE_DIVIDE(sum_clicks * 100, sum_impressions), 2) AS CTR,
+          ROUND(SAFE_DIVIDE(sum_installs * 100, sum_clicks), 2) AS CVR,
+          ROUND(SAFE_DIVIDE(sum_installs * 100, sum_impressions), 2) AS CVR_IMP,
+          retention_rate_sum_1to3,
+          test_market,
+          engagement_quality_2,
+          ROW_NUMBER() OVER (
             PARTITION BY app, past_network, network, future_locality
             ORDER BY ranking_score DESC
-        ) AS rank_per_network
+          ) AS rank_per_network
         FROM LatestSnapshot
-        """
+    """
     
     df = client.query(query).to_dataframe()
     return df
