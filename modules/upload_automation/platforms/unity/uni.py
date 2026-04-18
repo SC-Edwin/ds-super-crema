@@ -22,6 +22,7 @@ from modules.upload_automation.service.unity import UNITY_ADVERTISE_API_BASE
 
 from modules.upload_automation.platforms.unity.unity_ads import (
     UNITY_ORG_ID_DEFAULT,
+    _uni_key,
     get_unity_app_id,
     get_unity_campaign_set_id,
     _unity_get,
@@ -45,9 +46,9 @@ from concurrent.futures import as_completed
 from modules.upload_automation.utils.slack_executor import SlackNotifyThreadPoolExecutor as ThreadPoolExecutor
 import time
 # Re-export for compatibility
-def get_unity_settings(game: str, **kwargs) -> Dict:
-    """Re-export from unity_ads for compatibility."""
-    return _get_unity_settings(game)
+def get_unity_settings(game: str, prefix: str = "", **kwargs) -> Dict:
+    """Re-export from unity_ads for compatibility. prefix는 VN 탭 등 namespaced 세션과 일치해야 함."""
+    return _get_unity_settings(game, prefix=prefix)
 
 def preview_unity_upload(*, game: str, videos: List[Dict], settings: Dict, is_marketer: bool = True) -> Dict:
     """Re-export from unity_ads for compatibility. Default is_marketer=True for marketer mode."""
@@ -64,8 +65,15 @@ def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List
     
     # 하위 호환: 기존 단일 플랫폼 모드
     if not platforms:
+        cp_ids = creative_pack_ids
+        if isinstance(cp_ids, dict):
+            flat: List[str] = []
+            for v in cp_ids.values():
+                if isinstance(v, list):
+                    flat.extend(str(x) for x in v)
+            cp_ids = flat
         return _apply_unity_creative_packs_to_campaign(
-            game=game, creative_pack_ids=creative_pack_ids, settings=settings, is_marketer=is_marketer
+            game=game, creative_pack_ids=cp_ids, settings=settings, is_marketer=is_marketer
         )
     
     all_results = {
@@ -692,8 +700,10 @@ def render_unity_settings_panel(container, game: str, idx: int, is_marketer: boo
     - 플랫폼별 Playable 선택
     - 캠페인별 Creative Pack 선택 (assign용)
     """
-    _ensure_unity_settings_state()
-    cur = get_unity_settings(game) or {}
+    prefix = str(kwargs.get("prefix") or "").strip()
+    _ensure_unity_settings_state(prefix)
+    _us_key = _uni_key(prefix, "unity_settings")
+    cur = st.session_state[_us_key].get(game, {}) or {}
 
     with container:
         st.markdown(f"#### {game} Unity Settings (Marketer)")
@@ -879,8 +889,8 @@ def render_unity_settings_panel(container, game: str, idx: int, is_marketer: boo
             plat, cid = key.split("_", 1)
             cur[f"{plat}_{cid}_packs"] = val["pack_ids"]
         
-        st.session_state.unity_settings[game] = cur
-        
+        st.session_state[_us_key][game] = cur
+
         # 요약 표시
         st.markdown("---")
         total_campaigns = sum(len(platform_settings[p]["campaign_ids"]) for p in selected_platforms)

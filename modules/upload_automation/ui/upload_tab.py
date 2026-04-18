@@ -1296,8 +1296,12 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             if res.get("errors"):
                                 st.error("\n".join(res["errors"]))
 
-                            _apply_success = (total_assigned if res.get("results_per_campaign")
-                                              else len(res.get("assigned_packs", [])))
+                            rpc = res.get("results_per_campaign") or {}
+                            _apply_success = (
+                                sum(len(v.get("assigned_packs", [])) for v in rpc.values())
+                                if rpc
+                                else len(res.get("assigned_packs", []))
+                            )
                             _apply_errors = res.get("errors", [])
                             log_event("unity_apply", mode=mode_str, game=game, platform="Unity Ads",
                                       success_count=_apply_success,
