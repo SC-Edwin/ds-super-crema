@@ -60,6 +60,9 @@ def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List
     Marketer mode: 여러 플랫폼 + 여러 캠페인에 creative packs assign.
     - 병렬 처리 (max 2개 동시)
     - Resume 지원 (이미 assign된 pack은 skip)
+
+    TODO(dry-run): assign API 없이 대상 캠페인·팩·예상 POST 목록(또는 현재 GET 할당과의 diff)만
+    반환하는 모드. preview_unity_upload 와 별개이며 unity_ads 레이어와 함께 설계 필요.
     """
     platforms = settings.get("platforms", [])
     

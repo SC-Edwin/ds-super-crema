@@ -459,7 +459,7 @@ Base URL: https://services.api.unity.com/advertise/v1
 |------|------|
 | `upload_unity_creatives_to_campaign(game, videos, settings)` | 팩 생성 (이어하기 지원). 세로+가로+플레이어블 묶어서 팩 생성 |
 | `apply_unity_creative_packs_to_campaign(game, pack_ids, settings)` | 팩을 캠페인에 할당. Test Mode는 기존 팩 전체 해제 후 할당, Marketer는 추가만 |
-| `preview_unity_upload(game, videos, settings)` | 드라이런 (실제 실행 없이 계획 표시) |
+| `preview_unity_upload(game, videos, settings)` | **업로드·팩 생성 경로** 드라이런 (실제 API 업로드/생성 없이 계획 표시). **캠페인 적용(assign)** 은 포함하지 않음 |
 | `render_unity_settings_panel(right_col, game, idx, is_marketer, prefix)` | 설정 UI (플랫폼, 캠페인, 플레이어블, 언어 선택) |
 
 #### 크리에이티브 팩 생성 상세 흐름
@@ -560,6 +560,15 @@ en, ko, ja, zh-CN, zh-TW, fr, de, es, pt, it, id, th, vi, ru, ar, tr, hi, nl, pl
 | 이어하기 (Resume) | 이미 할당된 팩 건너뛰기 |
 | 병렬 할당 | 최대 2개 캠페인 동시 처리 |
 | 기존 팩 유지 | Test Mode와 달리 기존 팩 해제 없이 추가만 |
+
+#### TODO: Unity 캠페인 적용(Assign) Dry-run
+
+- **가능 여부**: Unity API로는 적용 전에 `GET .../campaigns/{cid}/assigned-creative-packs` 로 현재 할당을 읽을 수 있고, 실제 반영 없이 “어떤 `pack_id`를 어떤 `campaign_id`에 붙일지”는 클라이언트에서만 계산할 수 있어 **dry-run 구현은 기술적으로 가능**함.
+- **현재**: `preview_unity_upload`는 팩 생성·업로드 흐름만 미리보기. UI의 **「캠페인에 적용」** 은 즉시 `POST .../assigned-creative-packs` 등을 호출하며, 적용 전용 dry-run UI/플래그는 **미구현**.
+- **구현 시 참고**:
+  - `uni.apply_unity_creative_packs_to_campaign` / `unity_ads.apply_unity_creative_packs_to_campaign` 에 `dry_run` (또는 별도 `preview_unity_apply`) 분기: GET만 수행하거나, 호출 계획·diff를 dict로 반환하고 Streamlit에서 표시.
+  - `upload_tab.py` 의 Unity 버튼 영역에 “적용 미리보기” 토글 또는 별도 버튼 연결.
+  - Test Mode의 기존 팩 전체 해제(unassign) 루프는 dry-run에서 반드시 스킵.
 
 ---
 

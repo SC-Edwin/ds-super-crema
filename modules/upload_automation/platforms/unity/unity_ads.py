@@ -2681,6 +2681,8 @@ def upload_unity_creatives_to_campaign(
 
 @_unity_http_op_summary_log("apply_unity_creative_packs_to_campaign")
 def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List[str], settings: Dict[str, Any], is_marketer: bool = False) -> Dict[str, Any]:
+    # TODO(dry-run): 여기서 POST assign / Test Mode unassign 루프를 건너뛰고
+    # GET assigned-creative-packs 기반 diff 또는 호출 계획만 반환. uni.apply 와 동일 플래그 공유.
     if not creative_pack_ids:
         raise RuntimeError("No creative pack IDs to apply.")
 

@@ -592,6 +592,8 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                             for _w in _est_apply.get("warnings") or []:
                                 st.caption(_w)
                         cont_unity_create = st.button("크리에이티브/팩 생성", key=f"{kp}unity_create_{game}", width="stretch")
+                        # TODO(dry-run): Unity "캠페인에 적용" — assign 전용 미리보기(POST 생략, GET/diff만).
+                        # preview_unity_upload 는 업로드·팩 생성 경로만 커버. Handover_upload_automation.md Unity 모듈(uni.py) TODO 참고.
                         cont_unity_apply = st.button("캠페인에 적용", key=f"{kp}unity_apply_{game}", width="stretch")
                         # Store current tab in query params when Unity buttons are clicked
                         if cont_unity_create or cont_unity_apply:
