@@ -45,10 +45,31 @@ from modules.upload_automation.platforms.unity.unity_ads import (
 from concurrent.futures import as_completed
 from modules.upload_automation.utils.slack_executor import SlackNotifyThreadPoolExecutor as ThreadPoolExecutor
 import time
+
+
+def unity_use_namespaced_settings() -> bool:
+    """로그인 식별자(user_email, Google·로컬 공통)에 'jaepark'가 포함될 때만 prefix 분리 리팩터 사용.
+
+    그 외 사용자는 main 브랜치 `uni.py`와 동일: 항상 prefix 없이 `unity_settings` 단일 버킷.
+    """
+    try:
+        if not st.session_state.get("authenticated"):
+            return False
+    except Exception:
+        return False
+    uid = (st.session_state.get("user_email") or "").lower()
+    return "jaepark" in uid
+
+
+def _unity_settings_prefix_for_session(requested: str) -> str:
+    return (requested or "").strip() if unity_use_namespaced_settings() else ""
+
+
 # Re-export for compatibility
 def get_unity_settings(game: str, prefix: str = "", **kwargs) -> Dict:
-    """Re-export from unity_ads for compatibility. prefix는 VN 탭 등 namespaced 세션과 일치해야 함."""
-    return _get_unity_settings(game, prefix=prefix)
+    """Re-export from unity_ads for compatibility. prefix는 jaepark 계정에서만 vn_ 등과 일치."""
+    p = _unity_settings_prefix_for_session(prefix)
+    return _get_unity_settings(game, prefix=p)
 
 def preview_unity_upload(*, game: str, videos: List[Dict], settings: Dict, is_marketer: bool = True) -> Dict:
     """Re-export from unity_ads for compatibility. Default is_marketer=True for marketer mode."""
@@ -69,7 +90,8 @@ def apply_unity_creative_packs_to_campaign(*, game: str, creative_pack_ids: List
     # 하위 호환: 기존 단일 플랫폼 모드
     if not platforms:
         cp_ids = creative_pack_ids
-        if isinstance(cp_ids, dict):
+        # main 동작: dict 그대로 전달. jaepark만 dict→리스트 펼침(멀티플랫폼 생성 직후 레거시 apply 호환).
+        if unity_use_namespaced_settings() and isinstance(cp_ids, dict):
             flat: List[str] = []
             for v in cp_ids.values():
                 if isinstance(v, list):
@@ -703,7 +725,8 @@ def render_unity_settings_panel(container, game: str, idx: int, is_marketer: boo
     - 플랫폼별 Playable 선택
     - 캠페인별 Creative Pack 선택 (assign용)
     """
-    prefix = str(kwargs.get("prefix") or "").strip()
+    requested = str(kwargs.get("prefix") or "").strip()
+    prefix = _unity_settings_prefix_for_session(requested)
     _ensure_unity_settings_state(prefix)
     _us_key = _uni_key(prefix, "unity_settings")
     cur = st.session_state[_us_key].get(game, {}) or {}

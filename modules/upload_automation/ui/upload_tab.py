@@ -1322,6 +1322,11 @@ def render_main_app(title: str, fb_module, unity_module, is_marketer: bool = Fal
                 
                 if "clr_unity" in locals() and clr_unity:
                     st.session_state[_us].pop(game, None)
+                    # main uni: 마케터 설정은 항상 전역 `unity_settings`. vn 탭 등은 _us만 비우면 남을 수 있어 동기화.
+                    if not uni_marketer.unity_use_namespaced_settings():
+                        _ug = st.session_state.get("unity_settings")
+                        if isinstance(_ug, dict):
+                            _ug.pop(game, None)
                     st.session_state[_rv].pop(game, None)
                     st.query_params[_tab] = game  # Preserve current tab
                     st.rerun()
