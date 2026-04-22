@@ -2478,6 +2478,8 @@ def upload_unity_creatives_to_campaign(
     
     # Status container for real-time updates
     status_container = st.empty()
+    # Fatal 에러(특히 rate-limit 재시도 시각)는 별도 슬롯에 고정 노출
+    pinned_error_container = st.empty()
     _set_unity_progress_hook(lambda m: status_container.info(m))
 
     # ========================================
@@ -2691,18 +2693,20 @@ def upload_unity_creatives_to_campaign(
 
                 if is_capacity:
                     errors.append(f"🚫 Creative/Pack 용량 초과 at {base}: {msg[:200]}")
-                    status_container.error(
+                    fatal_msg = (
                         f"🚫 **Creative/Pack 용량 초과**\n\n"
                         f"Unity API 응답: `{msg[:300]}`\n\n"
                         f"사용하지 않는 creative/pack을 삭제한 후 다시 시도해주세요.\n"
                         f"Progress saved: {len(upload_state['completed_packs'])}/{total_pairs} packs."
                     )
+                    status_container.error(fatal_msg)
+                    pinned_error_container.error(fatal_msg)
                     should_stop = True
                     break
                 elif is_rate_limit:
-                    errors.append(f"⚠️ Rate limit at {base}: {msg[:200]}")
                     retry_after_s = _extract_retry_after_from_error_text(msg)
                     retry_hint = ""
+                    retry_hint_short = ""
                     if retry_after_s is not None:
                         kst = timezone(timedelta(hours=9))
                         retry_at_kst = datetime.now(kst) + timedelta(seconds=retry_after_s)
@@ -2710,13 +2714,27 @@ def upload_unity_creatives_to_campaign(
                             f"\n예상 재시도 가능 시간: 약 {retry_after_s}초 후 "
                             f"({retry_at_kst.strftime('%Y-%m-%d %H:%M:%S')} KST)"
                         )
-                    status_container.error(
+                        retry_hint_short = (
+                            f" | retry_after_s={retry_after_s}"
+                            f" | retry_at_kst={retry_at_kst.strftime('%Y-%m-%d %H:%M:%S')}"
+                        )
+                    errors.append(f"⚠️ Rate limit at {base}{retry_hint_short}: {msg[:200]}")
+                    logger.error(
+                        "[Unity RateLimit Stop] base=%s retry_after_s=%s retry_at_kst=%s msg=%s",
+                        base,
+                        retry_after_s,
+                        (retry_at_kst.strftime("%Y-%m-%d %H:%M:%S") if retry_after_s is not None else ""),
+                        msg[:300],
+                    )
+                    fatal_msg = (
                         f"⚠️ **API Rate Limit**\n\n"
                         f"Unity API 응답: `{msg[:300]}`\n\n"
                         f"Progress saved: {len(upload_state['completed_packs'])}/{total_pairs} packs.\n"
                         f"{retry_hint}\n"
                         f"Click '크리에이티브/팩 생성' again to resume."
                     )
+                    status_container.error(fatal_msg)
+                    pinned_error_container.error(fatal_msg)
                     should_stop = True
                     break
                 else:
