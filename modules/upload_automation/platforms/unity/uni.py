@@ -59,7 +59,7 @@ def unity_use_namespaced_settings() -> bool:
         return False
     uid = (st.session_state.get("user_email") or "").lower()
     return "jaepark" in uid
-
+    return True
 
 def _unity_settings_prefix_for_session(requested: str) -> str:
     return (requested or "").strip() if unity_use_namespaced_settings() else ""
