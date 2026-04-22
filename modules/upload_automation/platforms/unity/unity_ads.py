@@ -278,6 +278,40 @@ def _emit_unity_progress_text(msg: str) -> None:
         # UI 훅 실패가 업로드 본 동작을 막지 않도록 무시
         pass
 
+
+def _extract_unity_retry_after_seconds(resp: requests.Response | None) -> float | None:
+    """429 응답 헤더에서 재시도까지 남은 초를 추정한다."""
+    if resp is None:
+        return None
+    headers = resp.headers or {}
+
+    retry_after = headers.get("Retry-After") or headers.get("retry-after")
+    if retry_after:
+        s = str(retry_after).strip()
+        if re.fullmatch(r"\d+(\.\d+)?", s):
+            try:
+                return max(0.0, float(s))
+            except Exception:
+                pass
+        try:
+            dt = datetime.strptime(s, "%a, %d %b %Y %H:%M:%S GMT").replace(tzinfo=timezone.utc)
+            return max(0.0, (dt - datetime.now(timezone.utc)).total_seconds())
+        except Exception:
+            pass
+
+    for k, v in headers.items():
+        lk = str(k).lower()
+        if "reset" not in lk and "ratelimit" not in lk:
+            continue
+        m = re.search(r"(?:reset\s*[:=]\s*)?(\d+(?:\.\d+)?)", str(v or ""), re.IGNORECASE)
+        if not m:
+            continue
+        try:
+            return max(0.0, float(m.group(1)))
+        except Exception:
+            continue
+    return None
+
 # --------------------------------------------------------------------
 # Build derived maps from unity_cfg (for defaults)
 # --------------------------------------------------------------------
@@ -1027,11 +1061,20 @@ def _unity_post(path: str, json_body: dict) -> dict:
             if "quota" in detail.lower():
                 if _switch_to_next_key():
                     logger.warning("Unity Quota Exceeded on key -> switching to next key and retrying")
+                    _emit_unity_progress_text("⚠️ Unity quota 소진 감지: 보조 API 키로 전환해 재시도합니다.")
                     return
                 exhausted_quota = True
+                _emit_unity_progress_text("❌ Unity quota가 모두 소진되었습니다. 쿼터 리셋 후 다시 시도해주세요.")
                 return
             sleep_sec = 2 ** (attempt + 1)
+            hdr_wait = _extract_unity_retry_after_seconds(resp)
+            if hdr_wait is not None:
+                sleep_sec = max(sleep_sec, hdr_wait)
             logger.warning("Unity 429 Rate Limit (attempt %s/8). Sleeping %.1fs...", attempt + 1, sleep_sec)
+            _emit_unity_progress_text(
+                f"⏳ Unity 429 (POST) 재시도 대기: 약 {int(sleep_sec + 0.99)}초 남음 "
+                f"(attempt {attempt + 1}/8)"
+            )
 
     def _should_retry(resp: requests.Response) -> bool:
         if resp.status_code != 429:
@@ -1120,8 +1163,17 @@ def _unity_get(path: str, params: dict | None = None) -> dict:
         if "quota" in detail.lower():
             if _switch_to_next_key():
                 logger.warning("Unity Quota Exceeded on GET -> switching to next key")
+                _emit_unity_progress_text("⚠️ Unity quota 소진 감지(GET): 보조 API 키로 전환해 재시도합니다.")
             else:
                 exhausted_quota = True
+                _emit_unity_progress_text("❌ Unity quota가 모두 소진되었습니다. 쿼터 리셋 후 다시 시도해주세요.")
+            return
+        hdr_wait = _extract_unity_retry_after_seconds(resp)
+        if hdr_wait is not None:
+            _emit_unity_progress_text(
+                f"⏳ Unity 429 (GET) 재시도 대기: 약 {int(hdr_wait + 0.99)}초 남음 "
+                f"(attempt {attempt + 1}/5)"
+            )
 
     def _should_retry(resp: requests.Response) -> bool:
         if resp.status_code != 429:
@@ -1305,9 +1357,18 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
                 if "quota" in detail.lower():
                     if _switch_to_next_key():
                         logger.warning(f"Unity Quota Exceeded on CREATE CREATIVE → switching to next key")
+                        _emit_unity_progress_text("⚠️ Unity quota 소진 감지: 보조 API 키로 전환해 재시도합니다.")
                         continue
+                    _emit_unity_progress_text("❌ Unity quota가 모두 소진되었습니다. 쿼터 리셋 후 다시 시도해주세요.")
                     raise RuntimeError(f"Unity Quota Exceeded (all keys exhausted): {detail}")
                 sleep_sec = 5 * (attempt + 1)
+                hdr_wait = _extract_unity_retry_after_seconds(resp)
+                if hdr_wait is not None:
+                    sleep_sec = max(sleep_sec, hdr_wait)
+                _emit_unity_progress_text(
+                    f"⏳ Unity 429 (CREATE CREATIVE) 재시도 대기: 약 {int(sleep_sec + 0.99)}초 남음 "
+                    f"(attempt {attempt + 1}/8)"
+                )
                 time.sleep(sleep_sec)
                 continue
 
@@ -1406,8 +1467,19 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
                 )
                 if "quota" in detail.lower() and _switch_to_next_key():
                     logger.warning(f"Unity Quota Exceeded on CREATE PLAYABLE → switching to next key")
+                    _emit_unity_progress_text("⚠️ Unity quota 소진 감지: 보조 API 키로 전환해 재시도합니다.")
                     continue
-                time.sleep(3 * (attempt + 1))
+                if "quota" in detail.lower():
+                    _emit_unity_progress_text("❌ Unity quota가 모두 소진되었습니다. 쿼터 리셋 후 다시 시도해주세요.")
+                sleep_sec = 3 * (attempt + 1)
+                hdr_wait = _extract_unity_retry_after_seconds(resp)
+                if hdr_wait is not None:
+                    sleep_sec = max(sleep_sec, hdr_wait)
+                _emit_unity_progress_text(
+                    f"⏳ Unity 429 (CREATE PLAYABLE) 재시도 대기: 약 {int(sleep_sec + 0.99)}초 남음 "
+                    f"(attempt {attempt + 1}/8)"
+                )
+                time.sleep(sleep_sec)
                 continue
 
             if not resp.ok:
