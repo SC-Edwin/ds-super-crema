@@ -278,6 +278,51 @@ def _emit_unity_progress_text(msg: str) -> None:
         # UI 훅 실패가 업로드 본 동작을 막지 않도록 무시
         pass
 
+
+def _extract_unity_retry_after_seconds(resp: requests.Response | None) -> float | None:
+    """429 응답 헤더에서 재시도까지 남은 초를 추정한다."""
+    if resp is None:
+        return None
+    headers = resp.headers or {}
+
+    retry_after = headers.get("Retry-After") or headers.get("retry-after")
+    if retry_after:
+        s = str(retry_after).strip()
+        if re.fullmatch(r"\d+(\.\d+)?", s):
+            try:
+                return max(0.0, float(s))
+            except Exception:
+                pass
+        try:
+            dt = datetime.strptime(s, "%a, %d %b %Y %H:%M:%S GMT").replace(tzinfo=timezone.utc)
+            return max(0.0, (dt - datetime.now(timezone.utc)).total_seconds())
+        except Exception:
+            pass
+
+    for k, v in headers.items():
+        lk = str(k).lower()
+        if "reset" not in lk and "ratelimit" not in lk:
+            continue
+        m = re.search(r"(?:reset\s*[:=]\s*)?(\d+(?:\.\d+)?)", str(v or ""), re.IGNORECASE)
+        if not m:
+            continue
+        try:
+            return max(0.0, float(m.group(1)))
+        except Exception:
+            continue
+    return None
+
+
+def _extract_retry_after_from_error_text(msg: str) -> int | None:
+    """에러 문자열 내 retry_after_s=NN 값을 찾아 초 단위로 반환."""
+    m = re.search(r"retry_after_s\s*=\s*(\d+)", str(msg or ""), re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        return max(0, int(m.group(1)))
+    except Exception:
+        return None
+
 # --------------------------------------------------------------------
 # Build derived maps from unity_cfg (for defaults)
 # --------------------------------------------------------------------
@@ -1004,6 +1049,7 @@ def _unity_headers() -> dict:
 
 def _unity_post(path: str, json_body: dict) -> dict:
     last_429_detail: str = ""
+    last_429_wait: float | None = None
     exhausted_quota = False
 
     def _on_retry(attempt: int, resp: requests.Response | None, err: Exception | None) -> None:
@@ -1016,6 +1062,7 @@ def _unity_post(path: str, json_body: dict) -> dict:
         if resp.status_code == 429:
             detail = (resp.text or "")[:800]
             last_429_detail = detail
+            last_429_wait = _extract_unity_retry_after_seconds(resp)
             rate_headers = {k: v for k, v in resp.headers.items() if "rate" in k.lower() or "retry" in k.lower() or "limit" in k.lower()}
             logger.error(
                 "[Unity 429] POST %s | attempt=%s/8 | response_body=%s | rate_headers=%s",
@@ -1027,11 +1074,20 @@ def _unity_post(path: str, json_body: dict) -> dict:
             if "quota" in detail.lower():
                 if _switch_to_next_key():
                     logger.warning("Unity Quota Exceeded on key -> switching to next key and retrying")
+                    _emit_unity_progress_text("⚠️ Unity quota 소진 감지: 보조 API 키로 전환해 재시도합니다.")
                     return
                 exhausted_quota = True
+                _emit_unity_progress_text("❌ Unity quota가 모두 소진되었습니다. 쿼터 리셋 후 다시 시도해주세요.")
                 return
             sleep_sec = 2 ** (attempt + 1)
+            hdr_wait = last_429_wait
+            if hdr_wait is not None:
+                sleep_sec = max(sleep_sec, hdr_wait)
             logger.warning("Unity 429 Rate Limit (attempt %s/8). Sleeping %.1fs...", attempt + 1, sleep_sec)
+            _emit_unity_progress_text(
+                f"⏳ Unity 429 (POST) 재시도 대기: 약 {int(sleep_sec + 0.99)}초 남음 "
+                f"(attempt {attempt + 1}/8)"
+            )
 
     def _should_retry(resp: requests.Response) -> bool:
         if resp.status_code != 429:
@@ -1061,7 +1117,12 @@ def _unity_post(path: str, json_body: dict) -> dict:
         resp = execute_request(request_dto, retry_dto, context=context)
     except HttpRequestError:
         if exhausted_quota and last_429_detail:
-            raise RuntimeError(f"Unity Quota Exceeded (all keys exhausted): {last_429_detail}")
+            suffix = (
+                f" | retry_after_s={int(last_429_wait + 0.99)}"
+                if last_429_wait is not None
+                else ""
+            )
+            raise RuntimeError(f"Unity Quota Exceeded (all keys exhausted){suffix}: {last_429_detail}")
         if last_429_detail:
             raise RuntimeError(
                 f"Unity 429 Rate Limit - POST {path} failed after 8 retries. "
@@ -1098,6 +1159,7 @@ def _unity_put(path: str, json_body: dict) -> dict:
 
 def _unity_get(path: str, params: dict | None = None) -> dict:
     last_429_detail: str = ""
+    last_429_wait: float | None = None
     exhausted_quota = False
 
     def _on_retry(attempt: int, resp: requests.Response | None, err: Exception | None) -> None:
@@ -1109,6 +1171,7 @@ def _unity_get(path: str, params: dict | None = None) -> dict:
             return
         detail = (resp.text or "")[:800]
         last_429_detail = detail
+        last_429_wait = _extract_unity_retry_after_seconds(resp)
         rate_headers = {k: v for k, v in resp.headers.items() if "rate" in k.lower() or "retry" in k.lower() or "limit" in k.lower()}
         logger.error(
             "[Unity 429] GET %s | attempt=%s/5 | response_body=%s | rate_headers=%s",
@@ -1120,8 +1183,17 @@ def _unity_get(path: str, params: dict | None = None) -> dict:
         if "quota" in detail.lower():
             if _switch_to_next_key():
                 logger.warning("Unity Quota Exceeded on GET -> switching to next key")
+                _emit_unity_progress_text("⚠️ Unity quota 소진 감지(GET): 보조 API 키로 전환해 재시도합니다.")
             else:
                 exhausted_quota = True
+                _emit_unity_progress_text("❌ Unity quota가 모두 소진되었습니다. 쿼터 리셋 후 다시 시도해주세요.")
+            return
+        hdr_wait = _extract_unity_retry_after_seconds(resp)
+        if hdr_wait is not None:
+            _emit_unity_progress_text(
+                f"⏳ Unity 429 (GET) 재시도 대기: 약 {int(hdr_wait + 0.99)}초 남음 "
+                f"(attempt {attempt + 1}/5)"
+            )
 
     def _should_retry(resp: requests.Response) -> bool:
         if resp.status_code != 429:
@@ -1149,8 +1221,13 @@ def _unity_get(path: str, params: dict | None = None) -> dict:
         )
         resp = execute_request(request_dto, retry_dto, context=context)
     except HttpRequestError:
+        suffix = (
+            f" | retry_after_s={int(last_429_wait + 0.99)}"
+            if last_429_wait is not None
+            else ""
+        )
         raise RuntimeError(
-            f"Unity 429 Rate Limit - GET {path} failed after 5 retries. "
+            f"Unity 429 Rate Limit - GET {path} failed after 5 retries{suffix}. "
             f"Last API response: {last_429_detail[:400]}"
         )
 
@@ -1305,9 +1382,24 @@ def _unity_create_video_creative(*, org_id: str, title_id: str, video_path: str,
                 if "quota" in detail.lower():
                     if _switch_to_next_key():
                         logger.warning(f"Unity Quota Exceeded on CREATE CREATIVE → switching to next key")
+                        _emit_unity_progress_text("⚠️ Unity quota 소진 감지: 보조 API 키로 전환해 재시도합니다.")
                         continue
-                    raise RuntimeError(f"Unity Quota Exceeded (all keys exhausted): {detail}")
+                    _emit_unity_progress_text("❌ Unity quota가 모두 소진되었습니다. 쿼터 리셋 후 다시 시도해주세요.")
+                    hdr_wait = _extract_unity_retry_after_seconds(resp)
+                    suffix = (
+                        f" | retry_after_s={int(hdr_wait + 0.99)}"
+                        if hdr_wait is not None
+                        else ""
+                    )
+                    raise RuntimeError(f"Unity Quota Exceeded (all keys exhausted){suffix}: {detail}")
                 sleep_sec = 5 * (attempt + 1)
+                hdr_wait = _extract_unity_retry_after_seconds(resp)
+                if hdr_wait is not None:
+                    sleep_sec = max(sleep_sec, hdr_wait)
+                _emit_unity_progress_text(
+                    f"⏳ Unity 429 (CREATE CREATIVE) 재시도 대기: 약 {int(sleep_sec + 0.99)}초 남음 "
+                    f"(attempt {attempt + 1}/8)"
+                )
                 time.sleep(sleep_sec)
                 continue
 
@@ -1406,8 +1498,26 @@ def _unity_create_playable_creative(*, org_id: str, title_id: str, playable_path
                 )
                 if "quota" in detail.lower() and _switch_to_next_key():
                     logger.warning(f"Unity Quota Exceeded on CREATE PLAYABLE → switching to next key")
+                    _emit_unity_progress_text("⚠️ Unity quota 소진 감지: 보조 API 키로 전환해 재시도합니다.")
                     continue
-                time.sleep(3 * (attempt + 1))
+                if "quota" in detail.lower():
+                    _emit_unity_progress_text("❌ Unity quota가 모두 소진되었습니다. 쿼터 리셋 후 다시 시도해주세요.")
+                    hdr_wait = _extract_unity_retry_after_seconds(resp)
+                    suffix = (
+                        f" | retry_after_s={int(hdr_wait + 0.99)}"
+                        if hdr_wait is not None
+                        else ""
+                    )
+                    raise RuntimeError(f"Unity Quota Exceeded (all keys exhausted){suffix}: {detail}")
+                sleep_sec = 3 * (attempt + 1)
+                hdr_wait = _extract_unity_retry_after_seconds(resp)
+                if hdr_wait is not None:
+                    sleep_sec = max(sleep_sec, hdr_wait)
+                _emit_unity_progress_text(
+                    f"⏳ Unity 429 (CREATE PLAYABLE) 재시도 대기: 약 {int(sleep_sec + 0.99)}초 남음 "
+                    f"(attempt {attempt + 1}/8)"
+                )
+                time.sleep(sleep_sec)
                 continue
 
             if not resp.ok:
@@ -2368,6 +2478,8 @@ def upload_unity_creatives_to_campaign(
     
     # Status container for real-time updates
     status_container = st.empty()
+    # Fatal 에러(특히 rate-limit 재시도 시각)는 별도 슬롯에 고정 노출
+    pinned_error_container = st.empty()
     _set_unity_progress_hook(lambda m: status_container.info(m))
 
     # ========================================
@@ -2581,22 +2693,48 @@ def upload_unity_creatives_to_campaign(
 
                 if is_capacity:
                     errors.append(f"🚫 Creative/Pack 용량 초과 at {base}: {msg[:200]}")
-                    status_container.error(
+                    fatal_msg = (
                         f"🚫 **Creative/Pack 용량 초과**\n\n"
                         f"Unity API 응답: `{msg[:300]}`\n\n"
                         f"사용하지 않는 creative/pack을 삭제한 후 다시 시도해주세요.\n"
                         f"Progress saved: {len(upload_state['completed_packs'])}/{total_pairs} packs."
                     )
+                    status_container.error(fatal_msg)
+                    pinned_error_container.error(fatal_msg)
                     should_stop = True
                     break
                 elif is_rate_limit:
-                    errors.append(f"⚠️ Rate limit at {base}: {msg[:200]}")
-                    status_container.error(
+                    retry_after_s = _extract_retry_after_from_error_text(msg)
+                    retry_hint = ""
+                    retry_hint_short = ""
+                    if retry_after_s is not None:
+                        kst = timezone(timedelta(hours=9))
+                        retry_at_kst = datetime.now(kst) + timedelta(seconds=retry_after_s)
+                        retry_hint = (
+                            f"\n예상 재시도 가능 시간: 약 {retry_after_s}초 후 "
+                            f"({retry_at_kst.strftime('%Y-%m-%d %H:%M:%S')} KST)"
+                        )
+                        retry_hint_short = (
+                            f" | retry_after_s={retry_after_s}"
+                            f" | retry_at_kst={retry_at_kst.strftime('%Y-%m-%d %H:%M:%S')}"
+                        )
+                    errors.append(f"⚠️ Rate limit at {base}{retry_hint_short}: {msg[:200]}")
+                    logger.error(
+                        "[Unity RateLimit Stop] base=%s retry_after_s=%s retry_at_kst=%s msg=%s",
+                        base,
+                        retry_after_s,
+                        (retry_at_kst.strftime("%Y-%m-%d %H:%M:%S") if retry_after_s is not None else ""),
+                        msg[:300],
+                    )
+                    fatal_msg = (
                         f"⚠️ **API Rate Limit**\n\n"
                         f"Unity API 응답: `{msg[:300]}`\n\n"
                         f"Progress saved: {len(upload_state['completed_packs'])}/{total_pairs} packs.\n"
+                        f"{retry_hint}\n"
                         f"Click '크리에이티브/팩 생성' again to resume."
                     )
+                    status_container.error(fatal_msg)
+                    pinned_error_container.error(fatal_msg)
                     should_stop = True
                     break
                 else:
