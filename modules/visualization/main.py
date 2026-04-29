@@ -371,8 +371,34 @@ def run(test_market='WW', key_prefix='ww'):
 
 
     with col2:
-            all_future_localities = ['All'] + sorted(df['future_locality'].dropna().unique().tolist())
-            selected_future_locality = st.selectbox("🎯 투자 지역", all_future_localities, key=f"locality_{key_prefix}")
+            locality_base_df = df.copy()
+            if selected_app != 'All':
+                locality_base_df = locality_base_df[locality_base_df['app'] == selected_app]
+
+            locality_counts = (
+                locality_base_df.dropna(subset=['future_locality'])
+                .groupby('future_locality')['subject_label']
+                .nunique()
+                .to_dict()
+            )
+            all_future_localities = sorted(
+                locality_counts.keys(),
+                key=lambda x: (-int(locality_counts.get(x, 0)), str(x)),
+            )
+
+            locality_label_to_code = {'All': 'All'}
+            locality_options = [f"All ({locality_base_df['subject_label'].nunique()})"]
+            for loc in all_future_localities:
+                label = f"{loc} ({int(locality_counts.get(loc, 0))})"
+                locality_label_to_code[label] = loc
+                locality_options.append(label)
+
+            selected_future_locality_label = st.selectbox(
+                "🎯 투자 지역",
+                locality_options,
+                key=f"locality_{key_prefix}",
+            )
+            selected_future_locality = locality_label_to_code.get(selected_future_locality_label, 'All')
 
 
 
